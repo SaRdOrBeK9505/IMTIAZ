@@ -1,0 +1,44 @@
+# IMTIAZ — Celery Worker systemd service
+# Joylashtirish: /etc/systemd/system/imtiaz-celery.service
+
+[Unit]
+Description=IMTIAZ Celery Worker
+After=network.target redis.service postgresql.service
+Requires=redis.service
+
+[Service]
+Type=forking
+User=imtiaz
+Group=imtiaz
+WorkingDirectory=/home/imtiaz/app
+EnvironmentFile=/home/imtiaz/app/.env
+
+# Concurrency = CPU * 2 (8 vCPU uchun 16)
+ExecStart=/home/imtiaz/app/.venv/bin/celery \
+    -A config \
+    multi start worker1 \
+    --concurrency=16 \
+    --loglevel=info \
+    --logfile=/home/imtiaz/app/logs/celery_worker.log \
+    --pidfile=/run/imtiaz/celery_worker.pid
+
+ExecStop=/home/imtiaz/app/.venv/bin/celery \
+    -A config \
+    multi stopwait worker1 \
+    --pidfile=/run/imtiaz/celery_worker.pid
+
+ExecReload=/home/imtiaz/app/.venv/bin/celery \
+    -A config \
+    multi restart worker1 \
+    --pidfile=/run/imtiaz/celery_worker.pid \
+    --logfile=/home/imtiaz/app/logs/celery_worker.log
+
+RuntimeDirectory=imtiaz
+RuntimeDirectoryMode=0755
+
+Restart=on-failure
+RestartSec=10s
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

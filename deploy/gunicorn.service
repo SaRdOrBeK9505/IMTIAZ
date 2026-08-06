@@ -1,0 +1,55 @@
+# IMTIAZ — Gunicorn systemd service
+# Joylashtirish: /etc/systemd/system/imtiaz.service
+#
+# sudo systemctl daemon-reload
+# sudo systemctl enable imtiaz
+# sudo systemctl start imtiaz
+
+[Unit]
+Description=IMTIAZ Django Application (Gunicorn)
+After=network.target postgresql.service redis.service
+Requires=postgresql.service redis.service
+
+[Service]
+Type=notify
+User=imtiaz
+Group=www-data
+WorkingDirectory=/home/imtiaz/app
+
+# Virtual env ichidagi gunicorn
+ExecStart=/home/imtiaz/app/.venv/bin/gunicorn \
+    --workers 9 \
+    --worker-class gthread \
+    --threads 2 \
+    --worker-connections 1000 \
+    --max-requests 1000 \
+    --max-requests-jitter 100 \
+    --timeout 120 \
+    --keep-alive 5 \
+    --bind unix:/run/imtiaz/gunicorn.sock \
+    --access-logfile /home/imtiaz/app/logs/gunicorn_access.log \
+    --error-logfile /home/imtiaz/app/logs/gunicorn_error.log \
+    --log-level info \
+    --capture-output \
+    config.wsgi:application
+
+ExecReload=/bin/kill -s HUP $MAINPID
+ExecStop=/bin/kill -s TERM $MAINPID
+
+# Socket papkasi
+RuntimeDirectory=imtiaz
+RuntimeDirectoryMode=0755
+
+# Restart
+Restart=on-failure
+RestartSec=5s
+
+# Resurslar (8 vCPU, 16 GB RAM serveri uchun)
+LimitNOFILE=65536
+LimitNPROC=512
+
+# Environment
+EnvironmentFile=/home/imtiaz/app/.env
+
+[Install]
+WantedBy=multi-user.target

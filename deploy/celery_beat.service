@@ -1,0 +1,28 @@
+# IMTIAZ — Celery Beat (scheduled tasks) systemd service
+# Joylashtirish: /etc/systemd/system/imtiaz-celery-beat.service
+
+[Unit]
+Description=IMTIAZ Celery Beat Scheduler
+After=network.target redis.service postgresql.service
+Requires=redis.service
+
+[Service]
+Type=simple
+User=imtiaz
+Group=imtiaz
+WorkingDirectory=/home/imtiaz/app
+EnvironmentFile=/home/imtiaz/app/.env
+
+ExecStart=/home/imtiaz/app/.venv/bin/celery \
+    -A config beat \
+    --loglevel=info \
+    --logfile=/home/imtiaz/app/logs/celery_beat.log \
+    --scheduler django_celery_beat.schedulers:DatabaseScheduler \
+    --pidfile=/run/imtiaz/celery_beat.pid
+
+RuntimeDirectory=imtiaz
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
