@@ -329,16 +329,16 @@ JAZZMIN_UI_TWEAKS = {
     'body_small_text':      False,
     'brand_small_text':     False,
 
-    # Asosiy rang: dark purple — premium brend uchun
-    'brand_colour':         'navbar-dark',
-    'accent':               'accent-purple',
-    'navbar':               'navbar-dark',
+    # Asosiy rang: yorug' tema
+    'brand_colour':         'navbar-light',
+    'accent':               'accent-primary',
+    'navbar':               'navbar-white navbar-light',
     'no_navbar_border':     False,
     'navbar_fixed':         True,
     'layout_boxed':         False,
     'footer_fixed':         False,
     'sidebar_fixed':        True,
-    'sidebar':              'sidebar-dark-purple',
+    'sidebar':              'sidebar-light-primary',
     'sidebar_nav_small_text':False,
     'sidebar_disable_expand':False,
     'sidebar_nav_child_indent':True,
@@ -347,8 +347,8 @@ JAZZMIN_UI_TWEAKS = {
     'sidebar_nav_flat_style':False,
 
     # Tema
-    'theme':                'darkly',   # Bootstrap 5 darkly tema
-    'dark_mode_theme':      'darkly',
+    'theme':                'flatly',   # Bootstrap 5 yorug' tema
+    'dark_mode_theme':      'darkly',   # Foydalanuvchi dark rejimga o'ta oladi
     'button_classes': {
         'primary':   'btn-outline-primary',
         'secondary': 'btn-outline-secondary',
@@ -480,7 +480,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 if not DEBUG:
     SECURE_HSTS_SECONDS            = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_SSL_REDIRECT            = True
+    SECURE_SSL_REDIRECT            = env.bool('SECURE_SSL_REDIRECT', default=False)
     SESSION_COOKIE_SECURE          = True
     CSRF_COOKIE_SECURE             = True
     SECURE_BROWSER_XSS_FILTER      = True
