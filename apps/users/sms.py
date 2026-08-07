@@ -80,7 +80,7 @@ class DevSmsClient:
 
 def send_otp_sms(phone: str, code: str) -> bool:
     """OTP SMS yuborish — asosiy funksiya."""
-    message = f'IMTIAZ: tasdiqlash kodi {code}. Amal qilish muddati 5 daqiqa. Hech kimga bermang.'
+    message = f'IMTIAZ platformasiga ro\'yxatdan o\'tish uchun tasdiqlash kodingiz: {code}\nKodni hech kimga bermang!'
     client = DevSmsClient()
     return client.send(phone, message)
 
