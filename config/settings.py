@@ -56,8 +56,8 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 AUTH_USER_MODEL = 'users.User'
 
 AUTHENTICATION_BACKENDS = [
-    'apps.users.backends.TelegramIDBackend',
-    'django.contrib.auth.backends.ModelBackend',
+    'apps.users.backends.PhoneBackend',          # phone + password (asosiy)
+    'django.contrib.auth.backends.ModelBackend', # zaxira
 ]
 
 # ─── MIDDLEWARE ───────────────────────────────────────────────────────────────
@@ -198,15 +198,18 @@ REST_FRAMEWORK = {
 
 # ─── JWT ──────────────────────────────────────────────────────────────────────
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME':  timedelta(minutes=env.int('ACCESS_TOKEN_LIFETIME_MINUTES', default=60)),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=env.int('REFRESH_TOKEN_LIFETIME_DAYS', default=30)),
-    'ROTATE_REFRESH_TOKENS':  True,
+    'ACCESS_TOKEN_LIFETIME':    timedelta(minutes=env.int('ACCESS_TOKEN_LIFETIME_MINUTES', default=15)),
+    'REFRESH_TOKEN_LIFETIME':   timedelta(days=env.int('REFRESH_TOKEN_LIFETIME_DAYS', default=30)),
+    'ROTATE_REFRESH_TOKENS':    True,
     'BLACKLIST_AFTER_ROTATION': True,
-    'ALGORITHM':              'HS256',
-    'SIGNING_KEY':            SECRET_KEY,
-    'AUTH_HEADER_TYPES':      ('Bearer',),
-    'USER_ID_FIELD':          'id',
-    'USER_ID_CLAIM':          'user_id',
+    'ALGORITHM':                'HS256',
+    'SIGNING_KEY':              SECRET_KEY,
+    'AUTH_HEADER_TYPES':        ('Bearer',),
+    'USER_ID_FIELD':            'id',
+    'USER_ID_CLAIM':            'user_id',
+    # aud claim tekshiruvi — AudienceJWTAuthentication subklasslari orqali
+    # (global AUDIENCE ishlatilmaydi — har panel o'z classida tekshiradi)
+    'TOKEN_OBTAIN_SERIALIZER':  'rest_framework_simplejwt.serializers.TokenObtainPairSerializer',
 }
 
 # ─── JAZZMIN — Admin panel ────────────────────────────────────────────────────
@@ -385,9 +388,15 @@ SPECTACULAR_SETTINGS = {
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[
     'http://localhost:3000',
+    'http://localhost:5173',
     'http://127.0.0.1:3000',
 ])
 CORS_ALLOW_CREDENTIALS = True
+
+CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=[
+    'http://localhost:3000',
+    'http://localhost:5173',
+])
 
 # ─── AI PROVIDERS ─────────────────────────────────────────────────────────────
 # Faol provider: 'gemini' (default) yoki 'claude'

@@ -1,9 +1,24 @@
 """
-Users app — foydalanuvchi modeli, AI sozlamalari, OTP autentifikatsiya.
+Users app modellari.
 
-Auth kanallar:
-    1. Telegram initData (Mini App)
-    2. Telefon + SMS OTP (Eskiz gateway)
+Auth oqimi:
+    Ro'yxatdan o'tish (4 qadam, Telegram Mini App):
+        1. full_name + phone   → OTP SMS yuboriladi
+        2. phone + otp_code    → verification_token qaytariladi
+        3. token + password + telegram_init_data → User yaratiladi + JWT
+        4. (keyingi kirish)    → phone + password → JWT
+
+Rollar:
+    customer     — Telegram Mini App / Mobile App foydalanuvchisi
+    owner        — CRM: tashkilot egasi
+    branch_staff — CRM: filial xodimi
+    admin        — ichki xodim (Django admin + Admin panel)
+
+JWT audience:
+    customer     → 'mobile'
+    owner /
+    branch_staff → 'crm'
+    admin        → 'admin'
 """
 
 from __future__ import annotations
@@ -19,25 +34,13 @@ from django.utils import timezone
 from apps.core.models import BaseModel
 
 
-class UserManager(BaseUserManager):
-    def create_user(self, telegram_id=None, phone=None, **extra_fields):
-        if not telegram_id and not phone:
-            raise ValueError('Telegram ID yoki telefon raqam majburiy.')
-        user = self.model(telegram_id=telegram_id, phone=phone, **extra_fields)
-        user.set_unusable_password()
-        user.save(using=self._db)
-        return user
+# ─── Choices ──────────────────────────────────────────────────────────────────
 
-    def create_superuser(self, telegram_id, password=None, **extra_fields):
-        extra_fields.setdefault('is_staff', True)
-        extra_fields.setdefault('is_superuser', True)
-        user = self.model(telegram_id=telegram_id, **extra_fields)
-        if password:
-            user.set_password(password)
-        else:
-            user.set_unusable_password()
-        user.save(using=self._db)
-        return user
+class UserRole(models.TextChoices):
+    CUSTOMER     = 'customer',     'Mijoz'
+    OWNER        = 'owner',        'Tashkilot egasi'
+    BRANCH_STAFF = 'branch_staff', 'Filial xodimi'
+    ADMIN        = 'admin',        'Admin'
 
 
 class AIAutonomyLevel(models.TextChoices):
@@ -46,22 +49,66 @@ class AIAutonomyLevel(models.TextChoices):
     FULL_AUTO = 'full_auto', "To'liq avtomatik"
 
 
+# ─── Manager ──────────────────────────────────────────────────────────────────
+
+class UserManager(BaseUserManager):
+    def create_user(self, phone: str, password: str | None = None, **extra_fields):
+        if not phone:
+            raise ValueError('Telefon raqam majburiy.')
+        extra_fields.setdefault('role', UserRole.CUSTOMER)
+        user = self.model(phone=phone, **extra_fields)
+        if password:
+            user.set_password(password)
+        else:
+            user.set_unusable_password()
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, phone: str, password: str, **extra_fields):
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        extra_fields.setdefault('role', UserRole.ADMIN)
+        extra_fields.setdefault('is_phone_verified', True)
+        if not extra_fields.get('is_staff'):
+            raise ValueError("Superuser is_staff=True bo'lishi shart.")
+        return self.create_user(phone, password, **extra_fields)
+
+
+# ─── User ─────────────────────────────────────────────────────────────────────
+
 class User(AbstractBaseUser, PermissionsMixin, BaseModel):
     """
-    Asosiy foydalanuvchi modeli.
-    Telegram initData yoki Telefon+OTP orqali yaratiladi.
-    Parol ishlatilmaydi.
+    Yagona foydalanuvchi modeli — barcha kanallar uchun.
+
+    USERNAME_FIELD = 'phone' — Django admin va PhoneBackend uchun.
+    Parol majburiy — register oqimining 3-qadamida o'rnatiladi.
+    telegram_id — ixtiyoriy, CompleteRegistration vaqtida bog'lanadi.
     """
+
     # ── Identifikatorlar ──────────────────────────────────────────────────────
+    phone             = models.CharField(max_length=20, unique=True, db_index=True)
     telegram_id       = models.BigIntegerField(unique=True, null=True, blank=True, db_index=True)
     telegram_username = models.CharField(max_length=64, blank=True, null=True)
-    phone             = models.CharField(max_length=20, unique=True, null=True, blank=True, db_index=True)
 
-    # ── Shaxsiy ma'lumotlar ───────────────────────────────────────────────────
+    # ── Rol ───────────────────────────────────────────────────────────────────
+    role = models.CharField(
+        max_length=20,
+        choices=UserRole.choices,
+        default=UserRole.CUSTOMER,
+        db_index=True,
+    )
+
+    # ── Shaxsiy ──────────────────────────────────────────────────────────────
     first_name    = models.CharField(max_length=64, blank=True)
     last_name     = models.CharField(max_length=64, blank=True)
     avatar_url    = models.URLField(blank=True, null=True)
-    language_code = models.CharField(max_length=10, default='ru')
+    language_code = models.CharField(max_length=10, default='uz')
+
+    # ── Tasdiqlash ────────────────────────────────────────────────────────────
+    is_phone_verified = models.BooleanField(
+        default=False,
+        help_text='SMS OTP orqali tasdiqlangan (register 2-qadamida True bo\'ladi)',
+    )
 
     # ── AI sozlamalari ────────────────────────────────────────────────────────
     ai_autonomy_level = models.CharField(
@@ -78,13 +125,11 @@ class User(AbstractBaseUser, PermissionsMixin, BaseModel):
     balance      = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     bonus_points = models.PositiveIntegerField(default=0)
 
-    # ── Status ────────────────────────────────────────────────────────────────
+    # ── Django ────────────────────────────────────────────────────────────────
     is_active = models.BooleanField(default=True)
     is_staff  = models.BooleanField(default=False)
 
-    # ── Auth ──────────────────────────────────────────────────────────────────
-    # telegram_id yoki phone bilan kirish
-    USERNAME_FIELD  = 'telegram_id'
+    USERNAME_FIELD  = 'phone'
     REQUIRED_FIELDS = []
 
     objects = UserManager()
@@ -95,20 +140,27 @@ class User(AbstractBaseUser, PermissionsMixin, BaseModel):
         indexes = [
             models.Index(fields=['phone']),
             models.Index(fields=['telegram_id']),
+            models.Index(fields=['role']),
         ]
 
     def __str__(self) -> str:
-        name = self.full_name or str(self.telegram_id or self.phone)
-        return f'{name} (@{self.telegram_username or "-"})'
+        return f'{self.full_name or self.phone} [{self.role}]'
 
     @property
     def full_name(self) -> str:
         return f'{self.first_name} {self.last_name}'.strip()
 
+    @property
+    def jwt_audience(self) -> str:
+        """JWT tokenga yoziladigan audience."""
+        return {
+            UserRole.ADMIN:        'admin',
+            UserRole.OWNER:        'crm',
+            UserRole.BRANCH_STAFF: 'crm',
+        }.get(self.role, 'mobile')
+
     def get_effective_ai_autonomy_level(self) -> str:
-        """
-        Haqiqiy daraja = min(user tanlagan, tier maksimum).
-        """
+        """Haqiqiy daraja = min(user tanlagan, tier maksimum)."""
         try:
             tier = self.membership_tier
             order = {
@@ -116,9 +168,10 @@ class User(AbstractBaseUser, PermissionsMixin, BaseModel):
                 AIAutonomyLevel.SEMI_AUTO: 1,
                 AIAutonomyLevel.FULL_AUTO: 2,
             }
-            user_lvl = order.get(self.ai_autonomy_level, 0)
-            tier_max = order.get(tier.max_ai_autonomy_level, 0)
-            effective = min(user_lvl, tier_max)
+            effective = min(
+                order.get(self.ai_autonomy_level, 0),
+                order.get(tier.max_ai_autonomy_level, 0),
+            )
             return list(order.keys())[effective]
         except Exception:
             return self.ai_autonomy_level
@@ -128,47 +181,45 @@ class User(AbstractBaseUser, PermissionsMixin, BaseModel):
 
 OTP_EXPIRE_MINUTES = 5
 OTP_LENGTH         = 6
+OTP_MAX_ATTEMPTS   = 5
 
 
 class OTPCode(BaseModel):
     """
-    SMS orqali yuboriladigan bir martalik kod.
-    Eskiz SMS gateway ishlatiladi.
+    SMS orqali yuboriladigan bir martalik kod (DevSMS gateway).
 
-    Oqim:
-        POST /api/auth/sms/send/    → kod yaratiladi, SMS yuboriladi
-        POST /api/auth/sms/verify/  → kod tekshiriladi, JWT qaytariladi
+    Purpose.REGISTER     — ro'yxatdan o'tish oqimida (1-qadam)
+    Purpose.PASSWORD_RESET — parolni tiklash oqimida
     """
 
     class Purpose(models.TextChoices):
-        LOGIN    = 'login',    'Kirish'
-        REGISTER = 'register', "Ro'yxatdan o'tish"
-        VERIFY   = 'verify',   'Telefon tasdiqlash'
+        REGISTER       = 'register',       "Ro'yxatdan o'tish"
+        PASSWORD_RESET = 'password_reset', 'Parolni tiklash'
 
-    phone     = models.CharField(max_length=20, db_index=True)
-    code      = models.CharField(max_length=10)
-    purpose   = models.CharField(max_length=20, choices=Purpose.choices, default=Purpose.LOGIN)
-    is_used   = models.BooleanField(default=False)
+    phone      = models.CharField(max_length=20, db_index=True)
+    code       = models.CharField(max_length=10)
+    purpose    = models.CharField(
+        max_length=20,
+        choices=Purpose.choices,
+        default=Purpose.REGISTER,
+    )
+    is_used    = models.BooleanField(default=False)
     expires_at = models.DateTimeField()
-
-    # Brute-force himoya
-    attempts  = models.PositiveSmallIntegerField(default=0)
+    attempts   = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
         verbose_name        = 'OTP Kod'
         verbose_name_plural = 'OTP Kodlar'
         ordering            = ['-created_at']
-        indexes             = [models.Index(fields=['phone', 'is_used', 'expires_at'])]
+        indexes             = [models.Index(fields=['phone', 'purpose', 'is_used', 'expires_at'])]
 
     def __str__(self) -> str:
-        return f'{self.phone} | {self.code} | {"used" if self.is_used else "active"}'
+        return f'{self.phone} | {self.purpose} | {"used" if self.is_used else "active"}'
 
     @classmethod
-    def create_for_phone(cls, phone: str, purpose: str = Purpose.LOGIN) -> 'OTPCode':
-        """Yangi OTP kodni yaratadi (avvalgisini bekor qiladi)."""
-        # Avvalgi faol kodlarni bekor qilish
-        cls.objects.filter(phone=phone, is_used=False).update(is_used=True)
-
+    def create_for_phone(cls, phone: str, purpose: str = Purpose.REGISTER) -> 'OTPCode':
+        """Yangi OTP yaratadi; bir xil purpose'dagi avvalgi faollar bekor qilinadi."""
+        cls.objects.filter(phone=phone, purpose=purpose, is_used=False).update(is_used=True)
         code = ''.join(random.choices(string.digits, k=OTP_LENGTH))
         return cls.objects.create(
             phone=phone,
@@ -182,13 +233,14 @@ class OTPCode(BaseModel):
         return not self.is_used and timezone.now() < self.expires_at
 
     def verify(self, code: str) -> bool:
-        """Kodni tekshiradi. Muvaffaqiyatli bo'lsa is_used=True."""
+        """
+        Kodni tekshiradi. Muvaffaqiyatli → is_used=True.
+        OTP_MAX_ATTEMPTS dan ortiq urinishda False (brute-force himoya).
+        """
+        if self.attempts >= OTP_MAX_ATTEMPTS:
+            return False
         self.attempts += 1
         self.save(update_fields=['attempts'])
-
-        if self.attempts > 5:
-            return False  # brute-force
-
         if self.is_valid and self.code == code:
             self.is_used = True
             self.save(update_fields=['is_used'])
@@ -222,3 +274,46 @@ class WalletTransaction(BaseModel):
 
     def __str__(self) -> str:
         return f'{self.user} | {self.transaction_type} | {self.amount}'
+
+
+# ─── UserDevice ───────────────────────────────────────────────────────────────
+
+class UserDevice(BaseModel):
+    """
+    Foydalanuvchi qurilmalari va sessiya tracking.
+
+    Maqsadlar:
+        - "Barcha qurilmalardan chiqish" — barcha JTI ni blacklist qilish
+        - Push notification (FCM token)
+        - Xavfsizlik audit
+    """
+
+    class DeviceType(models.TextChoices):
+        MOBILE    = 'mobile',    'Mobile (Flutter)'
+        TELEGRAM  = 'telegram',  'Telegram Mini App'
+        WEB_CRM   = 'web_crm',   'Web CRM'
+        WEB_ADMIN = 'web_admin', 'Web Admin'
+
+    user              = models.ForeignKey(User, on_delete=models.CASCADE, related_name='devices')
+    device_type       = models.CharField(max_length=20, choices=DeviceType.choices)
+    refresh_token_jti = models.CharField(
+        max_length=255, unique=True,
+        help_text='JWT refresh tokenning JTI claim qiymati',
+    )
+    fcm_token   = models.CharField(max_length=255, null=True, blank=True)
+    device_name = models.CharField(max_length=100, blank=True)
+    ip_address  = models.GenericIPAddressField(null=True, blank=True)
+    last_active = models.DateTimeField(auto_now=True)
+    is_active   = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name        = 'Foydalanuvchi qurilmasi'
+        verbose_name_plural = 'Foydalanuvchi qurilmalari'
+        ordering            = ['-last_active']
+        indexes             = [
+            models.Index(fields=['user', 'is_active']),
+            models.Index(fields=['refresh_token_jti']),
+        ]
+
+    def __str__(self) -> str:
+        return f'{self.user} | {self.device_type} | {self.device_name or self.ip_address}'

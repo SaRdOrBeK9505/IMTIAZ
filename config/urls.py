@@ -7,7 +7,6 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
-from rest_framework_simplejwt.views import TokenRefreshView
 from apps.core.views import HealthCheckView
 
 urlpatterns = [
@@ -19,9 +18,8 @@ urlpatterns = [
 
     # API v1
     path('api/', include([
-        # Auth & Users
+        # Auth & Users (login, telegram, sms, profile, wallet)
         path('', include('apps.users.urls')),
-        path('auth/token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
 
         # AI Assistant
         path('ai/', include('apps.ai_assistant.urls')),
@@ -50,7 +48,7 @@ urlpatterns = [
 
     # API Docs (faqat DEBUG yoki ichki network)
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    path('api/docs/',   SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('',   SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('api/redoc/',  SpectacularRedocView.as_view(url_name='schema'),   name='redoc'),
 ]
 

@@ -1,23 +1,41 @@
 from django.urls import path
+from rest_framework_simplejwt.views import TokenRefreshView
+
 from .views import (
-    TelegramAuthView,
-    SMSSendView,
-    SMSVerifyView,
+    # Register (4 qadam)
+    RequestOTPView,
+    VerifyOTPView,
+    CompleteRegistrationView,
+    # Login
+    LoginView,
+    CRMLoginView,
+    AdminLoginView,
+    LogoutView,
+    # Profile & Wallet
     UserMeView,
     AISettingsView,
     WalletView,
 )
 
 urlpatterns = [
-    # Auth
-    path('auth/telegram/',   TelegramAuthView.as_view(), name='auth-telegram'),
-    path('auth/sms/send/',   SMSSendView.as_view(),      name='auth-sms-send'),
-    path('auth/sms/verify/', SMSVerifyView.as_view(),    name='auth-sms-verify'),
+    # ── Ro'yxatdan o'tish ─────────────────────────────────────────────────────
+    path('auth/register/request-otp/', RequestOTPView.as_view(),          name='register-request-otp'),
+    path('auth/register/verify-otp/',  VerifyOTPView.as_view(),           name='register-verify-otp'),
+    path('auth/register/complete/',    CompleteRegistrationView.as_view(), name='register-complete'),
 
-    # Profile
-    path('users/me/',              UserMeView.as_view(),    name='user-me'),
-    path('users/me/ai-settings/',  AISettingsView.as_view(), name='user-ai-settings'),
+    # ── Login (phone + password) ──────────────────────────────────────────────
+    path('auth/login/',       LoginView.as_view(),      name='auth-login'),
+    path('crm/auth/login/',   CRMLoginView.as_view(),   name='auth-crm-login'),
+    path('admin/auth/login/', AdminLoginView.as_view(), name='auth-admin-login'),
 
-    # Wallet
-    path('wallet/', WalletView.as_view(), name='wallet'),
+    # ── Token ────────────────────────────────────────────────────────────────
+    path('auth/token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
+    path('auth/logout/',        LogoutView.as_view(),        name='auth-logout'),
+
+    # ── Profile ───────────────────────────────────────────────────────────────
+    path('users/me/',             UserMeView.as_view(),     name='user-me'),
+    path('users/me/ai-settings/', AISettingsView.as_view(), name='user-ai-settings'),
+
+    # ── Wallet ────────────────────────────────────────────────────────────────
+    # path('wallet/', WalletView.as_view(), name='wallet'),
 ]
