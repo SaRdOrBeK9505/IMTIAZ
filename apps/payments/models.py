@@ -29,6 +29,7 @@ class PaymentProvider(models.TextChoices):
     CLICK      = 'click',      'Click'
     MULTICARD  = 'multicard',  'Multicard'
     WALLET     = 'wallet',     'IMTIAZ Hamyon'
+    ALIFPAY    = 'alifpay',   'AlifPay'
     # Kelajak uchun joy qoldirilgan:
     # STRIPE   = 'stripe',   'Stripe'
     # UZCARD   = 'uzcard',   'Uzcard'

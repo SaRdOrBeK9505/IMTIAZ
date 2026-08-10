@@ -177,3 +177,42 @@ class EventBooking(BaseModel):
     class Meta:
         verbose_name = 'Tadbir broni'
         verbose_name_plural = 'Tadbir bronlari'
+
+
+class FlightPayment(BaseModel):
+    """
+    Bookhara fiscalization_v2 bloki — soliq/fiskal ma'lumotlar.
+
+    pay_booking() muvaffaqiyatli bo'lgach, javobdagi fiscalization_v2
+    dict'i shu modelga saqlanadi. AlifPay OFD chek URL ham shu yerda.
+
+    MUHIM: amount maydonlari doim so'mda saqlanadi.
+    AlifPay'ga yuborishda tiyinga o'tkazish (x100) faqat
+    AlifPayProvider.create_payment() ichida amalga oshiriladi.
+    """
+    flight_booking     = models.ForeignKey(
+        FlightBooking, on_delete=models.CASCADE, related_name='payments',
+    )
+    receipt_type       = models.IntegerField(default=0)
+    ikpu_provider_1    = models.CharField(max_length=32, blank=True)
+    package_code_prov1 = models.CharField(max_length=32, blank=True)
+    id_provider_1      = models.CharField(max_length=32, blank=True)
+    amount             = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    nds_provider_1     = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    ikpu_bookhara      = models.CharField(max_length=32, blank=True)
+    package_code_bkh   = models.CharField(max_length=32, blank=True)
+    service_fee_bkh    = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    nds_bookhara       = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    profit             = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    discount           = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    total_amount       = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    # AlifPay OFD chek havolasi — webhook kelganda saqlanadi
+    receipt_url        = models.URLField(blank=True)
+
+    class Meta:
+        verbose_name        = "Parvoz to'lovi (fiskal)"
+        verbose_name_plural = "Parvoz to'lovlari (fiskal)"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'FlightPayment #{self.id} | {self.total_amount} UZS'

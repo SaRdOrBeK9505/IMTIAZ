@@ -38,6 +38,7 @@ def get_provider(provider_name: str) -> BasePaymentProvider:
         3. PaymentProvider enum'ga nom qo'shing (models.py)
     """
     from .providers.stub import StubPaymentProvider
+    from .providers.alifpay import AlifPayProvider
 
     # TODO: haqiqiy provayderlar tayyor bo'lganda quyidagilarni yoqing:
     # from .providers.payme import PaymeProvider
@@ -46,10 +47,12 @@ def get_provider(provider_name: str) -> BasePaymentProvider:
 
     registry: dict[str, type[BasePaymentProvider]] = {
         # Hozirda faqat stub — development uchun
-        PaymentProvider.PAYME: StubPaymentProvider,
-        PaymentProvider.CLICK: StubPaymentProvider,
+        PaymentProvider.PAYME:     StubPaymentProvider,
+        PaymentProvider.CLICK:     StubPaymentProvider,
         PaymentProvider.MULTICARD: StubPaymentProvider,
-        PaymentProvider.WALLET: StubPaymentProvider,
+        PaymentProvider.WALLET:    StubPaymentProvider,
+        # AlifPay — real implementatsiya tayyor
+        PaymentProvider.ALIFPAY:   AlifPayProvider,
     }
 
     provider_class = registry.get(provider_name)

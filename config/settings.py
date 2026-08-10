@@ -450,10 +450,16 @@ RAILWAY_API_KEY    = env('RAILWAY_API_KEY',    default='')
 RAILWAY_BASE_URL   = env('RAILWAY_BASE_URL',   default='')
 
 # Bookhara avia GDS
-BOOKHARA_API_KEY   = env('BOOKHARA_API_KEY',   default='')
-BOOKHARA_LOGIN     = env('BOOKHARA_LOGIN',     default='')
-BOOKHARA_PASSWORD  = env('BOOKHARA_PASSWORD',  default='')
-BOOKHARA_BASE_URL  = env('BOOKHARA_BASE_URL',  default='https://avia-api-dev.bookhara.uz')
+BOOKHARA_EMAIL          = env('BOOKHARA_EMAIL',          default='')
+BOOKHARA_PASSWORD       = env('BOOKHARA_PASSWORD',       default='')
+BOOKHARA_BASE_URL       = env('BOOKHARA_BASE_URL',       default='https://avia-api-dev.bookhara.uz')
+BOOKHARA_WEBHOOK_SECRET = env('BOOKHARA_WEBHOOK_SECRET', default='')
+
+# AlifPay — mijozdan pul olish (checkout modeli)
+ALIFPAY_TOKEN       = env('ALIFPAY_TOKEN',       default='')
+ALIFPAY_SECRET_KEY  = env('ALIFPAY_SECRET_KEY',  default='')
+ALIFPAY_WEBHOOK_URL = env('ALIFPAY_WEBHOOK_URL', default='')
+ALIFPAY_TEST_MODE   = env.bool('ALIFPAY_TEST_MODE', default=True)
 
 # ─── SENTRY (production error tracking) ───────────────────────────────────────
 SENTRY_DSN = env('SENTRY_DSN', default='')
