@@ -97,6 +97,7 @@ class Command(BaseCommand):
             '0001_initial',
             '0002_sync_otpcode_userdevice_and_user_fields',
             '0003_user_email',
+            '0004_merge_vps_and_sync',
         ]
         for name in required_users_migrations:
             if ('users', name) in applied:
