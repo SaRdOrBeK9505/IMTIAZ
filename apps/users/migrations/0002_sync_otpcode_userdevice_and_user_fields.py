@@ -28,15 +28,21 @@ def _column_exists(schema_editor, table_name: str, column_name: str) -> bool:
     return column_name in columns
 
 
+def _add_field(schema_editor, model, field_name: str, field: models.Field) -> None:
+    field.set_attributes_from_name(field_name)
+    schema_editor.add_field(model, field)
+
+
 def forwards(apps, schema_editor):
     User = apps.get_model('users', 'User')
 
     # ── User maydonlari (eski VPS schema → yangi) ─────────────────────────
     if not _column_exists(schema_editor, 'users_user', 'role'):
-        schema_editor.add_field(
+        _add_field(
+            schema_editor,
             User,
+            'role',
             models.CharField(
-                name='role',
                 max_length=20,
                 choices=[
                     ('customer', 'Mijoz'),
@@ -50,10 +56,11 @@ def forwards(apps, schema_editor):
         )
 
     if not _column_exists(schema_editor, 'users_user', 'is_phone_verified'):
-        schema_editor.add_field(
+        _add_field(
+            schema_editor,
             User,
+            'is_phone_verified',
             models.BooleanField(
-                name='is_phone_verified',
                 default=False,
                 help_text="SMS OTP orqali tasdiqlangan (register 2-qadamida True bo'ladi)",
             ),

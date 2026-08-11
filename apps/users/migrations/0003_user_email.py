@@ -12,12 +12,19 @@ def _column_exists(schema_editor, table_name: str, column_name: str) -> bool:
     return column_name in columns
 
 
+def _add_field(schema_editor, model, field_name: str, field: models.Field) -> None:
+    field.set_attributes_from_name(field_name)
+    schema_editor.add_field(model, field)
+
+
 def add_email_if_missing(apps, schema_editor):
     User = apps.get_model('users', 'User')
     if not _column_exists(schema_editor, 'users_user', 'email'):
-        schema_editor.add_field(
+        _add_field(
+            schema_editor,
             User,
-            models.EmailField(name='email', blank=True, default='', max_length=254),
+            'email',
+            models.EmailField(blank=True, default='', max_length=254),
         )
 
 
