@@ -52,8 +52,8 @@ class BookharaClient:
     def _ensure_configured(self) -> None:
         if not is_bookhara_configured():
             raise IntegrationNotConfiguredError(
-                'Bookhara',
-                hint='BOOKHARA_EMAIL va BOOKHARA_PASSWORD .env ga qo\'shing',
+                service='flight',
+                detail='BOOKHARA_EMAIL/BOOKHARA_PASSWORD not set',
             )
 
     def _get_token(self) -> str:
@@ -79,13 +79,17 @@ class BookharaClient:
             )
             resp.raise_for_status()
         except httpx.TimeoutException as exc:
-            raise IntegrationUnavailableError('Bookhara', 'javob vaqti tugadi') from exc
+            raise IntegrationUnavailableError(
+                service='flight', detail='timeout',
+            ) from exc
         except httpx.ConnectError as exc:
-            raise IntegrationUnavailableError('Bookhara', 'serverga ulanib bo\'lmadi') from exc
+            raise IntegrationUnavailableError(
+                service='flight', detail='connection_failed',
+            ) from exc
         except httpx.HTTPStatusError as exc:
             raise IntegrationUnavailableError(
-                'Bookhara',
-                f'autentifikatsiya xatosi (HTTP {exc.response.status_code})',
+                service='flight',
+                detail=f'auth HTTP {exc.response.status_code}',
             ) from exc
         body  = resp.json()
         token = (
@@ -128,9 +132,9 @@ class BookharaClient:
         try:
             resp = self._http.request(method, url, headers=self._headers(), **kwargs)
         except httpx.TimeoutException as exc:
-            raise IntegrationUnavailableError('Bookhara', 'javob vaqti tugadi') from exc
+            raise IntegrationUnavailableError(service='flight', detail='timeout') from exc
         except httpx.ConnectError as exc:
-            raise IntegrationUnavailableError('Bookhara', 'serverga ulanib bo\'lmadi') from exc
+            raise IntegrationUnavailableError(service='flight', detail='connection_failed') from exc
 
         if resp.status_code == 401:
             logger.warning('Bookhara 401 — token yangilanmoqda: %s %s', method, path)
@@ -138,9 +142,9 @@ class BookharaClient:
             try:
                 resp = self._http.request(method, url, headers=self._headers(), **kwargs)
             except httpx.TimeoutException as exc:
-                raise IntegrationUnavailableError('Bookhara', 'javob vaqti tugadi') from exc
+                raise IntegrationUnavailableError(service='flight', detail='timeout') from exc
             except httpx.ConnectError as exc:
-                raise IntegrationUnavailableError('Bookhara', 'serverga ulanib bo\'lmadi') from exc
+                raise IntegrationUnavailableError(service='flight', detail='connection_failed') from exc
 
         try:
             resp.raise_for_status()
@@ -150,12 +154,14 @@ class BookharaClient:
                 body = exc.response.json()
             except ValueError:
                 body = {'raw_text': exc.response.text[:200]}
-            msg = (
+            api_msg = (
                 body.get('message')
                 or body.get('error_message')
                 or body.get('error')
                 or f'HTTP {exc.response.status_code}'
             )
-            raise IntegrationUnavailableError('Bookhara', str(msg)) from exc
+            raise IntegrationUnavailableError(
+                service='flight', detail=str(api_msg),
+            ) from exc
 
         return resp.json()

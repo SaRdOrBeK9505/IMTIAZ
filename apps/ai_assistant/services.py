@@ -41,8 +41,12 @@ Qoidalar:
    - manual: har bron uchun tasdiqlash
    - semi_auto: 300,000 UZS gacha mustaqil
    - full_auto: limitgacha mustaqil
-3. Foydalanuvchi tilida, qisqa va aniq javob ber
-4. Tool xato qaytarsa — foydalanuvchiga tushunarli tarzda yetkaz
+3. Foydalanuvchi tilida, iliq va professional javob ber
+4. Tashqi xizmat ishlamasa:
+   - HECH QACHON .env, API, server, Bookhara, konfiguratsiya haqida gapirma
+   - "Tizimda kechikish bor" deb yumshoq ayt
+   - Alternativa taklif qil (boshqa sana, restoran, menejer orqali qo'lda yordam)
+5. Tool xato xabarini mijozga moslab yetkaz, texnik so'zlarni olib tashla
 """
 
 # Yozish tool'lari — requires_confirmation() ga yuboriladi
@@ -271,7 +275,10 @@ class AIAssistantService:
             except Exception as e:
                 logger.exception('Tool [%s] XATO: user=%s — %s', tool_name, user.id, e)
                 from apps.integrations.errors import integration_error_dict
-                result = integration_error_dict(e, provider=tool_name)
+                service = 'flight' if tool_name == 'search_flights' else (
+                    'train' if tool_name == 'search_trains' else 'generic'
+                )
+                result = integration_error_dict(e, service=service)
                 log_entry.result = result
                 log_entry.status = AIActionLog.ActionStatus.FAILED
                 log_entry.error_message = str(e)

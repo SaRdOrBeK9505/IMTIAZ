@@ -20,7 +20,7 @@ def handle_search_flights(
     Sozlanmagan yoki xato bo'lsa — aniq xabar qaytaradi (mock emas).
     """
     from apps.integrations.errors import (
-        IntegrationNotConfiguredError,
+        flight_search_error,
         integration_error_dict,
         is_bookhara_configured,
     )
@@ -28,16 +28,16 @@ def handle_search_flights(
     logger.info('Parvoz qidiruv: %s→%s %s (user=%s)', origin, destination, departure_date, user.id)
 
     if not is_bookhara_configured():
-        err = IntegrationNotConfiguredError(
-            'Bookhara',
-            hint='BOOKHARA_EMAIL va BOOKHARA_PASSWORD .env ga qo\'shing',
+        logger.warning(
+            'Bookhara sozlanmagan (BOOKHARA_EMAIL / BOOKHARA_PASSWORD .env da yo\'q)'
         )
-        return {
-            **integration_error_dict(err),
-            'origin': origin,
-            'destination': destination,
-            'departure_date': departure_date,
-        }
+        return flight_search_error(
+            'not_configured',
+            origin=origin,
+            destination=destination,
+            departure_date=departure_date,
+            detail='bookhara_not_configured',
+        )
 
     try:
         from apps.integrations.adapters.bookhara import BookharaAdapter
@@ -72,9 +72,11 @@ def handle_search_flights(
             ],
         }
     except Exception as e:
-        logger.warning('Bookhara search xato: %s', e)
         return {
-            **integration_error_dict(e),
+            **integration_error_dict(
+                e, service='flight',
+                origin=origin, destination=destination, departure_date=departure_date,
+            ),
             'origin': origin,
             'destination': destination,
             'departure_date': departure_date,
@@ -86,26 +88,25 @@ def handle_search_trains(
     passengers: int = 1, wagon_type: str = 'coupe', **kwargs,
 ) -> dict:
     from django.conf import settings
-    from apps.integrations.errors import IntegrationNotConfiguredError, integration_error_dict
+    from apps.integrations.errors import integration_error_dict, train_search_error
 
     logger.info('Poyezd qidiruv: %s→%s (user=%s)', origin, destination, user.id)
 
     if not settings.RAILWAY_API_KEY:
-        err = IntegrationNotConfiguredError(
-            'Temir yo\'l',
-            hint='RAILWAY_API_KEY .env ga qo\'shing',
+        logger.warning('Railway integratsiyasi sozlanmagan (RAILWAY_API_KEY yo\'q)')
+        return train_search_error(
+            'not_configured',
+            origin=origin,
+            destination=destination,
+            detail='railway_not_configured',
         )
-        return integration_error_dict(err)
 
-    # Railway integratsiyasi qo'shilganda shu yerda chaqiriladi
-    return {
-        'status': 'error',
-        'error_code': 'unavailable',
-        'message': (
-            "Poyezd qidiruv xizmati hozircha ishga tushirilmagan. "
-            "Tez orada mavjud bo'ladi."
-        ),
-    }
+    return train_search_error(
+        'unavailable',
+        origin=origin,
+        destination=destination,
+        detail='railway_not_implemented',
+    )
 
 
 def handle_search_restaurants(

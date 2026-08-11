@@ -299,11 +299,7 @@ def _create_flight_booking(user, log: 'AIActionLog', payload: dict) -> dict:
     offer_id   = payload.get('offer_id', '')
     passengers = payload.get('passengers', 1)
 
-    from apps.integrations.errors import (
-        IntegrationNotConfiguredError,
-        integration_error_dict,
-        is_bookhara_configured,
-    )
+    from apps.integrations.errors import is_bookhara_configured
 
     ext_id = None
     bookhara_note = ''
@@ -316,16 +312,20 @@ def _create_flight_booking(user, log: 'AIActionLog', payload: dict) -> dict:
             ext_id = result.external_booking_id if result.success else None
             if not ext_id:
                 bookhara_note = (
-                    getattr(result, 'error_message', None)
-                    or 'Bookhara bron tasdiqlanmadi.'
+                    'Aviachipta tizimi hozir javob bermadi — '
+                    'bron saqlandi, menejer qo\'lda tekshiradi.'
                 )
         else:
-            bookhara_note = integration_error_dict(
-                IntegrationNotConfiguredError('Bookhara')
-            )['message']
+            bookhara_note = (
+                'Aviachipta tizimi bilan bog\'lanishda kechikish — '
+                'bron qayd etildi, menejer tez orada chiptani tasdiqlaydi.'
+            )
     except Exception as exc:
         logger.warning('Bookhara booking xato: %s', exc)
-        bookhara_note = integration_error_dict(exc)['message']
+        bookhara_note = (
+            'Aviachipta tizimi vaqtincha ishlamayapti — '
+            'bron saqlandi, menejer siz bilan bog\'lanadi.'
+        )
 
     booking = Booking.objects.create(
         user=user,
