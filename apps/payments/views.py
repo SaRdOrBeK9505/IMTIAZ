@@ -60,8 +60,8 @@ class PaymentInitiateView(APIView):
         },
         summary='To\'lov boshlash (tashqi provayder)',
         description=(
-            'Hozir barcha provayderlar stub rejimida ishlaydi — '
-            'haqiqiy provayder tanlanganida avtomatik ulangan bo\'ladi.'
+            'AlifPay (production) yoki stub provayderlar orqali to\'lov boshlash. '
+            'AlifPay: checkout sahifasiga yo\'naltiradi.'
         ),
         tags=['Payments'],
     )
@@ -86,8 +86,15 @@ class PaymentInitiateView(APIView):
             provider_name=serializer.validated_data['provider'],
             amount=booking.final_price,
             user=request.user,
-            return_url=request.META.get('HTTP_ORIGIN'),
+            return_url=(
+                serializer.validated_data.get('return_url')
+                or request.META.get('HTTP_ORIGIN')
+            ),
+            cancel_url=serializer.validated_data.get('cancel_url'),
+            description=booking.title,
         )
+        if not result.get('success', True) and result.get('message'):
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
         return Response(result)
 
 
@@ -196,9 +203,16 @@ class PaymentWebhookView(APIView):
         from .models import Payment, PaymentStatus
         from .services import PaymentService
 
-        # ── Imzo tekshiruvi ──────────────────────────────────────────
-        received_sig = request.META.get('HTTP_X_ALIFPAY_SIGNATURE', '')
+        # ── Imzo tekshiruvi (AlifPay docs: HTTP header "Signature") ─────
+        received_sig = (
+            request.META.get('HTTP_SIGNATURE')
+            or request.META.get('HTTP_X_ALIFPAY_SIGNATURE', '')
+        )
         secret_key   = getattr(settings, 'ALIFPAY_SECRET_KEY', '')
+
+        if not secret_key and not settings.DEBUG:
+            logger.error('AlifPay webhook: ALIFPAY_SECRET_KEY o\'rnatilmagan (production)')
+            return Response({'status': 'misconfigured'}, status=500)
 
         if secret_key and not verify_alifpay_signature(
             body=request.body,
@@ -241,6 +255,11 @@ class PaymentWebhookView(APIView):
                 logger.exception(
                     'AlifPay webhook: confirm_payment xatosi. payment_id=%s', payment.id,
                 )
+        elif pay_status in ('FAILED', 'CANCELLED', 'EXPIRED'):
+            PaymentService.mark_payment_failed(
+                str(payment.id),
+                reason=f'AlifPay status: {pay_status}',
+            )
 
         # ── Receipt URL ni FlightPayment'ga saqlash ───────────────────────
         receipt_url = None

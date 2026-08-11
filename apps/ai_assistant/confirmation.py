@@ -299,18 +299,33 @@ def _create_flight_booking(user, log: 'AIActionLog', payload: dict) -> dict:
     offer_id   = payload.get('offer_id', '')
     passengers = payload.get('passengers', 1)
 
-    # Bookhara integratsiyasi (tayyor bo'lganda)
+    from apps.integrations.errors import (
+        IntegrationNotConfiguredError,
+        integration_error_dict,
+        is_bookhara_configured,
+    )
+
+    ext_id = None
+    bookhara_note = ''
     try:
         from apps.integrations.adapters.bookhara import BookharaAdapter
-        from django.conf import settings
-        if settings.BOOKHARA_API_KEY:
+
+        if is_bookhara_configured():
             adapter = BookharaAdapter()
-            result  = adapter.create_booking(offer_id=offer_id, passengers=passengers)
-            ext_id  = result.external_booking_id if result.success else None
+            result = adapter.create_booking(offer_id=offer_id, passengers=passengers)
+            ext_id = result.external_booking_id if result.success else None
+            if not ext_id:
+                bookhara_note = (
+                    getattr(result, 'error_message', None)
+                    or 'Bookhara bron tasdiqlanmadi.'
+                )
         else:
-            ext_id = None
-    except (ImportError, Exception):
-        ext_id = None
+            bookhara_note = integration_error_dict(
+                IntegrationNotConfiguredError('Bookhara')
+            )['message']
+    except Exception as exc:
+        logger.warning('Bookhara booking xato: %s', exc)
+        bookhara_note = integration_error_dict(exc)['message']
 
     booking = Booking.objects.create(
         user=user,
@@ -341,11 +356,11 @@ def _create_flight_booking(user, log: 'AIActionLog', payload: dict) -> dict:
         'Tasdiqlangan parvoz broni yaratildi: booking=%s, user=%s, ext_id=%s',
         booking.id, user.id, ext_id,
     )
+    message = f"Parvoz broni yaratildi. Bron ID: {booking.id}"
+    if bookhara_note and not ext_id:
+        message = f"{message}\n\n⚠️ {bookhara_note}"
     return {
         'status':     'ok',
         'booking_id': str(booking.id),
-        'message':    (
-            f"Parvoz broni muvaffaqiyatli yaratildi. "
-            f"Bron ID: {booking.id}"
-        ),
+        'message':    message,
     }

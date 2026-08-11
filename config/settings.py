@@ -50,6 +50,8 @@ LOCAL_APPS = [
     'apps.notifications',
     'apps.events',
     'apps.integrations',
+    'apps.tours',       # Tur sayohat tizimi
+    'apps.qr_codes',    # QR kod chegirma tizimi
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -311,6 +313,7 @@ JAZZMIN_SETTINGS = {
     ],
 
     # ── Ko'rinish ─────────────────────────────────────────────────────────────
+    'default_theme_mode':     'auto',   # light | dark | auto (Jazzmin 3.x)
     'show_ui_builder':        False,   # production'da o'chiq
     'related_modal_active':   True,    # related fieldlar modal'da ochilsin
     'custom_css':             None,
@@ -349,9 +352,8 @@ JAZZMIN_UI_TWEAKS = {
     'sidebar_nav_legacy_style':False,
     'sidebar_nav_flat_style':False,
 
-    # Tema
-    'theme':                'flatly',   # Bootstrap 5 yorug' tema
-    'dark_mode_theme':      'darkly',   # Foydalanuvchi dark rejimga o'ta oladi
+    # Tema (Bootstrap 5 — light/dark data-bs-theme orqali)
+    'theme':                'flatly',
     'button_classes': {
         'primary':   'btn-outline-primary',
         'secondary': 'btn-outline-secondary',
@@ -390,18 +392,27 @@ CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[
     'http://localhost:3000',
     'http://localhost:5173',
     'http://127.0.0.1:3000',
+    'https://imtiaz-crm.vercel.app',
 ])
 CORS_ALLOW_CREDENTIALS = True
 
 CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=[
     'http://localhost:3000',
     'http://localhost:5173',
+    'https://imtiaz-crm.vercel.app',
 ])
+
+# ─── Frontend / QR ────────────────────────────────────────────────────────────
+FRONTEND_URL     = env('FRONTEND_URL', default='https://imtiaz-crm.vercel.app')
+QR_SCAN_BASE_URL = env('QR_SCAN_BASE_URL', default=f'{FRONTEND_URL.rstrip("/")}/qr/')
 
 # ─── AI PROVIDERS ─────────────────────────────────────────────────────────────
 # Faol provider: 'gemini' (default) yoki 'claude'
 AI_PROVIDER   = env('AI_PROVIDER', default='gemini')
-AI_MAX_TOKENS = env.int('AI_MAX_TOKENS', default=4096)
+AI_MAX_TOKENS = env.int('AI_MAX_TOKENS', default=1024)
+AI_FOLLOWUP_MAX_TOKENS = env.int('AI_FOLLOWUP_MAX_TOKENS', default=512)
+AI_HISTORY_LIMIT = env.int('AI_HISTORY_LIMIT', default=12)
+AI_SKIP_SECOND_CALL = env.bool('AI_SKIP_SECOND_CALL', default=True)
 
 # Gemini (Google)
 GEMINI_API_KEY = env('GEMINI_API_KEY', default='')

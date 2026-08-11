@@ -33,11 +33,20 @@ class PaymentInitiateSerializer(serializers.Serializer):
     booking_id = serializers.UUIDField()
     provider = serializers.ChoiceField(
         choices=[
+            PaymentProvider.ALIFPAY,
             PaymentProvider.PAYME,
             PaymentProvider.CLICK,
             PaymentProvider.MULTICARD,
         ],
-        help_text='To\'lov provayderi (hozir stub — real provayder tanlanmagan)',
+        help_text='To\'lov provayderi. Production uchun alifpay tavsiya etiladi.',
+    )
+    return_url = serializers.URLField(
+        required=False, allow_blank=True,
+        help_text='To\'lovdan keyin qaytish URL (masalan: https://app.imtiaz.uz/payment/success)',
+    )
+    cancel_url = serializers.URLField(
+        required=False, allow_blank=True,
+        help_text='To\'lov bekor qilinganda qaytish URL',
     )
 
 

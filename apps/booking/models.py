@@ -15,10 +15,12 @@ class ServiceType(models.TextChoices):
     RESTAURANT = 'restaurant', 'Restoran'
     EVENT = 'event', 'Tadbir'
     HOTEL = 'hotel', 'Mehmonxona'  # kelajak uchun tayyor
+    TOUR = 'tour', 'Tur sayohat'
 
 
 class BookingStatus(models.TextChoices):
     PENDING = 'pending', 'Kutilmoqda'
+    IN_PROGRESS = 'in_progress', 'Jarayonda'
     CONFIRMED = 'confirmed', 'Tasdiqlangan'
     CANCELLED = 'cancelled', 'Bekor qilingan'
     COMPLETED = 'completed', 'Bajarilgan'
@@ -154,6 +156,10 @@ class RestaurantBooking(BaseModel):
     )
     reservation_at = models.DateTimeField()
     guest_count = models.PositiveSmallIntegerField(default=2)
+    duration_minutes = models.PositiveSmallIntegerField(
+        default=120,
+        help_text='Bron davomiyligi (daqiqa)',
+    )
     special_requests = models.TextField(blank=True)
     table_number = models.CharField(max_length=20, blank=True, null=True)
     confirmed_by_staff = models.BooleanField(default=False)
@@ -216,3 +222,86 @@ class FlightPayment(BaseModel):
 
     def __str__(self):
         return f'FlightPayment #{self.id} | {self.total_amount} UZS'
+
+
+class TourBooking(BaseModel):
+    """
+    Tur sayohat broni — Booking modelining kengaytmasi.
+    Operator tasdiqlagach TourVoucher yaratiladi.
+    """
+
+    class HotelPreference(models.TextChoices):
+        STANDARD = 'standard', 'Standart'
+        DELUXE   = 'deluxe',   'Deluxe'
+        SUITE    = 'suite',    'Suite'
+        ANY      = 'any',      'Farq qilmaydi'
+
+    booking = models.OneToOneField(
+        Booking, on_delete=models.CASCADE, related_name='tour_detail'
+    )
+    package = models.ForeignKey(
+        'tours.TourPackage',
+        on_delete=models.PROTECT,
+        related_name='tour_bookings',
+    )
+    availability = models.ForeignKey(
+        'tours.TourAvailability',
+        on_delete=models.PROTECT,
+        related_name='tour_bookings',
+    )
+
+    # ── Sayohatchilar ────────────────────────────────────────────────
+    tourist_count    = models.PositiveSmallIntegerField(default=1)
+    tourists_info    = models.JSONField(
+        default=list,
+        help_text='[{"name": "Ism Familiya", "passport": "AC123456", '
+                  '"dob": "1990-01-01", "nationality": "UZ"}]'
+    )
+    special_requests = models.TextField(blank=True)
+    hotel_preference = models.CharField(
+        max_length=20,
+        choices=HotelPreference.choices,
+        default=HotelPreference.ANY,
+    )
+
+    # ── CRM operator tomonidan to'ldiriladi ─────────────────────────
+    confirmed_by     = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='confirmed_tour_bookings',
+    )
+    confirmed_at     = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+    operator_notes   = models.TextField(blank=True)
+
+    # ── AI tahlil (CRM arizalar sahifasi) ───────────────────────────
+    ai_analysis      = models.TextField(
+        blank=True,
+        help_text='AI tomonidan shakllangan mijoz/tur tahlili matni',
+    )
+    ai_reprocessed   = models.BooleanField(
+        default=False,
+        help_text='AI qayta ishlagan ariza belgisi',
+    )
+
+    # ── Voaucher ─────────────────────────────────────────────────────
+    voucher_generated    = models.BooleanField(default=False)
+    voucher_generated_at = models.DateTimeField(null=True, blank=True)
+    voucher_generated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='generated_tour_vouchers',
+    )
+
+    class Meta:
+        verbose_name        = 'Tur broni'
+        verbose_name_plural = 'Tur bronlari'
+        indexes = [
+            models.Index(fields=['package', 'availability']),
+            models.Index(fields=['voucher_generated']),
+        ]
+
+    def __str__(self):
+        return f'TurBron: {self.booking.user} → {self.package} [{self.booking.status}]'

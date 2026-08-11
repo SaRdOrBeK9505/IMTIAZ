@@ -17,88 +17,94 @@ def handle_search_flights(
 ) -> dict:
     """
     Parvoz qidirish — BookharaAdapter orqali.
-    API kaliti yo'q bo'lsa mock natija qaytaradi.
+    Sozlanmagan yoki xato bo'lsa — aniq xabar qaytaradi (mock emas).
     """
+    from apps.integrations.errors import (
+        IntegrationNotConfiguredError,
+        integration_error_dict,
+        is_bookhara_configured,
+    )
+
     logger.info('Parvoz qidiruv: %s→%s %s (user=%s)', origin, destination, departure_date, user.id)
 
-    from django.conf import settings
-    if settings.BOOKHARA_API_KEY and settings.BOOKHARA_LOGIN:
-        try:
-            from apps.integrations.adapters.bookhara import BookharaAdapter
-            adapter = BookharaAdapter()
-            offers  = adapter.search(
-                origin=origin,
-                destination=destination,
-                departure_date=departure_date,
-                passengers=passengers,
-                seat_class=seat_class,
-                return_date=return_date,
-            )
-            return {
-                'status':         'ok',
-                'origin':         origin,
-                'destination':    destination,
-                'departure_date': departure_date,
-                'offers': [
-                    {
-                        'offer_id':        o.offer_id,
-                        'airline':         o.airline,
-                        'flight_number':   o.flight_number,
-                        'departure_at':    o.departure_at,
-                        'arrival_at':      o.arrival_at,
-                        'price':           float(o.price),
-                        'currency':        o.currency,
-                        'seat_class':      o.seat_class,
-                        'available_seats': o.available_seats,
-                        'baggage':         o.baggage_included,
-                    }
-                    for o in offers
-                ],
-            }
-        except Exception as e:
-            logger.warning('Bookhara search xato, mock qaytarilmoqda: %s', e)
+    if not is_bookhara_configured():
+        err = IntegrationNotConfiguredError(
+            'Bookhara',
+            hint='BOOKHARA_EMAIL va BOOKHARA_PASSWORD .env ga qo\'shing',
+        )
+        return {
+            **integration_error_dict(err),
+            'origin': origin,
+            'destination': destination,
+            'departure_date': departure_date,
+        }
 
-    # Mock — API sozlanmagan yoki xato
-    return {
-        'status':         'ok',
-        'origin':         origin,
-        'destination':    destination,
-        'departure_date': departure_date,
-        'offers': [
-            {
-                'offer_id':        'mock-flight-001',
-                'airline':         'Uzbekistan Airways',
-                'flight_number':   'HY401',
-                'departure_at':    f'{departure_date}T08:00:00',
-                'arrival_at':      f'{departure_date}T10:30:00',
-                'price':           1_500_000,
-                'currency':        'UZS',
-                'seat_class':      seat_class,
-                'available_seats': 15,
-                'baggage':         False,
-            }
-        ],
-    }
+    try:
+        from apps.integrations.adapters.bookhara import BookharaAdapter
+        adapter = BookharaAdapter()
+        offers = adapter.search(
+            origin=origin,
+            destination=destination,
+            departure_date=departure_date,
+            passengers=passengers,
+            seat_class=seat_class,
+            return_date=return_date,
+        )
+        return {
+            'status':         'ok',
+            'origin':         origin,
+            'destination':    destination,
+            'departure_date': departure_date,
+            'offers': [
+                {
+                    'offer_id':        o.offer_id,
+                    'airline':         o.airline,
+                    'flight_number':   o.flight_number,
+                    'departure_at':    o.departure_at,
+                    'arrival_at':      o.arrival_at,
+                    'price':           float(o.price),
+                    'currency':        o.currency,
+                    'seat_class':      o.seat_class,
+                    'available_seats': o.available_seats,
+                    'baggage':         o.baggage_included,
+                }
+                for o in offers[:10]
+            ],
+        }
+    except Exception as e:
+        logger.warning('Bookhara search xato: %s', e)
+        return {
+            **integration_error_dict(e),
+            'origin': origin,
+            'destination': destination,
+            'departure_date': departure_date,
+        }
 
 
 def handle_search_trains(
     user, origin: str, destination: str, departure_date: str,
     passengers: int = 1, wagon_type: str = 'coupe', **kwargs,
 ) -> dict:
+    from django.conf import settings
+    from apps.integrations.errors import IntegrationNotConfiguredError, integration_error_dict
+
     logger.info('Poyezd qidiruv: %s→%s (user=%s)', origin, destination, user.id)
+
+    if not settings.RAILWAY_API_KEY:
+        err = IntegrationNotConfiguredError(
+            'Temir yo\'l',
+            hint='RAILWAY_API_KEY .env ga qo\'shing',
+        )
+        return integration_error_dict(err)
+
+    # Railway integratsiyasi qo'shilganda shu yerda chaqiriladi
     return {
-        'status': 'ok',
-        'offers': [
-            {
-                'offer_id':    'mock-train-001',
-                'train_number':'005',
-                'departure_at': f'{departure_date}T18:00:00',
-                'arrival_at':   f'{departure_date}T22:00:00',
-                'price':        350_000,
-                'currency':     'UZS',
-                'wagon_type':   wagon_type,
-            }
-        ],
+        'status': 'error',
+        'error_code': 'unavailable',
+        'message': (
+            "Poyezd qidiruv xizmati hozircha ishga tushirilmagan. "
+            "Tez orada mavjud bo'ladi."
+        ),
     }
 
 

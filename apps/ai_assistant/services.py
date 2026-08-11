@@ -22,34 +22,27 @@ from django.conf import settings
 from .confirmation import create_pending_action, requires_confirmation
 from .models import ConversationSession, ConversationMessage, AIActionLog
 from .providers.base import BaseAIProvider, AIMessage
+from .response_builder import (
+    build_reply_from_tools,
+    can_reply_without_ai,
+    trim_tool_result_for_ai,
+)
 from .tools import get_all_tools
 
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
-Sen IMTIAZ — premium lifestyle concierge platformasining AI assistantisan.
+Sen IMTIAZ premium lifestyle concierge AI assistantsan.
+Xizmatlar: parvoz, poyezd, restoran, tadbirlar, bronlar.
 
-IMTIAZ — Yandex Go/Market kabi super-app: parvoz, poyezd, restoran, \
-sport, salomatlik va eksklyuziv tadbirlar. Premium a\'zolar uchun.
-
-SENIN VAZIFANG:
-- Xizmatlarni topish, taqqoslash va bron qilishda yordam berish
-- Eng yaqin, qulay va mos variantlarni taklif qilish
-- Manzillarni tahlil qilish — eng yaqin va qulay variantni tanlash
-- Foydalanuvchi ruxsatiga qarab bron qilish
-
-MUHIM QOIDALAR:
-1. FAQAT IMTIAZ mavzularida: sayohat, restoran, tadbirlar, xizmatlar
-2. Boshqa mavzularda: "Men faqat IMTIAZ xizmatlari haqida yordam bera olaman."
-3. Avtonomiya: {autonomy_level}
-   - manual: har bir bron/bekor uchun tasdiqlash so\'ra
-   - semi_auto: 300,000 UZS gacha mustaqil, undan yuqori — tasdiqlash
-   - full_auto: {price_limit} UZS gacha mustaqil
-4. Foydalanuvchi tilida javob ber
-5. Professional va mehribon bo\'l
-
-MAVZU CHEGARALARI:
-Siyosat, din, umumiy yangiliklar, matematika, tarix, tibbiy/huquqiy maslahat
+Qoidalar:
+1. Faqat IMTIAZ mavzularida yordam ber
+2. Avtonomiya: {autonomy_level} | limit: {price_limit} UZS
+   - manual: har bron uchun tasdiqlash
+   - semi_auto: 300,000 UZS gacha mustaqil
+   - full_auto: limitgacha mustaqil
+3. Foydalanuvchi tilida, qisqa va aniq javob ber
+4. Tool xato qaytarsa — foydalanuvchiga tushunarli tarzda yetkaz
 """
 
 # Yozish tool'lari — requires_confirmation() ga yuboriladi
@@ -139,8 +132,13 @@ class AIAssistantService:
             if pending_action_id:
                 # Tasdiqlash kerak — foydalanuvchiga savol
                 final_content = pending_summary
+            elif can_reply_without_ai(tool_results) and getattr(
+                settings, 'AI_SKIP_SECOND_CALL', True
+            ):
+                # Token tejash: tool natijasidan javob yig'amiz
+                final_content = build_reply_from_tools(tool_results)
             else:
-                # Barcha tool'lar bajarildi — AI'ga natijalarni ber
+                # Murakkab holat — AI ga qisqartirilgan natija yuboriladi
                 tool_msgs = [
                     AIMessage(
                         role='assistant',
@@ -156,20 +154,28 @@ class AIAssistantService:
                             {
                                 'type':        'tool_result',
                                 'tool_use_id': r['tool_use_id'],
-                                'content':     json.dumps(r['result'], ensure_ascii=False),
+                                'content':     json.dumps(
+                                    trim_tool_result_for_ai(r['result']),
+                                    ensure_ascii=False,
+                                ),
                             }
                             for r in tool_results
                         ],
                     ),
                 ]
                 try:
-                    final_resp    = self.provider.chat(
+                    final_resp = self.provider.chat(
                         messages=history + tool_msgs,
                         tools=tools, system=system,
+                        max_tokens=getattr(settings, 'AI_FOLLOWUP_MAX_TOKENS', 512),
                     )
-                    final_content = final_resp.content
+                    final_content = final_resp.content or build_reply_from_tools(tool_results)
                 except Exception as e:
                     logger.exception('Tool result qayta chaqiruvda xato: %s', e)
+                    final_content = build_reply_from_tools(tool_results) or (
+                        "Ma'lumot olindi, lekin javobni shakllantirishda muammo bo'ldi. "
+                        "Qayta urinib ko'ring."
+                    )
 
         msg = ConversationMessage.objects.create(
             session=session,
@@ -197,12 +203,17 @@ class AIAssistantService:
     # ── Ichki metodlar ────────────────────────────────────────────────────────
 
     def _load_history(self, session: ConversationSession) -> list[AIMessage]:
+        limit = getattr(settings, 'AI_HISTORY_LIMIT', 12)
         rows = (
             session.messages
-            .order_by('created_at')
-            .values('role', 'content')[:50]
+            .order_by('-created_at')
+            .values('role', 'content')[:limit]
         )
-        return [AIMessage(role=r['role'], content=r['content']) for r in rows]
+        # Eski tartibda qaytarish
+        return [
+            AIMessage(role=r['role'], content=r['content'])
+            for r in reversed(list(rows))
+        ]
 
     def _execute_tool_calls(
         self,
@@ -259,9 +270,10 @@ class AIAssistantService:
                 logger.info('Tool [%s] OK: user=%s', tool_name, user.id)
             except Exception as e:
                 logger.exception('Tool [%s] XATO: user=%s — %s', tool_name, user.id, e)
-                result               = {'error': str(e)}
-                log_entry.result     = result
-                log_entry.status     = AIActionLog.ActionStatus.FAILED
+                from apps.integrations.errors import integration_error_dict
+                result = integration_error_dict(e, provider=tool_name)
+                log_entry.result = result
+                log_entry.status = AIActionLog.ActionStatus.FAILED
                 log_entry.error_message = str(e)
 
             log_entry.save()

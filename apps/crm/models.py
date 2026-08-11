@@ -14,12 +14,13 @@ class Organization(BaseModel):
     """Hamkor tashkilot (restoran zanjiri, aviakassa va h.k.)."""
 
     class OrgType(models.TextChoices):
-        RESTAURANT = 'restaurant', 'Restoran'
-        AIRLINE = 'airline', 'Aviakompaniya'
-        RAILWAY = 'railway', 'Temir yo\'l'
+        RESTAURANT     = 'restaurant',     'Restoran'
+        AIRLINE        = 'airline',        'Aviakompaniya'
+        RAILWAY        = 'railway',        'Temir yo\'l'
         EVENT_ORGANIZER = 'event_organizer', 'Tadbir tashkilotchisi'
-        HOTEL = 'hotel', 'Mehmonxona'
-        OTHER = 'other', 'Boshqa'
+        HOTEL          = 'hotel',          'Mehmonxona'
+        TOUR_COMPANY   = 'tour_company',   'Tur kompaniyasi'
+        OTHER          = 'other',          'Boshqa'
 
     name = models.CharField(max_length=200)
     org_type = models.CharField(max_length=30, choices=OrgType.choices)
@@ -107,3 +108,177 @@ class BranchStaff(BaseModel):
 
     def has_permission(self, permission: str) -> bool:
         return permission in (self.permissions or [])
+
+
+# ─── RestaurantTable ───────────────────────────────────────────────────────────────────────────
+
+class TableStatus(models.TextChoices):
+    AVAILABLE = 'available', 'Bo\'sh'
+    RESERVED  = 'reserved',  'Bron qilingan'
+    OCCUPIED  = 'occupied',  'Band'
+    MAINTENANCE = 'maintenance', 'Ta\'mirda'
+
+
+class RestaurantTable(BaseModel):
+    """
+    Restoran stoli — AI faqat active va available stollarni ko'radi.
+    Restoran CRM admini tomonidan boshqariladi.
+    """
+    branch        = models.ForeignKey(
+        Branch, on_delete=models.CASCADE, related_name='tables'
+    )
+    table_number  = models.CharField(max_length=20, help_text='"A1", "VIP-3", "Teras-5"')
+    capacity      = models.PositiveSmallIntegerField(help_text='Necha kishilik')
+    min_capacity  = models.PositiveSmallIntegerField(default=1)
+    section       = models.CharField(max_length=100, blank=True, help_text='"Teras", "Ichki zal", "VIP xona"')
+    description   = models.TextField(blank=True)
+    is_active     = models.BooleanField(default=True)
+    is_vip        = models.BooleanField(default=False)
+    features      = models.JSONField(
+        default=list,
+        help_text='["window_view", "outdoor", "smoking", "projector"]'
+    )
+    # Real-time holat — AI uchun
+    current_status    = models.CharField(
+        max_length=20, choices=TableStatus.choices, default=TableStatus.AVAILABLE
+    )
+    status_updated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name        = 'Restoran stoli'
+        verbose_name_plural = 'Restoran stollar'
+        unique_together     = ('branch', 'table_number')
+        ordering            = ['branch', 'section', 'table_number']
+
+    def __str__(self):
+        return f'{self.branch.name} — {self.table_number} ({self.capacity} kishi)'
+
+
+class TableTimeSlot(BaseModel):
+    """
+    Stol vaqt oralig'i — bron uchun slot tizimi.
+    AI qaysi vaqt bo'sh ekanini ko'radi va bronlaydi.
+    """
+    table      = models.ForeignKey(
+        RestaurantTable, on_delete=models.CASCADE, related_name='time_slots'
+    )
+    date       = models.DateField()
+    start_time = models.TimeField()
+    end_time   = models.TimeField()
+    is_available = models.BooleanField(default=True)
+    booking    = models.ForeignKey(
+        'booking.RestaurantBooking',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='table_slots',
+    )
+    notes      = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        verbose_name        = 'Stol vaqt sloti'
+        verbose_name_plural = 'Stol vaqt slotlari'
+        ordering            = ['date', 'start_time']
+        indexes             = [
+            models.Index(fields=['table', 'date', 'is_available']),
+        ]
+
+    def __str__(self):
+        return f'{self.table} | {self.date} {self.start_time}–{self.end_time}'
+
+
+# ─── Staff Statistics ─────────────────────────────────────────────────────────────────────
+
+class StaffActivityLog(BaseModel):
+    """
+    Har bir CRM operator harakati qayd etiladi.
+    Rahbar kim qanday ishlayotganini bu jurnaldan ko'radi.
+    """
+
+    class ActionType(models.TextChoices):
+        # Tur bronlari
+        CONFIRM_TOUR_BOOKING  = 'confirm_tour_booking',  'Tur bronini tasdiqlash'
+        REJECT_TOUR_BOOKING   = 'reject_tour_booking',   'Tur bronini rad etish'
+        GENERATE_VOUCHER      = 'generate_voucher',      'Voaucher yaratish'
+        # Restoran
+        CONFIRM_TABLE_BOOKING = 'confirm_table_booking', 'Stol bronini tasdiqlash'
+        CANCEL_TABLE_BOOKING  = 'cancel_table_booking',  'Stol bronini bekor qilish'
+        UPDATE_TABLE_STATUS   = 'update_table_status',   'Stol holatini yangilash'
+        ADD_TABLE             = 'add_table',             'Stol qo\'shish'
+        # Umumiy
+        LOGIN                 = 'login',                 'Tizimga kirish'
+        LOGOUT                = 'logout',                'Tizimdan chiqish'
+        VIEW_ANALYTICS        = 'view_analytics',        'Analitikani ko\'rish'
+        MANAGE_QR             = 'manage_qr',             'QR kod boshqarish'
+        MANAGE_PACKAGES       = 'manage_packages',       'Paketlarni boshqarish'
+
+    staff       = models.ForeignKey(
+        BranchStaff, on_delete=models.CASCADE, related_name='activity_logs'
+    )
+    action_type = models.CharField(max_length=50, choices=ActionType.choices)
+    entity_type = models.CharField(
+        max_length=50, blank=True,
+        help_text='Qaysi model: TourBooking, RestaurantBooking, ...'
+    )
+    entity_id   = models.UUIDField(null=True, blank=True)
+    description = models.CharField(max_length=500)
+    metadata    = models.JSONField(default=dict, blank=True)
+    ip_address  = models.GenericIPAddressField(null=True, blank=True)
+
+    class Meta:
+        verbose_name        = 'Xodim faoliyat jurnali'
+        verbose_name_plural = 'Xodim faoliyat jurnallari'
+        ordering            = ['-created_at']
+        indexes             = [
+            models.Index(fields=['staff', 'action_type', 'created_at']),
+            models.Index(fields=['entity_type', 'entity_id']),
+        ]
+
+    def __str__(self):
+        return f'{self.staff} | {self.action_type} | {self.created_at:%Y-%m-%d %H:%M}'
+
+
+class StaffPerformanceSummary(BaseModel):
+    """
+    Xodim ish ko'rsatkichlari (denormalized).
+    Celery task kunlik hisoblaydi — tez query uchun.
+    Rahbar dashboard'ida to'g'ridan-to'g'ri ishlatiladi.
+    """
+
+    class PeriodType(models.TextChoices):
+        DAILY   = 'daily',   'Kunlik'
+        WEEKLY  = 'weekly',  'Haftalik'
+        MONTHLY = 'monthly', 'Oylik'
+
+    staff        = models.ForeignKey(
+        BranchStaff, on_delete=models.CASCADE, related_name='performance_summaries'
+    )
+    period_type  = models.CharField(max_length=10, choices=PeriodType.choices)
+    period_start = models.DateField()
+    period_end   = models.DateField()
+
+    # Tur statistikasi
+    tour_bookings_confirmed = models.PositiveIntegerField(default=0)
+    tour_bookings_rejected  = models.PositiveIntegerField(default=0)
+    vouchers_generated      = models.PositiveIntegerField(default=0)
+
+    # Restoran statistikasi
+    table_bookings_confirmed = models.PositiveIntegerField(default=0)
+    table_bookings_cancelled = models.PositiveIntegerField(default=0)
+
+    # Umumiy
+    total_revenue_managed    = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    avg_response_time_minutes = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    login_count              = models.PositiveIntegerField(default=0)
+    total_actions            = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        verbose_name        = 'Xodim ish ko\'rsatkichlari'
+        verbose_name_plural = 'Xodim ish ko\'rsatkichlari'
+        unique_together     = ('staff', 'period_type', 'period_start')
+        ordering            = ['-period_start']
+        indexes             = [
+            models.Index(fields=['staff', 'period_type', 'period_start']),
+        ]
+
+    def __str__(self):
+        return f'{self.staff} | {self.period_type} | {self.period_start}'

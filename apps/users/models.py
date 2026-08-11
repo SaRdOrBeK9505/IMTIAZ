@@ -101,6 +101,7 @@ class User(AbstractBaseUser, PermissionsMixin, BaseModel):
     # ── Shaxsiy ──────────────────────────────────────────────────────────────
     first_name    = models.CharField(max_length=64, blank=True)
     last_name     = models.CharField(max_length=64, blank=True)
+    email         = models.EmailField(blank=True, default='')
     avatar_url    = models.URLField(blank=True, null=True)
     language_code = models.CharField(max_length=10, default='uz')
 

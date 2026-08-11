@@ -19,6 +19,12 @@ import httpx
 from django.conf import settings
 from django.core.cache import cache
 
+from apps.integrations.errors import (
+    IntegrationNotConfiguredError,
+    IntegrationUnavailableError,
+    is_bookhara_configured,
+)
+
 logger = logging.getLogger(__name__)
 
 TOKEN_CACHE_KEY = 'bookhara_access_token'
@@ -43,7 +49,15 @@ class BookharaClient:
     # Token boshqaruvi
     # -------------------------------------------------------------------
 
+    def _ensure_configured(self) -> None:
+        if not is_bookhara_configured():
+            raise IntegrationNotConfiguredError(
+                'Bookhara',
+                hint='BOOKHARA_EMAIL va BOOKHARA_PASSWORD .env ga qo\'shing',
+            )
+
     def _get_token(self) -> str:
+        self._ensure_configured()
         token = cache.get(TOKEN_CACHE_KEY)
         if token:
             return token
@@ -51,17 +65,28 @@ class BookharaClient:
 
     def _fetch_token(self) -> str:
         """POST /api/v1/accounts/tokens — yangi token oladi."""
+        self._ensure_configured()
         url = f'{self.base_url}/api/v1/accounts/tokens'
-        resp = self._http.post(
-            url,
-            json={
-                'email':       self.email,
-                'password':    self.password,
-                'access_type': 'avia',
-            },
-            headers={'Content-Type': 'application/json', 'Accept': 'application/json'},
-        )
-        resp.raise_for_status()
+        try:
+            resp = self._http.post(
+                url,
+                json={
+                    'email':       self.email,
+                    'password':    self.password,
+                    'access_type': 'avia',
+                },
+                headers={'Content-Type': 'application/json', 'Accept': 'application/json'},
+            )
+            resp.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise IntegrationUnavailableError('Bookhara', 'javob vaqti tugadi') from exc
+        except httpx.ConnectError as exc:
+            raise IntegrationUnavailableError('Bookhara', 'serverga ulanib bo\'lmadi') from exc
+        except httpx.HTTPStatusError as exc:
+            raise IntegrationUnavailableError(
+                'Bookhara',
+                f'autentifikatsiya xatosi (HTTP {exc.response.status_code})',
+            ) from exc
         body  = resp.json()
         token = (
             body.get('token')
@@ -100,13 +125,37 @@ class BookharaClient:
 
     def _request(self, method: str, path: str, **kwargs) -> dict:
         url = f'{self.base_url}{path}'
-        resp = self._http.request(method, url, headers=self._headers(), **kwargs)
+        try:
+            resp = self._http.request(method, url, headers=self._headers(), **kwargs)
+        except httpx.TimeoutException as exc:
+            raise IntegrationUnavailableError('Bookhara', 'javob vaqti tugadi') from exc
+        except httpx.ConnectError as exc:
+            raise IntegrationUnavailableError('Bookhara', 'serverga ulanib bo\'lmadi') from exc
 
         if resp.status_code == 401:
-            # Token eskirgan — tozalab, qayta olish, bir marta qayta urinish
             logger.warning('Bookhara 401 — token yangilanmoqda: %s %s', method, path)
             cache.delete(TOKEN_CACHE_KEY)
-            resp = self._http.request(method, url, headers=self._headers(), **kwargs)
+            try:
+                resp = self._http.request(method, url, headers=self._headers(), **kwargs)
+            except httpx.TimeoutException as exc:
+                raise IntegrationUnavailableError('Bookhara', 'javob vaqti tugadi') from exc
+            except httpx.ConnectError as exc:
+                raise IntegrationUnavailableError('Bookhara', 'serverga ulanib bo\'lmadi') from exc
 
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            body = {}
+            try:
+                body = exc.response.json()
+            except ValueError:
+                body = {'raw_text': exc.response.text[:200]}
+            msg = (
+                body.get('message')
+                or body.get('error_message')
+                or body.get('error')
+                or f'HTTP {exc.response.status_code}'
+            )
+            raise IntegrationUnavailableError('Bookhara', str(msg)) from exc
+
         return resp.json()

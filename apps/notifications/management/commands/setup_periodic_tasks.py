@@ -86,6 +86,36 @@ class Command(BaseCommand):
             created_count += 1
             self.stdout.write(self.style.SUCCESS('  [+] cleanup_old — har dushanba 03:00'))
 
+        # ── Har kunda 01:00: QR analitika ─────────────────────────────────────
+        cron_0100, _ = CrontabSchedule.objects.get_or_create(
+            minute='0', hour='1',
+            day_of_week='*', day_of_month='*', month_of_year='*',
+        )
+        _, created = PeriodicTask.objects.update_or_create(
+            name='QR kodlar kunlik analitikasi',
+            defaults={
+                'task':    'qr_codes.calculate_daily_analytics',
+                'crontab': cron_0100,
+                'enabled': True,
+            },
+        )
+        if created:
+            created_count += 1
+            self.stdout.write(self.style.SUCCESS('  [+] qr_codes.calculate_daily_analytics — har kunda 01:00'))
+
+        # ── Har soat: muddati o'tgan QR kodlar ────────────────────────────────
+        _, created = PeriodicTask.objects.update_or_create(
+            name='Muddati o\'tgan QR kodlarni o\'chirish',
+            defaults={
+                'task':     'qr_codes.expire_codes',
+                'interval': interval_1h,
+                'enabled':  True,
+            },
+        )
+        if created:
+            created_count += 1
+            self.stdout.write(self.style.SUCCESS('  [+] qr_codes.expire_codes — har soat'))
+
         self.stdout.write(
             self.style.SUCCESS(
                 f"\nJami {PeriodicTask.objects.count()} ta periodic task mavjud "

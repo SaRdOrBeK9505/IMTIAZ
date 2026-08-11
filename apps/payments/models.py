@@ -53,7 +53,7 @@ PAYMENT_STATUS_TRANSITIONS: dict[str, list[str]] = {
     PaymentStatus.PENDING:            [PaymentStatus.PROCESSING, PaymentStatus.CANCELLED],
     PaymentStatus.PROCESSING:         [PaymentStatus.SUCCESS, PaymentStatus.FAILED],
     PaymentStatus.SUCCESS:            [PaymentStatus.REFUNDED, PaymentStatus.PARTIALLY_REFUNDED],
-    PaymentStatus.FAILED:             [PaymentStatus.PENDING],   # qayta urinish
+    PaymentStatus.FAILED:             [PaymentStatus.PENDING, PaymentStatus.SUCCESS],
     PaymentStatus.REFUNDED:           [],
     PaymentStatus.PARTIALLY_REFUNDED: [PaymentStatus.REFUNDED],
     PaymentStatus.CANCELLED:          [],

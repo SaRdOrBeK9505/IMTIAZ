@@ -77,6 +77,7 @@ class PaymentService:
         user,
         description: str = '',
         return_url: str | None = None,
+        cancel_url: str | None = None,
     ) -> dict:
         """
         Yangi to'lov yaratadi va payment URL qaytaradi.
@@ -89,7 +90,23 @@ class PaymentService:
                 success: bool,
             }
         """
-        # 1. DB yozuvi
+        # 1. DB yozuvi — faqat bitta faol to'lov
+        from apps.booking.models import BookingStatus
+        if booking.status not in (BookingStatus.PENDING, BookingStatus.IN_PROGRESS):
+            return {
+                'success': False,
+                'message': f'Bu bron uchun to\'lov qabul qilinmaydi. Holat: {booking.status}',
+            }
+        active = Payment.objects.filter(
+            booking=booking,
+            status__in=[PaymentStatus.PENDING, PaymentStatus.PROCESSING],
+        ).exists()
+        if active:
+            return {
+                'success': False,
+                'message': 'Bu bron uchun allaqachon faol to\'lov mavjud.',
+            }
+
         payment = Payment.objects.create(
             booking=booking,
             user=user,
@@ -111,6 +128,10 @@ class PaymentService:
             amount=amount,
             description=description or f'IMTIAZ #{payment.id}',
             return_url=return_url,
+            extra={
+                'phone':      getattr(user, 'phone', ''),
+                'cancel_url': cancel_url or return_url,
+            },
         )
 
         # 3. Natijaga qarab holat o'zgartirish
@@ -163,11 +184,7 @@ class PaymentService:
 
         if result.is_paid:
             payment.transition_to(PaymentStatus.SUCCESS)
-            # Booking ham tasdiqlansin
-            if payment.booking:
-                from apps.booking.models import BookingStatus
-                payment.booking.status = BookingStatus.CONFIRMED
-                payment.booking.save(update_fields=['status', 'updated_at'])
+            PaymentService._on_payment_success(payment)
             logger.info('Payment %s muvaffaqiyatli tasdiqlandi', payment_id)
 
         elif result.is_failed:
@@ -243,6 +260,88 @@ class PaymentService:
         }
 
     @staticmethod
+    def _on_payment_success(payment: Payment) -> None:
+        """To'lov muvaffaqiyatli bo'lganda booking va xizmat-specific amallar."""
+        if not payment.booking:
+            return
+
+        from apps.booking.models import BookingStatus, ServiceType
+        booking = payment.booking
+
+        if booking.status != BookingStatus.CONFIRMED:
+            booking.status = BookingStatus.CONFIRMED
+            booking.save(update_fields=['status', 'updated_at'])
+
+        # Parvoz — Bookhara'ga to'lov (GDS ticket)
+        if booking.service_type == ServiceType.FLIGHT:
+            PaymentService._settle_flight_booking(booking, payment)
+
+    @staticmethod
+    def _settle_flight_booking(booking, payment: Payment) -> None:
+        """Mijoz to'lagach Bookhara orqali chipta rasmiylashtirish."""
+        try:
+            from apps.booking.models import FlightBooking, FlightPayment
+            fb = FlightBooking.objects.filter(booking=booking).first()
+            if not fb or not booking.external_booking_id:
+                logger.warning(
+                    'Flight booking settle: external_booking_id yo\'q. booking=%s', booking.id,
+                )
+                return
+
+            from apps.integrations.adapters.bookhara import BookharaAdapter
+            adapter = BookharaAdapter()
+            pay_result = adapter.pay_booking(booking.external_booking_id)
+
+            fiscal = pay_result.get('fiscalization_v2') or {}
+            receipt_url = (payment.provider_response or {}).get('_receipt_url', '')
+
+            FlightPayment.objects.update_or_create(
+                flight_booking=fb,
+                defaults={
+                    'amount':             fiscal.get('amount', payment.amount),
+                    'total_amount':       fiscal.get('total_amount', payment.amount),
+                    'receipt_url':        receipt_url,
+                    'ikpu_provider_1':    fiscal.get('ikpu_provider_1', ''),
+                    'package_code_prov1': fiscal.get('package_code_prov1', ''),
+                    'id_provider_1':      fiscal.get('id_provider_1', ''),
+                    'nds_provider_1':     fiscal.get('nds_provider_1', 0),
+                    'ikpu_bookhara':      fiscal.get('ikpu_bookhara', ''),
+                    'package_code_bkh':   fiscal.get('package_code_bkh', ''),
+                    'service_fee_bkh':    fiscal.get('service_fee_bkh', 0),
+                    'nds_bookhara':       fiscal.get('nds_bookhara', 0),
+                    'profit':             fiscal.get('profit', 0),
+                    'discount':           fiscal.get('discount', 0),
+                },
+            )
+            fb.provider_response = pay_result
+            fb.provider_status = pay_result.get('status', 'ticketed')
+            fb.save(update_fields=['provider_response', 'provider_status', 'updated_at'])
+            logger.info('Flight booking settled via Bookhara: booking=%s', booking.id)
+        except Exception:
+            logger.exception('Flight booking settle xato: booking=%s', booking.id)
+
+    @staticmethod
+    def mark_payment_failed(payment_id: str, reason: str = '') -> None:
+        """Webhook yoki polling orqali to'lovni failed deb belgilash."""
+        try:
+            payment = Payment.objects.get(id=payment_id)
+        except Payment.DoesNotExist:
+            return
+        if payment.status not in (PaymentStatus.PENDING, PaymentStatus.PROCESSING):
+            return
+        old = payment.status
+        if reason:
+            payment.error_message = reason
+            payment.save(update_fields=['error_message', 'updated_at'])
+        payment.transition_to(PaymentStatus.FAILED)
+        PaymentLog.objects.create(
+            payment=payment,
+            from_status=old,
+            to_status=PaymentStatus.FAILED,
+            note=reason or 'To\'lov muvaffaqiyatsiz',
+        )
+
+    @staticmethod
     def process_wallet_payment(
         booking,
         amount: Decimal,
@@ -288,6 +387,7 @@ class PaymentService:
             from apps.booking.models import BookingStatus
             booking.status = BookingStatus.CONFIRMED
             booking.save(update_fields=['status', 'updated_at'])
+            PaymentService._on_payment_success(payment)
 
         PaymentLog.objects.create(
             payment=payment,

@@ -162,7 +162,7 @@ class AlifPayProvider(BasePaymentProvider):
                 }
             ],
             'redirectUrl': return_url or '',
-            'cancelUrl':   return_url or '',
+            'cancelUrl':   extra.get('cancel_url') or return_url or '',
             'webhookUrl':  getattr(settings, 'ALIFPAY_WEBHOOK_URL', ''),
             'meta':        {'order_id': str(order_id)},
             'receipt':     True,

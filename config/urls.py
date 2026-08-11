@@ -24,14 +24,26 @@ urlpatterns = [
         # AI Assistant
         path('ai/', include('apps.ai_assistant.urls')),
 
-        # Bronlar
+        # Bronlar (umumiy)
         path('bookings/', include('apps.booking.urls')),
+
+        # ─── Tur sayohat (user-facing) ────────────────────────────────────────
+        path('tours/', include('apps.tours.urls.user_urls')),
+
+        # ─── QR Kod (user-facing / web scanner) ──────────────────────────────
+        path('qr/', include('apps.qr_codes.urls.user_urls')),
 
         # A'zolik
         path('membership/', include('apps.membership.urls')),
 
-        # CRM (filial paneli)
+        # CRM (filial paneli) — restoran, xodimlar
         path('crm/', include('apps.crm.urls')),
+
+        # CRM — Tur kompaniyasi (alohida UI)
+        path('crm/tours/', include('apps.tours.urls.crm_urls')),
+
+        # CRM — QR kodlar boshqaruvi
+        path('crm/qr/', include('apps.qr_codes.urls.crm_urls')),
 
         # Tadbirlar
         path('events/', include('apps.events.urls')),
