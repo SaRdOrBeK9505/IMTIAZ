@@ -1,24 +1,8 @@
 """
-Tours — CRM views (tur kompaniyasi xodimlari uchun).
+Tours — CRM views (tur kompaniyasi owner va xodimlari uchun).
 
-Endpointlar:
-    # Paketlar
-    GET/POST          /api/crm/tours/packages/
-    GET/PUT/DELETE    /api/crm/tours/packages/<id>/
-    GET/POST          /api/crm/tours/packages/<id>/availability/
-    PUT/DELETE        /api/crm/tours/packages/<id>/availability/<avail_id>/
-
-    # Bronlar
-    GET               /api/crm/tours/bookings/
-    GET               /api/crm/tours/bookings/<id>/
-    POST              /api/crm/tours/bookings/<id>/confirm/
-    POST              /api/crm/tours/bookings/<id>/reject/
-    POST              /api/crm/tours/bookings/<id>/voucher/generate/
-    GET               /api/crm/tours/bookings/<id>/voucher/
-
-    # Dashboard & Analytics
-    GET               /api/crm/tours/dashboard/
-    GET               /api/crm/tours/analytics/
+Asosiy namespace: /api/crm/tour/
+Legacy alias:      /api/crm/tours/
 """
 
 import logging
@@ -26,14 +10,17 @@ from datetime import timedelta
 
 from django.db.models import Sum, Count, Q, Avg
 from django.utils import timezone
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, extend_schema_view
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.booking.models import TourBooking, BookingStatus, Booking
+from apps.core.authentication import CRMJWTAuthentication
 from apps.crm.models import StaffActivityLog
+from apps.crm_travel.helpers import get_crm_org, log_staff_activity
+
 from ..models import TourPackage, TourAvailability, TourVoucher
 from ..serializers import (
     TourPackageCRMSerializer, TourPackageCRMWriteSerializer,
@@ -52,27 +39,31 @@ from ..permissions import (
 
 logger = logging.getLogger(__name__)
 
+_PACKAGES_TAG = 'CRM Travel — Packages'
+_BOOKINGS_TAG = 'CRM Travel — Bookings'
+_ANALYTICS_TAG = 'CRM Travel — Analytics'
+_DASHBOARD_TAG = 'CRM Travel — Dashboard'
+
+
+class TourCRMMixin:
+    """Tur CRM JWT autentifikatsiyasi."""
+    authentication_classes = [CRMJWTAuthentication]
+
+
+def _get_crm_org(request):
+    return get_crm_org(request.user)
+
 
 def _log_staff_action(request, action_type, entity_type='', entity_id=None, description='', metadata=None):
-    """Xodim harakatini qayd etish yordamchi funksiya."""
-    try:
-        staff = request.user.branch_staff_profile
-        StaffActivityLog.objects.create(
-            staff       = staff,
-            action_type = action_type,
-            entity_type = entity_type,
-            entity_id   = entity_id,
-            description = description,
-            metadata    = metadata or {},
-            ip_address  = request.META.get('REMOTE_ADDR'),
-        )
-    except Exception as e:
-        logger.warning('StaffActivityLog yozishda xato: %s', e)
-
-
-def _get_staff_org(request):
-    """Xodimning tashkilotini olish."""
-    return request.user.branch_staff_profile.branch.organization
+    log_staff_activity(
+        request.user,
+        action_type=action_type,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        description=description,
+        metadata=metadata,
+        request=request,
+    )
 
 
 def _tour_bookings_qs(org):
@@ -112,7 +103,7 @@ _STATUS_LABELS = {
 
 # ─── Tur Paketlari (CRM) ──────────────────────────────────────────────────────
 
-class TourPackageCRMListCreateView(generics.ListCreateAPIView):
+class TourPackageCRMListCreateView(TourCRMMixin, generics.ListCreateAPIView):
     """
     GET  /api/crm/tours/packages/ — kompaniya paketlari
     POST /api/crm/tours/packages/ — yangi paket yaratish
@@ -127,12 +118,12 @@ class TourPackageCRMListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return TourPackage.objects.none()
-        org = _get_staff_org(self.request)
+        org = _get_crm_org(self.request)
         return TourPackage.objects.filter(
             organization=org
         ).select_related('destination', 'category').prefetch_related('itinerary_days')
 
-    @extend_schema(summary='Tur paketlari (CRM)', tags=['CRM Tours'])
+    @extend_schema(summary='Tur paketlari (CRM)', tags=[_PACKAGES_TAG])
     def get(self, request, *args, **kwargs):
         _log_staff_action(request, StaffActivityLog.ActionType.MANAGE_PACKAGES, description='Paketlar ro\'yxati ko\'rildi')
         return super().get(request, *args, **kwargs)
@@ -141,12 +132,12 @@ class TourPackageCRMListCreateView(generics.ListCreateAPIView):
         request   = TourPackageCRMWriteSerializer,
         responses = {201: TourPackageCRMSerializer},
         summary   = 'Yangi tur paketi (CRM)',
-        tags      = ['CRM Tours'],
+        tags      = [_PACKAGES_TAG],
     )
     def post(self, request, *args, **kwargs):
         serializer = TourPackageCRMWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        org = _get_staff_org(request)
+        org = _get_crm_org(request)
         package = TourPackage.objects.create(organization=org, **serializer.validated_data)
         _log_staff_action(
             request,
@@ -157,7 +148,7 @@ class TourPackageCRMListCreateView(generics.ListCreateAPIView):
         return Response(TourPackageCRMSerializer(package).data, status=status.HTTP_201_CREATED)
 
 
-class TourPackageCRMDetailView(generics.RetrieveUpdateDestroyAPIView):
+class TourPackageCRMDetailView(TourCRMMixin, generics.RetrieveUpdateDestroyAPIView):
     """
     GET/PUT/PATCH /api/crm/tours/packages/<id>/
     DELETE        /api/crm/tours/packages/<id>/ (soft delete)
@@ -172,7 +163,7 @@ class TourPackageCRMDetailView(generics.RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return TourPackage.objects.none()
-        org = _get_staff_org(self.request)
+        org = _get_crm_org(self.request)
         return TourPackage.objects.filter(organization=org)
 
     def perform_destroy(self, instance):
@@ -186,22 +177,22 @@ class TourPackageCRMDetailView(generics.RetrieveUpdateDestroyAPIView):
             description=f'Paket o\'chirildi: {instance.title}',
         )
 
-    @extend_schema(summary='Tur paketi tafsiloti (CRM)', tags=['CRM Tours'])
+    @extend_schema(summary='Tur paketi tafsiloti (CRM)', tags=[_PACKAGES_TAG])
     def get(self, request, *args, **kwargs): return super().get(request, *args, **kwargs)
 
-    @extend_schema(summary='Tur paketini yangilash (CRM)', tags=['CRM Tours'])
+    @extend_schema(summary='Tur paketini yangilash (CRM)', tags=[_PACKAGES_TAG])
     def put(self, request, *args, **kwargs): return super().put(request, *args, **kwargs)
 
-    @extend_schema(summary='Tur paketini yangilash (partial, CRM)', tags=['CRM Tours'])
+    @extend_schema(summary='Tur paketini yangilash (partial, CRM)', tags=[_PACKAGES_TAG])
     def patch(self, request, *args, **kwargs): return super().patch(request, *args, **kwargs)
 
-    @extend_schema(summary='Tur paketini o\'chirish (soft, CRM)', tags=['CRM Tours'])
+    @extend_schema(summary='Tur paketini o\'chirish (soft, CRM)', tags=[_PACKAGES_TAG])
     def delete(self, request, *args, **kwargs): return super().delete(request, *args, **kwargs)
 
 
 # ─── Mavjudliklar (CRM) ───────────────────────────────────────────────────────
 
-class TourAvailabilityCRMView(generics.ListCreateAPIView):
+class TourAvailabilityCRMView(TourCRMMixin, generics.ListCreateAPIView):
     """
     GET  /api/crm/tours/packages/<package_id>/availability/
     POST /api/crm/tours/packages/<package_id>/availability/
@@ -212,27 +203,27 @@ class TourAvailabilityCRMView(generics.ListCreateAPIView):
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return TourAvailability.objects.none()
-        org = _get_staff_org(self.request)
+        org = _get_crm_org(self.request)
         return TourAvailability.objects.filter(
             package_id=self.kwargs['package_id'],
             package__organization=org,
         ).order_by('departure_date')
 
     def perform_create(self, serializer):
-        org = _get_staff_org(self.request)
+        org = _get_crm_org(self.request)
         package = TourPackage.objects.get(
             id=self.kwargs['package_id'], organization=org
         )
         serializer.save(package=package)
 
-    @extend_schema(summary='Tur mavjudliklari (CRM)', tags=['CRM Tours'])
+    @extend_schema(summary='Tur mavjudliklari (CRM)', tags=[_PACKAGES_TAG])
     def get(self, request, *args, **kwargs): return super().get(request, *args, **kwargs)
 
-    @extend_schema(summary='Yangi mavjudlik qo\'shish (CRM)', tags=['CRM Tours'])
+    @extend_schema(summary='Yangi mavjudlik qo\'shish (CRM)', tags=[_PACKAGES_TAG])
     def post(self, request, *args, **kwargs): return super().post(request, *args, **kwargs)
 
 
-class TourAvailabilityCRMDetailView(generics.RetrieveUpdateDestroyAPIView):
+class TourAvailabilityCRMDetailView(TourCRMMixin, generics.RetrieveUpdateDestroyAPIView):
     """
     GET/PUT/PATCH/DELETE /api/crm/tours/packages/<package_id>/availability/<avail_id>/
     """
@@ -242,28 +233,28 @@ class TourAvailabilityCRMDetailView(generics.RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return TourAvailability.objects.none()
-        org = _get_staff_org(self.request)
+        org = _get_crm_org(self.request)
         return TourAvailability.objects.filter(
             package_id=self.kwargs['package_id'],
             package__organization=org,
         )
 
-    @extend_schema(summary='Mavjudlik tafsiloti (CRM)', tags=['CRM Tours'])
+    @extend_schema(summary='Mavjudlik tafsiloti (CRM)', tags=[_PACKAGES_TAG])
     def get(self, request, *args, **kwargs): return super().get(request, *args, **kwargs)
 
-    @extend_schema(summary='Mavjudlikni yangilash (CRM)', tags=['CRM Tours'])
+    @extend_schema(summary='Mavjudlikni yangilash (CRM)', tags=[_PACKAGES_TAG])
     def put(self, request, *args, **kwargs): return super().put(request, *args, **kwargs)
 
-    @extend_schema(summary='Mavjudlikni yangilash (partial, CRM)', tags=['CRM Tours'])
+    @extend_schema(summary='Mavjudlikni yangilash (partial, CRM)', tags=[_PACKAGES_TAG])
     def patch(self, request, *args, **kwargs): return super().patch(request, *args, **kwargs)
 
-    @extend_schema(summary='Mavjudlikni o\'chirish (CRM)', tags=['CRM Tours'])
+    @extend_schema(summary='Mavjudlikni o\'chirish (CRM)', tags=[_PACKAGES_TAG])
     def delete(self, request, *args, **kwargs): return super().delete(request, *args, **kwargs)
 
 
 # ─── Tur Bronlari (CRM) ───────────────────────────────────────────────────────
 
-class TourBookingCRMListView(generics.ListAPIView):
+class TourBookingCRMListView(TourCRMMixin, generics.ListAPIView):
     """GET /api/crm/tours/bookings/"""
     permission_classes = [IsAuthenticated, IsTourCompanyStaff]
     serializer_class   = TourBookingCRMListSerializer
@@ -271,7 +262,7 @@ class TourBookingCRMListView(generics.ListAPIView):
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return TourBooking.objects.none()
-        org = _get_staff_org(self.request)
+        org = _get_crm_org(self.request)
         qs  = TourBooking.objects.filter(
             package__organization=org
         ).select_related(
@@ -295,7 +286,7 @@ class TourBookingCRMListView(generics.ListAPIView):
 
     @extend_schema(
         summary    = 'Tur bronlari ro\'yxati (CRM)',
-        tags       = ['CRM Tours'],
+        tags       = [_BOOKINGS_TAG],
         parameters = [
             OpenApiParameter('status',        str,  description='Bron holati'),
             OpenApiParameter('date',          str,  description='Jo\'nash sanasi YYYY-MM-DD'),
@@ -308,7 +299,7 @@ class TourBookingCRMListView(generics.ListAPIView):
         return super().get(request, *args, **kwargs)
 
 
-class TourBookingCRMDetailView(generics.RetrieveAPIView):
+class TourBookingCRMDetailView(TourCRMMixin, generics.RetrieveAPIView):
     """GET /api/crm/tours/bookings/<id>/"""
     permission_classes = [IsAuthenticated, IsTourCompanyStaff]
     serializer_class   = TourBookingCRMDetailSerializer
@@ -316,16 +307,16 @@ class TourBookingCRMDetailView(generics.RetrieveAPIView):
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return TourBooking.objects.none()
-        org = _get_staff_org(self.request)
+        org = _get_crm_org(self.request)
         return TourBooking.objects.filter(
             package__organization=org
         ).select_related('booking__user', 'package__destination', 'availability')
 
-    @extend_schema(summary='Tur bron tafsiloti (CRM)', tags=['CRM Tours'])
+    @extend_schema(summary='Tur bron tafsiloti (CRM)', tags=[_PACKAGES_TAG])
     def get(self, request, *args, **kwargs): return super().get(request, *args, **kwargs)
 
 
-class TourBookingConfirmView(APIView):
+class TourBookingConfirmView(TourCRMMixin, APIView):
     """POST /api/crm/tours/bookings/<id>/confirm/"""
     permission_classes = [IsAuthenticated, CanConfirmTourBookings]
 
@@ -333,14 +324,14 @@ class TourBookingConfirmView(APIView):
         request   = TourBookingConfirmSerializer,
         responses = {200: TourBookingCRMDetailSerializer},
         summary   = 'Tur bronini tasdiqlash (CRM)',
-        tags      = ['CRM Tours'],
+        tags      = [_PACKAGES_TAG],
     )
     def post(self, request, pk=None):
         serializer = TourBookingConfirmSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         # Tashkilot tekshiruvi
-        org = _get_staff_org(request)
+        org = _get_crm_org(request)
         try:
             tour_booking = TourBooking.objects.select_related('package').get(
                 id=pk, package__organization=org
@@ -367,7 +358,7 @@ class TourBookingConfirmView(APIView):
         return Response(TourBookingCRMDetailSerializer(tour_booking).data)
 
 
-class TourBookingRejectView(APIView):
+class TourBookingRejectView(TourCRMMixin, APIView):
     """POST /api/crm/tours/bookings/<id>/reject/"""
     permission_classes = [IsAuthenticated, CanConfirmTourBookings]
 
@@ -375,13 +366,13 @@ class TourBookingRejectView(APIView):
         request   = TourBookingRejectSerializer,
         responses = {200: TourBookingCRMDetailSerializer},
         summary   = 'Tur bronini rad etish (CRM)',
-        tags      = ['CRM Tours'],
+        tags      = [_PACKAGES_TAG],
     )
     def post(self, request, pk=None):
         serializer = TourBookingRejectSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        org = _get_staff_org(request)
+        org = _get_crm_org(request)
         try:
             TourBooking.objects.get(id=pk, package__organization=org)
         except TourBooking.DoesNotExist:
@@ -405,17 +396,20 @@ class TourBookingRejectView(APIView):
         return Response(TourBookingCRMDetailSerializer(tour_booking).data)
 
 
-class TourVoucherGenerateView(APIView):
+@extend_schema_view(
+    post=extend_schema(
+        responses={201: TourVoucherSerializer},
+        summary='Voaucher yaratish (CRM)',
+        tags=[_PACKAGES_TAG],
+        request=None,
+    ),
+)
+class TourVoucherGenerateView(TourCRMMixin, APIView):
     """POST /api/crm/tours/bookings/<id>/voucher/generate/"""
     permission_classes = [IsAuthenticated, CanGenerateVoucher]
 
-    @extend_schema(
-        responses = {201: TourVoucherSerializer},
-        summary   = 'Voaucher yaratish (CRM)',
-        tags      = ['CRM Tours'],
-    )
     def post(self, request, pk=None):
-        org = _get_staff_org(request)
+        org = _get_crm_org(request)
         try:
             TourBooking.objects.get(id=pk, package__organization=org)
         except TourBooking.DoesNotExist:
@@ -435,17 +429,17 @@ class TourVoucherGenerateView(APIView):
         return Response(TourVoucherSerializer(voucher).data, status=status.HTTP_201_CREATED)
 
 
-class TourVoucherCRMDetailView(APIView):
+class TourVoucherCRMDetailView(TourCRMMixin, APIView):
     """GET /api/crm/tours/bookings/<id>/voucher/"""
     permission_classes = [IsAuthenticated, IsTourCompanyStaff]
 
     @extend_schema(
         responses = {200: TourVoucherSerializer},
         summary   = 'Voaucher ko\'rish (CRM)',
-        tags      = ['CRM Tours'],
+        tags      = [_PACKAGES_TAG],
     )
     def get(self, request, pk=None):
-        org = _get_staff_org(request)
+        org = _get_crm_org(request)
         try:
             tour_booking = TourBooking.objects.get(id=pk, package__organization=org)
         except TourBooking.DoesNotExist:
@@ -461,17 +455,17 @@ class TourVoucherCRMDetailView(APIView):
 
 # ─── Dashboard & Analytics (CRM) ──────────────────────────────────────────────
 
-class TourDashboardView(APIView):
+class TourDashboardView(TourCRMMixin, APIView):
     """GET /api/crm/tours/dashboard/"""
     permission_classes = [IsAuthenticated, IsTourCompanyStaff]
 
     @extend_schema(
         responses = {200: OpenApiResponse(description='Dashboard ko\'rsatkichlari')},
         summary   = 'Tur kompaniyasi dashboard (CRM)',
-        tags      = ['CRM Tours'],
+        tags      = [_PACKAGES_TAG],
     )
     def get(self, request):
-        org   = _get_staff_org(request)
+        org   = _get_crm_org(request)
         today = timezone.now().date()
 
         total_packages = TourPackage.objects.filter(organization=org, is_active=True).count()
@@ -523,7 +517,7 @@ class TourDashboardView(APIView):
 
 # ─── Arizalar / Tasdiqlangan / Mijozlar (UI sahifalari) ─────────────────────
 
-class TourApplicationsView(APIView):
+class TourApplicationsView(TourCRMMixin, APIView):
     """
     GET /api/crm/tours/applications/
     UI: /tours/applications — arizalar ro'yxati + tab sonlari.
@@ -533,13 +527,13 @@ class TourApplicationsView(APIView):
     @extend_schema(
         responses  = {200: OpenApiResponse(description='Tur arizalari')},
         summary    = 'Tur arizalari (CRM — /tours/applications)',
-        tags       = ['CRM Tours'],
+        tags       = [_BOOKINGS_TAG],
         parameters = [
             OpenApiParameter('status', str, description='pending | in_progress | confirmed | rejected | all'),
         ],
     )
     def get(self, request):
-        org = _get_staff_org(request)
+        org = _get_crm_org(request)
         qs  = _tour_bookings_qs(org)
 
         status = request.query_params.get('status', 'all')
@@ -561,7 +555,7 @@ class TourApplicationsView(APIView):
         })
 
 
-class TourConfirmedListView(APIView):
+class TourConfirmedListView(TourCRMMixin, APIView):
     """
     GET /api/crm/tours/confirmed/
     UI: /tours/confirmed — tasdiqlangan arizalar.
@@ -571,10 +565,10 @@ class TourConfirmedListView(APIView):
     @extend_schema(
         responses = {200: TourBookingCRMListSerializer(many=True)},
         summary   = 'Tasdiqlangan arizalar (CRM — /tours/confirmed)',
-        tags      = ['CRM Tours'],
+        tags      = [_PACKAGES_TAG],
     )
     def get(self, request):
-        org = _get_staff_org(request)
+        org = _get_crm_org(request)
         qs  = _tour_bookings_qs(org).filter(booking__status=BookingStatus.CONFIRMED)
         return Response({
             'count':   qs.count(),
@@ -582,7 +576,7 @@ class TourConfirmedListView(APIView):
         })
 
 
-class TourClientsView(APIView):
+class TourClientsView(TourCRMMixin, APIView):
     """
     GET /api/crm/tours/clients/
     UI: /tours/clients — mijozlar tarixi + qidiruv.
@@ -592,7 +586,7 @@ class TourClientsView(APIView):
     @extend_schema(
         responses  = {200: TourClientSerializer(many=True)},
         summary    = 'Mijozlar tarixi (CRM — /tours/clients)',
-        tags       = ['CRM Tours'],
+        tags       = [_BOOKINGS_TAG],
         parameters = [
             OpenApiParameter('q', str, description='Ism yoki telefon bo\'yicha qidiruv'),
         ],
@@ -601,7 +595,7 @@ class TourClientsView(APIView):
         from django.contrib.auth import get_user_model
         User = get_user_model()
 
-        org = _get_staff_org(request)
+        org = _get_crm_org(request)
         bookings = _tour_bookings_qs(org).filter(
             booking__status__in=[BookingStatus.CONFIRMED, BookingStatus.COMPLETED],
         )
@@ -661,7 +655,7 @@ class TourClientsView(APIView):
         })
 
 
-class TourBookingProcessView(APIView):
+class TourBookingProcessView(TourCRMMixin, APIView):
     """POST /api/crm/tours/bookings/<id>/process/ — arizani jarayonga o'tkazish."""
     permission_classes = [IsAuthenticated, CanConfirmTourBookings]
 
@@ -669,13 +663,13 @@ class TourBookingProcessView(APIView):
         request   = TourBookingProcessSerializer,
         responses = {200: TourBookingCRMDetailSerializer},
         summary   = 'Arizani jarayonga o\'tkazish (CRM)',
-        tags      = ['CRM Tours'],
+        tags      = [_PACKAGES_TAG],
     )
     def post(self, request, pk=None):
         serializer = TourBookingProcessSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        org = _get_staff_org(request)
+        org = _get_crm_org(request)
         try:
             TourBooking.objects.get(id=pk, package__organization=org)
         except TourBooking.DoesNotExist:
@@ -699,7 +693,7 @@ class TourBookingProcessView(APIView):
         return Response(TourBookingCRMDetailSerializer(tour_booking).data)
 
 
-class TourAnalyticsView(APIView):
+class TourAnalyticsView(TourCRMMixin, APIView):
     """
     GET /api/crm/tours/analytics/
     Query params: period=daily|weekly|monthly|yearly
@@ -709,14 +703,14 @@ class TourAnalyticsView(APIView):
     @extend_schema(
         responses  = {200: OpenApiResponse(description='Analitika ma\'lumotlari')},
         summary    = 'Tur kompaniyasi analitikasi (CRM)',
-        tags       = ['CRM Tours'],
+        tags       = [_BOOKINGS_TAG],
         parameters = [
             OpenApiParameter('period', str, description='daily | weekly | monthly | yearly'),
             OpenApiParameter('package_id', str, description='Konkret paket bo\'yicha (ixtiyoriy)'),
         ]
     )
     def get(self, request):
-        org    = _get_staff_org(request)
+        org    = _get_crm_org(request)
         period = request.query_params.get('period', 'monthly')
         now    = timezone.now()
 

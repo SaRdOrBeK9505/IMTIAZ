@@ -9,16 +9,17 @@ Auth oqimi:
         4. (keyingi kirish)    → phone + password → JWT
 
 Rollar:
-    customer     — Telegram Mini App / Mobile App foydalanuvchisi
-    owner        — CRM: tashkilot egasi
-    branch_staff — CRM: filial xodimi
-    admin        — ichki xodim (Django admin + Admin panel)
+    customer          — Telegram Mini App / Mobile App foydalanuvchisi
+    owner_restaurant  — Restoran kompaniyasi egasi (CRM)
+    restaurant_staff  — Restoran filial xodimi (CRM)
+    owner_tour        — Tur kompaniyasi egasi (CRM)
+    tour_staff        — Tur kompaniyasi xodimi (CRM)
+    admin             — ichki xodim (Django admin + Admin panel)
 
 JWT audience:
-    customer     → 'mobile'
-    owner /
-    branch_staff → 'crm'
-    admin        → 'admin'
+    customer / boshqa → 'mobile'
+    CRM rollar        → 'crm'
+    admin               → 'admin'
 """
 
 from __future__ import annotations
@@ -37,10 +38,16 @@ from apps.core.models import BaseModel
 # ─── Choices ──────────────────────────────────────────────────────────────────
 
 class UserRole(models.TextChoices):
-    CUSTOMER     = 'customer',     'Mijoz'
-    OWNER        = 'owner',        'Tashkilot egasi'
-    BRANCH_STAFF = 'branch_staff', 'Filial xodimi'
-    ADMIN        = 'admin',        'Admin'
+    CUSTOMER          = 'customer',          'Mijoz'
+    OWNER_RESTAURANT  = 'owner_restaurant',  'Restoran egasi'
+    RESTAURANT_STAFF  = 'restaurant_staff',  'Restoran xodimi'
+    OWNER_TOUR        = 'owner_tour',        'Tur kompaniyasi egasi'
+    TOUR_STAFF        = 'tour_staff',        'Tur kompaniyasi xodimi'
+    ADMIN             = 'admin',             'Admin'
+
+    # Deprecated — migratsiya uchun saqlanadi, yangi foydalanuvchilarda ishlatilmaydi
+    OWNER        = 'owner',        'Tashkilot egasi (eski)'
+    BRANCH_STAFF = 'branch_staff', 'Filial xodimi (eski)'
 
 
 class AIAutonomyLevel(models.TextChoices):
@@ -92,7 +99,7 @@ class User(AbstractBaseUser, PermissionsMixin, BaseModel):
 
     # ── Rol ───────────────────────────────────────────────────────────────────
     role = models.CharField(
-        max_length=20,
+        max_length=32,
         choices=UserRole.choices,
         default=UserRole.CUSTOMER,
         db_index=True,
@@ -154,11 +161,35 @@ class User(AbstractBaseUser, PermissionsMixin, BaseModel):
     @property
     def jwt_audience(self) -> str:
         """JWT tokenga yoziladigan audience."""
-        return {
-            UserRole.ADMIN:        'admin',
-            UserRole.OWNER:        'crm',
-            UserRole.BRANCH_STAFF: 'crm',
-        }.get(self.role, 'mobile')
+        from apps.users.crm_roles import is_crm_role
+
+        if self.role == UserRole.ADMIN:
+            return 'admin'
+        if is_crm_role(self.role):
+            return 'crm'
+        return 'mobile'
+
+    @property
+    def organization(self):
+        """Foydalanuvchi roliga qarab tegishli Organization'ni qaytaradi."""
+        from apps.users.crm_roles import is_restaurant_owner, is_tour_owner
+
+        if is_restaurant_owner(self.role) or is_tour_owner(self.role):
+            return getattr(self, 'owned_organization', None)
+        if self.role in (UserRole.RESTAURANT_STAFF, UserRole.TOUR_STAFF, UserRole.BRANCH_STAFF):
+            profile = getattr(self, 'branch_staff_profile', None)
+            return profile.branch.organization if profile else None
+        return None
+
+    @property
+    def is_restaurant_crm(self) -> bool:
+        from apps.users.crm_roles import RESTAURANT_CRM_ROLES
+        return self.role in RESTAURANT_CRM_ROLES
+
+    @property
+    def is_tour_crm(self) -> bool:
+        from apps.users.crm_roles import TOUR_CRM_ROLES
+        return self.role in TOUR_CRM_ROLES
 
     def get_effective_ai_autonomy_level(self) -> str:
         """Haqiqiy daraja = min(user tanlagan, tier maksimum)."""

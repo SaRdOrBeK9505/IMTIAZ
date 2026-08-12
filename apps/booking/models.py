@@ -7,6 +7,7 @@ TZ 3.3 bo'limiga mos.
 from django.db import models
 from django.conf import settings
 from apps.core.models import BaseModel
+from apps.booking.settlement import SettlementStatus, TransactionStep
 
 
 class ServiceType(models.TextChoices):
@@ -305,3 +306,107 @@ class TourBooking(BaseModel):
 
     def __str__(self):
         return f'TurBron: {self.booking.user} → {self.package} [{self.booking.status}]'
+
+
+class BookingSettlement(BaseModel):
+    """
+    Parvoz bronlari uchun Bookhara settlement saga holati.
+
+    Har bir flight booking uchun bitta yozuv (OneToOne).
+    Idempotency: pay_booking so'rovlarida idempotency_key ishlatiladi.
+    """
+    booking = models.OneToOneField(
+        Booking,
+        on_delete=models.CASCADE,
+        related_name='settlement',
+    )
+    payment = models.ForeignKey(
+        'payments.Payment',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='settlements',
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=SettlementStatus.CHOICES,
+        default=SettlementStatus.PENDING,
+        db_index=True,
+    )
+    idempotency_key = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        help_text='Bookhara pay_booking uchun noyob kalit',
+    )
+    locked_price = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='Pre-flight da qulflangan Bookhara narxi (UZS)',
+    )
+    bookhara_deposit_at_preflight = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='Pre-flight vaqtidagi depozit balansi',
+    )
+    last_error_code = models.CharField(max_length=64, blank=True)
+    last_error_message = models.TextField(blank=True)
+    retry_count = models.PositiveSmallIntegerField(default=0)
+    refund_attempts = models.PositiveSmallIntegerField(default=0)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Bron settlement (saga)'
+        verbose_name_plural = 'Bron settlementlar (saga)'
+        indexes = [
+            models.Index(fields=['status', 'created_at']),
+        ]
+
+    def __str__(self) -> str:
+        return f'Settlement {self.booking_id} [{self.status}]'
+
+    def transition_to(self, new_status: str) -> None:
+        from apps.booking.settlement import SETTLEMENT_TRANSITIONS
+
+        allowed = SETTLEMENT_TRANSITIONS.get(self.status, [])
+        if new_status not in allowed:
+            raise ValueError(
+                f"Settlement '{self.status}' dan '{new_status}' ga o'tish "
+                f"ruxsat etilmagan. Ruxsat: {allowed}"
+            )
+        self.status = new_status
+        self.save(update_fields=['status', 'updated_at'])
+
+
+class BookingTransactionLog(BaseModel):
+    """Settlement saga har bir bosqichining audit jurnali."""
+
+    settlement = models.ForeignKey(
+        BookingSettlement,
+        on_delete=models.CASCADE,
+        related_name='transaction_logs',
+    )
+    step = models.CharField(max_length=64, choices=TransactionStep.CHOICES, db_index=True)
+    from_status = models.CharField(max_length=32, blank=True)
+    to_status = models.CharField(max_length=32, blank=True)
+    success = models.BooleanField(default=True)
+    message = models.TextField(blank=True)
+    provider_response = models.JSONField(null=True, blank=True)
+    error_code = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        verbose_name = 'Bron transaction log'
+        verbose_name_plural = 'Bron transaction loglari'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['settlement', 'step']),
+        ]
+
+    def __str__(self) -> str:
+        mark = 'OK' if self.success else 'FAIL'
+        return f'{self.settlement_id} | {self.step} [{mark}]'
+

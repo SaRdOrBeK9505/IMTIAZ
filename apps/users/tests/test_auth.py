@@ -269,8 +269,8 @@ class LoginViewTests(TestCase):
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_wrong_role_blocked(self):
-        """Customer endpoint orqali CRM useri kira olmasin."""
-        _make_user(phone='+998901234568', role=UserRole.OWNER)
+        """Customer login orqali CRM useri kira olmasin."""
+        _make_user(phone='+998901234568', role=UserRole.OWNER_RESTAURANT)
         resp = self.client.post(self.url, {'phone': '+998901234568', 'password': 'Test1234!'})
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
@@ -292,15 +292,32 @@ class CRMLoginViewTests(TestCase):
     def setUp(self):
         self.client = APIClient()
 
-    def test_owner_can_login(self):
-        _make_user(phone='+998901234567', role=UserRole.OWNER)
+    def test_owner_restaurant_can_login(self):
+        owner = _make_user(phone='+998901234567', role=UserRole.OWNER_RESTAURANT)
+        Organization.objects.create(
+            name='Test Org',
+            org_type=Organization.OrgType.RESTAURANT,
+            business_type=BusinessType.RESTAURANT,
+            owner=owner,
+        )
         resp = self.client.post(self.url, {'phone': '+998901234567', 'password': 'Test1234!'})
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         token = RefreshToken(resp.data['refresh'])
         self.assertEqual(token['aud'], 'crm')
+        self.assertEqual(token['role'], 'owner_restaurant')
 
-    def test_branch_staff_can_login(self):
-        _make_user(phone='+998901234568', role=UserRole.BRANCH_STAFF)
+    def test_restaurant_staff_can_login(self):
+        from apps.crm.models import Branch, BranchStaff
+        owner = _make_user(phone='+998901234580', role=UserRole.OWNER_RESTAURANT)
+        org = Organization.objects.create(
+            name='Staff Org',
+            org_type=Organization.OrgType.RESTAURANT,
+            business_type=BusinessType.RESTAURANT,
+            owner=owner,
+        )
+        branch = Branch.objects.create(organization=org, name='Main')
+        staff_user = _make_user(phone='+998901234568', role=UserRole.RESTAURANT_STAFF)
+        BranchStaff.objects.create(user=staff_user, branch=branch)
         resp = self.client.post(self.url, {'phone': '+998901234568', 'password': 'Test1234!'})
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
@@ -337,7 +354,7 @@ class AudienceAuthTests(TestCase):
     def setUp(self):
         self.client  = APIClient()
         self.customer = _make_user(phone='+998901234567', role=UserRole.CUSTOMER)
-        self.owner    = _make_user(phone='+998901234568', role=UserRole.OWNER)
+        self.owner = _make_user(phone='+998901234568', role=UserRole.OWNER_RESTAURANT)
 
     def _get_token(self, user: User) -> str:
         refresh = RefreshToken.for_user(user)

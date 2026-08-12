@@ -16,6 +16,9 @@ class UserAdmin(BaseUserAdmin):
     ordering        = ['-created_at']
     readonly_fields = ['id', 'telegram_id', 'created_at', 'updated_at', 'balance', 'bonus_points']
 
+    def get_search_fields(self, request):
+        return self.search_fields
+
     fieldsets = (
         ('Identifikator', {
             'fields': ('phone', 'telegram_id', 'telegram_username', 'password'),

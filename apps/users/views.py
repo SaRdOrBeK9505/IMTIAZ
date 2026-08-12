@@ -31,8 +31,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenRefreshView as SimpleJWTTokenRefreshView
 
 from .models import OTPCode
+from apps.core.openapi_schemas import (
+    ErrorResponseSerializer,
+    JWTAuthResponseSerializer,
+    LogoutResponseSerializer,
+    OTPRequestResponseSerializer,
+    OTPVerifyResponseSerializer,
+)
 from .serializers import (
     AdminLoginSerializer,
     AISettingsSerializer,
@@ -66,12 +74,13 @@ class RequestOTPView(APIView):
     @extend_schema(
         request=RequestOTPSerializer,
         responses={
-            200: OpenApiResponse(description='OTP SMS yuborildi'),
-            400: OpenApiResponse(description='Validatsiya xatosi'),
-            429: OpenApiResponse(description='Rate limit'),
-            503: OpenApiResponse(description='SMS gateway xato'),
+            200: OTPRequestResponseSerializer,
+            400: ErrorResponseSerializer,
+            429: ErrorResponseSerializer,
+            503: ErrorResponseSerializer,
         },
         summary="Ro'yxatdan o'tish: OTP SMS yuborish (1-qadam)",
+        description='Rate limit: 60 soniyada 1 ta SMS. `full_name` cache\'da 15 daqiqa saqlanadi.',
         tags=['Register'],
     )
     def post(self, request):
@@ -129,8 +138,8 @@ class VerifyOTPView(APIView):
     @extend_schema(
         request=VerifyOTPSerializer,
         responses={
-            200: OpenApiResponse(description='verification_token qaytarildi'),
-            400: OpenApiResponse(description="Noto'g'ri OTP"),
+            200: OTPVerifyResponseSerializer,
+            400: ErrorResponseSerializer,
         },
         summary="Ro'yxatdan o'tish: OTP tasdiqlash (2-qadam)",
         tags=['Register'],
@@ -169,10 +178,11 @@ class CompleteRegistrationView(APIView):
     @extend_schema(
         request=CompleteRegistrationSerializer,
         responses={
-            201: OpenApiResponse(description='User yaratildi, JWT qaytarildi'),
-            400: OpenApiResponse(description='Validatsiya xatosi'),
+            201: JWTAuthResponseSerializer,
+            400: ErrorResponseSerializer,
         },
         summary="Ro'yxatdan o'tish: parol + Telegram bog'lash + JWT (3-4-qadam)",
+        description='Muvaffaqiyatli ro\'yxatdan o\'tishdan keyin avtomatik login (JWT qaytariladi).',
         tags=['Register'],
     )
     def post(self, request):
@@ -181,6 +191,24 @@ class CompleteRegistrationView(APIView):
         data = serializer.create_user_and_respond()
         logger.info("Yangi user yaratildi: id=%s, phone=%s", data['user']['id'], data['user']['phone'][:7])
         return Response(data, status=status.HTTP_201_CREATED)
+
+
+class TokenRefreshView(SimpleJWTTokenRefreshView):
+    """POST /api/auth/token/refresh/ — access token yangilash."""
+
+    @extend_schema(
+        tags=['Auth — Mobile', 'Auth — CRM', 'Auth — Admin'],
+        summary='JWT access token yangilash',
+        description=(
+            'Refresh token yuboriladi, yangi access (+ rotate bo\'lsa yangi refresh) qaytariladi. '
+            'Barcha kanallar (mobile, crm, admin) uchun bir xil endpoint: '
+            '`POST /api/auth/token/refresh/`. CRM login (`/api/crm/auth/login/`) dan olingan '
+            'refresh token ham shu yerda ishlatiladi.'
+        ),
+        responses={200: OpenApiResponse(description='Yangi access va refresh tokenlar')},
+    )
+    def post(self, request, *args, **kwargs):
+        return super().post(request, *args, **kwargs)
 
 
 # ─── Login ────────────────────────────────────────────────────────────────────
@@ -196,11 +224,12 @@ class LoginView(APIView):
     @extend_schema(
         request=LoginSerializer,
         responses={
-            200: OpenApiResponse(description='JWT + profil'),
-            400: OpenApiResponse(description="Noto'g'ri ma'lumot"),
+            200: JWTAuthResponseSerializer,
+            400: ErrorResponseSerializer,
         },
         summary='Kirish: phone + password (customer)',
-        tags=['Auth'],
+        description='Telegram Mini App va mobile ilova. Token `aud=mobile`.',
+        tags=['Auth — Mobile'],
     )
     def post(self, request):
         serializer = self.serializer_class(
@@ -221,9 +250,18 @@ class CRMLoginView(LoginView):
 
     @extend_schema(
         request=CRMLoginSerializer,
-        responses={200: OpenApiResponse(description='JWT + profil')},
-        summary='CRM kirish: phone + password (owner/branch_staff)',
-        tags=['CRM Auth'],
+        responses={
+            200: JWTAuthResponseSerializer,
+            400: ErrorResponseSerializer,
+        },
+        summary='CRM kirish: phone + password',
+        description=(
+            'Token `aud=crm`. Ruxsat etilgan rollar: '
+            '`owner_restaurant`, `restaurant_staff`, `owner_tour`, `tour_staff`.\n\n'
+            'Frontend `user.role` asosida qaysi CRM panelga yo\'naltiradi.\n\n'
+            'Access token muddati tugasa: `POST /api/auth/token/refresh/` (umumiy endpoint).'
+        ),
+        tags=['Auth — CRM'],
     )
     def post(self, request):
         return super().post(request)
@@ -238,9 +276,13 @@ class AdminLoginView(LoginView):
 
     @extend_schema(
         request=AdminLoginSerializer,
-        responses={200: OpenApiResponse(description='JWT + profil')},
+        responses={
+            200: JWTAuthResponseSerializer,
+            400: ErrorResponseSerializer,
+        },
         summary='Admin kirish: phone + password',
-        tags=['Admin Auth'],
+        description='Ichki admin panel. Token `aud=admin`.',
+        tags=['Auth — Admin'],
     )
     def post(self, request):
         return super().post(request)
@@ -260,11 +302,11 @@ class LogoutView(APIView):
             'required': ['refresh'],
         }},
         responses={
-            200: OpenApiResponse(description='Muvaffaqiyatli chiqildi'),
-            400: OpenApiResponse(description="Noto'g'ri token"),
+            200: LogoutResponseSerializer,
+            400: ErrorResponseSerializer,
         },
         summary='Chiqish (refresh tokenni bekor qilish)',
-        tags=['Auth'],
+        tags=['Auth — Mobile'],
     )
     def post(self, request):
         refresh_token = request.data.get('refresh')
@@ -292,12 +334,26 @@ class UserMeView(generics.RetrieveUpdateAPIView):
     serializer_class   = UserProfileSerializer
     http_method_names  = ['get', 'patch']
 
-    def get_object(self):
-        return self.request.user
+    @extend_schema(
+        tags=['Users'],
+        summary='Mening profilim',
+        description='Mobile/Telegram foydalanuvchi profili. CRM userlar uchun ham ochiq.',
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
 
-    def update(self, request, *args, **kwargs):
+    @extend_schema(
+        tags=['Users'],
+        summary='Profilni yangilash',
+        request=UserProfileSerializer,
+        responses={200: UserProfileSerializer},
+    )
+    def patch(self, request, *args, **kwargs):
         kwargs['partial'] = True
         return super().update(request, *args, **kwargs)
+
+    def get_object(self):
+        return self.request.user
 
 
 class AISettingsView(generics.UpdateAPIView):
@@ -306,9 +362,16 @@ class AISettingsView(generics.UpdateAPIView):
     serializer_class   = AISettingsSerializer
     http_method_names  = ['patch']
 
-    def get_object(self):
-        return self.request.user
-
-    def update(self, request, *args, **kwargs):
+    @extend_schema(
+        tags=['Users'],
+        summary='AI sozlamalarini yangilash',
+        description='`ai_autonomy_level` va `ai_auto_price_limit` — tier cheklovi bilan.',
+        request=AISettingsSerializer,
+        responses={200: AISettingsSerializer},
+    )
+    def patch(self, request, *args, **kwargs):
         kwargs['partial'] = True
         return super().update(request, *args, **kwargs)
+
+    def get_object(self):
+        return self.request.user

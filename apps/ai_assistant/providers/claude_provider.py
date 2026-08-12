@@ -3,12 +3,22 @@ Claude (Anthropic) AI Provider implementatsiyasi.
 """
 
 import logging
+
 from django.conf import settings
-import anthropic
 
 from .base import BaseAIProvider, AIMessage, AIResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _anthropic_client(api_key: str):
+    try:
+        import anthropic
+    except ImportError as exc:
+        raise ImportError(
+            "anthropic paketi o'rnatilmagan. `pip install anthropic` bajaring."
+        ) from exc
+    return anthropic.Anthropic(api_key=api_key)
 
 
 class ClaudeProvider(BaseAIProvider):
@@ -17,7 +27,7 @@ class ClaudeProvider(BaseAIProvider):
     def __init__(self, api_key: str | None = None, model: str | None = None):
         self.api_key = api_key or settings.ANTHROPIC_API_KEY
         self.model = model or settings.AI_MODEL
-        self._client = anthropic.Anthropic(api_key=self.api_key)
+        self._client = _anthropic_client(self.api_key)
 
     def get_model_name(self) -> str:
         return self.model

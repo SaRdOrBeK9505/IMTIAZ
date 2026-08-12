@@ -4,10 +4,10 @@ Tours app — Celery async tasks.
 Jadval (celery beat):
     expire_tour_availabilities  — har 1 soat
     update_all_package_stats    — har 6 soat
-    calculate_staff_performance — kunlik 00:00
 """
 
 import logging
+
 from celery import shared_task
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ def update_all_package_stats(self):
     """Barcha aktiv paketlar statistikasini yangilaydi."""
     from .models import TourPackage
     from .services import TourAvailabilityService
-    ids     = TourPackage.objects.filter(is_active=True).values_list('id', flat=True)
+    ids = TourPackage.objects.filter(is_active=True).values_list('id', flat=True)
     updated = 0
     for pkg_id in ids:
         try:
@@ -55,35 +55,44 @@ def update_all_package_stats(self):
 
 
 @shared_task(name='tours.send_voucher_notification')
-def send_voucher_notification(voucher_id: str):
-    """
-    Voaucher yaratilganda mijozga Telegram/push xabari yuboradi.
-    Notifications app orqali.
-    """
+def send_voucher_notification(voucher_id: str) -> dict:
+    """Voaucher yaratilganda mijozga xabar yuboradi."""
     try:
         from .models import TourVoucher
         from apps.notifications.models import Notification
+        from apps.notifications.tasks import notify_user
 
         voucher = TourVoucher.objects.select_related(
-            'tour_booking__booking__user'
+            'tour_booking__booking__user',
+            'tour_booking__package',
+            'tour_booking__availability',
         ).get(id=voucher_id)
 
-        user = voucher.tour_booking.booking.user
-        Notification.objects.create(
-            user    = user,
-            title   = 'Voauchingiz tayyor! 🎉',
-            message = (
-                f'Sizning {voucher.tour_booking.package.title} turiga '
-                f'voaucher raqami: {voucher.voucher_number}. '
-                f"Jo'nash sanasi: {voucher.valid_from.strftime('%d.%m.%Y')}."
-            ),
-            notification_type = 'in_app',
-            data = {
-                'type':       'tour_voucher',
+        tb = voucher.tour_booking
+        user = tb.booking.user
+        body = (
+            f'Sizning {tb.package.title} turiga voaucher tayyor.\n'
+            f'Raqam: {voucher.voucher_number}\n'
+            f"Jo'nash: {voucher.valid_from.strftime('%d.%m.%Y')}"
+        )
+
+        notify_user(
+            user,
+            Notification.NotificationType.GENERAL,
+            'Voauchingiz tayyor! 🎉',
+            body,
+            metadata={
+                'type': 'tour_voucher',
                 'voucher_id': str(voucher.id),
                 'voucher_number': voucher.voucher_number,
-            }
+                'booking_id': str(tb.booking_id),
+            },
         )
-        logger.info('[tours] Voucher notification sent: %s → user %s', voucher.voucher_number, user.id)
-    except Exception as e:
-        logger.error('[tours] send_voucher_notification xato: %s', e)
+        logger.info(
+            '[tours] Voucher notification sent: %s → user %s',
+            voucher.voucher_number, user.id,
+        )
+        return {'status': 'sent', 'voucher_id': str(voucher.id)}
+    except Exception as exc:
+        logger.error('[tours] send_voucher_notification xato: %s', exc)
+        return {'status': 'error', 'message': str(exc)}

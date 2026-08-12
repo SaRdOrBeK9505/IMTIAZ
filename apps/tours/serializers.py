@@ -21,7 +21,7 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from .models import (
-    TourCategory, TourDestination, TourPackage,
+    TourCategory, TourDestination, TourDestinationImage, TourPackage,
     TourItineraryDay, TourAvailability, TourVoucher, TourReview,
 )
 from apps.booking.models import TourBooking
@@ -50,14 +50,114 @@ class TourCategorySerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'slug', 'icon', 'description', 'cover_image']
 
 
+class TourDestinationImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TourDestinationImage
+        fields = ['id', 'image', 'caption', 'sort_order', 'is_cover']
+        read_only_fields = ['id']
+
+
 class TourDestinationSerializer(serializers.ModelSerializer):
+    images = TourDestinationImageSerializer(many=True, read_only=True)
+    package_count = serializers.IntegerField(read_only=True, required=False)
+    min_price = serializers.DecimalField(
+        max_digits=16, decimal_places=2, read_only=True, required=False, allow_null=True,
+    )
+
     class Meta:
         model  = TourDestination
         fields = [
             'id', 'name', 'slug', 'country', 'country_code', 'city',
             'description', 'cover_image', 'climate_info', 'visa_info',
-            'best_months', 'is_popular',
+            'best_months', 'is_popular', 'images', 'package_count', 'min_price',
         ]
+
+
+class TourDestinationListSerializer(serializers.ModelSerializer):
+    """Mobil grid — yengil kartochka."""
+    images = TourDestinationImageSerializer(many=True, read_only=True)
+    package_count = serializers.IntegerField(read_only=True, required=False)
+    min_price = serializers.DecimalField(
+        max_digits=16, decimal_places=2, read_only=True, required=False, allow_null=True,
+    )
+    max_price = serializers.DecimalField(
+        max_digits=16, decimal_places=2, read_only=True, required=False, allow_null=True,
+    )
+    avg_rating = serializers.DecimalField(
+        max_digits=3, decimal_places=2, read_only=True, required=False, allow_null=True,
+    )
+    short_description = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TourDestination
+        fields = [
+            'id', 'name', 'slug', 'country', 'country_code', 'city',
+            'short_description', 'cover_image', 'is_popular',
+            'images', 'package_count', 'min_price', 'max_price', 'avg_rating',
+        ]
+
+    @extend_schema_field(serializers.CharField())
+    def get_short_description(self, obj) -> str:
+        if not obj.description:
+            return ''
+        return obj.description[:180] + ('…' if len(obj.description) > 180 else '')
+
+
+class TourDestinationCRMWriteSerializer(serializers.ModelSerializer):
+    """CRM — yo'nalish yaratish / tahrirlash."""
+
+    class Meta:
+        model = TourDestination
+        fields = [
+            'name', 'country', 'country_code', 'city',
+            'description', 'cover_image', 'climate_info', 'visa_info',
+            'best_months', 'is_active', 'is_popular',
+        ]
+
+    def validate_best_months(self, value):
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError('best_months ro\'yxat bo\'lishi kerak.')
+        return value
+
+
+class TourDestinationCRMSerializer(serializers.ModelSerializer):
+    """CRM — yo'nalish to'liq ko'rinishi."""
+    images = TourDestinationImageSerializer(many=True, read_only=True)
+    package_count = serializers.SerializerMethodField()
+    min_price = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TourDestination
+        fields = [
+            'id', 'name', 'slug', 'country', 'country_code', 'city',
+            'description', 'cover_image', 'climate_info', 'visa_info',
+            'best_months', 'is_active', 'is_popular',
+            'images', 'package_count', 'min_price',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'slug', 'created_at', 'updated_at']
+
+    @extend_schema_field(serializers.IntegerField())
+    def get_package_count(self, obj) -> int:
+        if getattr(obj, 'package_count', None) is not None:
+            return obj.package_count
+        return obj.packages.filter(is_active=True).count()
+
+    @extend_schema_field(serializers.DecimalField(max_digits=16, decimal_places=2, allow_null=True))
+    def get_min_price(self, obj):
+        if getattr(obj, 'min_price', None) is not None:
+            return obj.min_price
+        from django.db.models import Min
+        return obj.packages.filter(is_active=True).aggregate(v=Min('base_price'))['v']
+
+
+class TourDestinationImageUploadSerializer(serializers.Serializer):
+    """Bir yoki bir nechta rasm yuklash."""
+    image = serializers.ImageField(required=False)
+    caption = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    is_cover = serializers.BooleanField(required=False, default=False)
 
 
 # ─── User-facing: TourPackage ─────────────────────────────────────────────────
@@ -95,6 +195,44 @@ class TourPackageListSerializer(serializers.ModelSerializer):
             status='open', departure_date__gte=timezone.now().date()
         ).order_by('departure_date').first()
         return str(avail.departure_date) if avail else None
+
+
+class TourDestinationDetailSerializer(serializers.ModelSerializer):
+    """To'liq yo'nalish — galereya + tavsiya etilgan turlar."""
+    images = TourDestinationImageSerializer(many=True, read_only=True)
+    package_count = serializers.IntegerField(read_only=True, required=False)
+    min_price = serializers.DecimalField(
+        max_digits=16, decimal_places=2, read_only=True, required=False, allow_null=True,
+    )
+    max_price = serializers.DecimalField(
+        max_digits=16, decimal_places=2, read_only=True, required=False, allow_null=True,
+    )
+    avg_rating = serializers.DecimalField(
+        max_digits=3, decimal_places=2, read_only=True, required=False, allow_null=True,
+    )
+    featured_packages = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TourDestination
+        fields = [
+            'id', 'name', 'slug', 'country', 'country_code', 'city',
+            'description', 'cover_image', 'climate_info', 'visa_info',
+            'best_months', 'is_popular', 'images',
+            'package_count', 'min_price', 'max_price', 'avg_rating',
+            'featured_packages',
+        ]
+
+    @extend_schema_field(TourPackageListSerializer(many=True))
+    def get_featured_packages(self, obj) -> list:
+        from .models import TourPackage
+        qs = TourPackage.objects.filter(
+            destination=obj,
+            is_active=True,
+            organization__is_active=True,
+        ).select_related('destination', 'category', 'organization').order_by(
+            '-is_featured', '-avg_rating', '-total_bookings',
+        )[:6]
+        return TourPackageListSerializer(qs, many=True, context=self.context).data
 
 
 class TourPackageDetailSerializer(serializers.ModelSerializer):
@@ -314,6 +452,17 @@ class TourPackageCRMWriteSerializer(serializers.ModelSerializer):
             'difficulty_level', 'languages_offered', 'tags',
             'is_active', 'is_featured',
         ]
+
+    def validate_destination(self, value):
+        request = self.context.get('request')
+        if not request:
+            return value
+        org = request.user.organization
+        if value.organization_id and value.organization_id != org.id:
+            raise serializers.ValidationError('Bu yo\'nalish sizning kompaniyangizga tegishli emas.')
+        if value.organization_id and not value.is_active:
+            raise serializers.ValidationError('Yo\'nalish faol emas.')
+        return value
 
 
 class TourAvailabilityCRMSerializer(serializers.ModelSerializer):

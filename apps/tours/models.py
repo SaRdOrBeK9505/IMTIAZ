@@ -57,10 +57,18 @@ class TourCategory(BaseModel):
 class TourDestination(BaseModel):
     """
     Sayohat yo'nalishi (davlat yoki shahar darajasida).
-    Bitta yo'nalishda ko'p turlar bo'lishi mumkin.
+    Tur kompaniyasi CRM orqali o'z yo'nalishlarini yaratadi.
     """
+    organization = models.ForeignKey(
+        'crm.Organization',
+        on_delete=models.CASCADE,
+        related_name='tour_destinations',
+        null=True,
+        blank=True,
+        help_text='Tur kompaniyasi — CRM orqali yaratilgan yo\'nalishlar',
+    )
     name        = models.CharField(max_length=150)
-    slug        = models.SlugField(max_length=170, unique=True, blank=True)
+    slug        = models.SlugField(max_length=170, blank=True)
     country     = models.CharField(max_length=100)
     country_code = models.CharField(max_length=3, blank=True, help_text='ISO 3166-1 alpha-2')
     city        = models.CharField(max_length=100, blank=True)
@@ -79,15 +87,60 @@ class TourDestination(BaseModel):
         verbose_name        = 'Sayohat yo\'nalishi'
         verbose_name_plural = 'Sayohat yo\'nalishlari'
         ordering            = ['-is_popular', 'name']
-        unique_together     = ('country', 'city')
+        constraints         = [
+            models.UniqueConstraint(
+                fields=['organization', 'country', 'city'],
+                name='unique_org_destination_location',
+                condition=models.Q(organization__isnull=False),
+            ),
+            models.UniqueConstraint(
+                fields=['country', 'city'],
+                name='unique_global_destination_location',
+                condition=models.Q(organization__isnull=True),
+            ),
+        ]
 
     def __str__(self):
         return f'{self.name} ({self.country})'
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(f'{self.country}-{self.city or self.name}')
+            base = f'{self.country}-{self.city or self.name}'
+            if self.organization_id:
+                base = f'{self.organization_id}-{base}'
+            self.slug = slugify(base)[:170]
         super().save(*args, **kwargs)
+
+
+class TourDestinationImage(BaseModel):
+    """Yo'nalish galereyasi — bir nechta rasm."""
+    destination = models.ForeignKey(
+        TourDestination,
+        on_delete=models.CASCADE,
+        related_name='images',
+    )
+    image = models.ImageField(upload_to='tours/destinations/gallery/')
+    caption = models.CharField(max_length=255, blank=True)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    is_cover = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name        = 'Yo\'nalish rasmi'
+        verbose_name_plural = 'Yo\'nalish rasmlari'
+        ordering            = ['sort_order', 'created_at']
+
+    def __str__(self):
+        return f'{self.destination.name} — rasm #{self.sort_order}'
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.is_cover:
+            TourDestinationImage.objects.filter(
+                destination_id=self.destination_id,
+            ).exclude(pk=self.pk).update(is_cover=False)
+            if self.image and not self.destination.cover_image:
+                self.destination.cover_image = self.image
+                self.destination.save(update_fields=['cover_image', 'updated_at'])
 
 
 # ─── TourPackage ──────────────────────────────────────────────────────────────

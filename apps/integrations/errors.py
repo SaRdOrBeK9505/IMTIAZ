@@ -28,9 +28,9 @@ class IntegrationError(Exception):
 class IntegrationNotConfiguredError(IntegrationError):
     """Dev: .env da kalitlar yo'q. Mijozga umumiy kechikish xabari ketadi."""
 
-    def __init__(self, service: str = 'generic', *, detail: str = ''):
+    def __init__(self, service: str = 'generic', *, detail: str = '', lang: str = 'uz'):
         super().__init__(
-            user_message=customer_message(service, 'unavailable'),
+            user_message=customer_message(service, 'unavailable', lang=lang),
             error_code='not_configured',
             detail=detail,
         )
@@ -39,9 +39,9 @@ class IntegrationNotConfiguredError(IntegrationError):
 class IntegrationUnavailableError(IntegrationError):
     """Xizmat sozlangan, lekin javob bermadi."""
 
-    def __init__(self, service: str = 'generic', *, detail: str = ''):
+    def __init__(self, service: str = 'generic', *, detail: str = '', lang: str = 'uz'):
         super().__init__(
-            user_message=customer_message(service, 'unavailable'),
+            user_message=customer_message(service, 'unavailable', lang=lang),
             error_code='unavailable',
             detail=detail,
         )
@@ -49,55 +49,30 @@ class IntegrationUnavailableError(IntegrationError):
 
 # ─── Mijozga ko'rinadigan matnlar (concierge uslubi) ─────────────────────────
 
-def customer_message(service: str, error_code: str, **ctx) -> str:
+def customer_message(service: str, error_code: str, lang: str = 'uz', **ctx) -> str:
     """Texnik tafsilotsiz, IMTIAZ concierge uslubida xabar."""
-    builders = {
-        'flight': _flight_message,
-        'train':  _train_message,
-    }
-    builder = builders.get(service, _generic_message)
-    return builder(error_code, **ctx)
+    from apps.ai_assistant.i18n import normalize_language, t
 
+    lang = normalize_language(lang)
 
-def _flight_message(error_code: str, **ctx) -> str:
-    origin = ctx.get('origin') or 'jo\'nash shahri'
-    destination = ctx.get('destination') or 'manzil'
-    date = ctx.get('departure_date') or ''
-    date_line = f" ({date})" if date else ''
+    if service == 'flight':
+        origin = ctx.get('origin') or t('origin_default', lang)
+        destination = ctx.get('destination') or t('destination_default', lang)
+        date = ctx.get('departure_date') or ''
+        date_line = f" ({date})" if date else ''
+        return t(
+            'flight_unavailable', lang,
+            origin=origin,
+            destination=destination,
+            date_line=date_line,
+        )
 
-    return (
-        f"Hozir {origin} → {destination}{date_line} bo'yicha onlayn parvoz "
-        f"qidiruv vaqtincha mavjud emas — aviachiptalar tizimi bilan bog'lanishda "
-        f"biroz kechikish bor.\n\n"
-        f"Shu bilan birga sizga yordam bera olaman:\n"
-        f"• Boshqa sana yoki yaqin aeroport bo'yicha variant ko'rib chiqish\n"
-        f"• Sayohatingiz uchun restoran yoki tadbir bronlash\n"
-        f"• Menejerimiz orqali chipta — biz siz uchun qo'lda tekshirib, "
-        f"eng qulay variantni topamiz\n\n"
-        f"Bir ozdan keyin avtomatik qidiruvni yana sinab ko'ramiz. "
-        f"Hozir qaysi yo'nalish sizga qulayroq?"
-    )
+    if service == 'train':
+        origin = ctx.get('origin') or t('origin_train_default', lang)
+        destination = ctx.get('destination') or t('destination_default', lang)
+        return t('train_unavailable', lang, origin=origin, destination=destination)
 
-
-def _train_message(error_code: str, **ctx) -> str:
-    origin = ctx.get('origin') or 'jo\'nash punkti'
-    destination = ctx.get('destination') or 'manzil'
-
-    return (
-        f"Hozir {origin} → {destination} yo'nalishida poyezd qidiruv "
-        f"vaqtincha ishlamayapti — bu xizmat tez orada ulab qo'yiladi.\n\n"
-        f"Ayni paytda parvoz qidiruv, restoran bron yoki boshqa "
-        f"IMTIAZ xizmatlari bilan yordam bera olaman. Nima qidiramiz?"
-    )
-
-
-def _generic_message(error_code: str, **ctx) -> str:
-    return (
-        "So'rovingizni hozir to'liq bajara olmadim — xizmat vaqtincha band "
-        "yoki bog'lanishda kechikish bor.\n\n"
-        "Boshqa yo'nalish, sana yoki xizmat turini sinab ko'ramizmi? "
-        "Yoki menejerimiz siz bilan bog'lanishini tashkil qilay?"
-    )
+    return t('integration_generic', lang)
 
 
 # ─── Tool handler javoblari ───────────────────────────────────────────────────
@@ -108,6 +83,7 @@ def flight_search_error(
     destination: str = '',
     departure_date: str = '',
     detail: str = '',
+    lang: str = 'uz',
 ) -> dict:
     if detail:
         logger.warning('Flight search xato [%s]: %s', error_code, detail)
@@ -115,7 +91,7 @@ def flight_search_error(
         'status':         'error',
         'error_code':     error_code,
         'message':        customer_message(
-            'flight', error_code,
+            'flight', error_code, lang=lang,
             origin=origin, destination=destination, departure_date=departure_date,
         ),
         'origin':         origin,
@@ -129,6 +105,7 @@ def train_search_error(
     origin: str = '',
     destination: str = '',
     detail: str = '',
+    lang: str = 'uz',
 ) -> dict:
     if detail:
         logger.warning('Train search xato [%s]: %s', error_code, detail)
@@ -136,7 +113,8 @@ def train_search_error(
         'status':  'error',
         'error_code': error_code,
         'message': customer_message(
-            'train', error_code, origin=origin, destination=destination,
+            'train', error_code, lang=lang,
+            origin=origin, destination=destination,
         ),
     }
 
@@ -144,17 +122,16 @@ def train_search_error(
 def integration_error_dict(
     exc: Exception,
     service: str = 'generic',
+    lang: str = 'uz',
     **ctx,
 ) -> dict:
     """Exception → mijozga tushunarli dict."""
     if isinstance(exc, IntegrationError):
         if exc.detail:
             logger.warning('Integration xato [%s]: %s', exc.error_code, exc.detail)
-        # IntegrationError allaqachon customer message bilan yaratilgan
         msg = exc.user_message
-        # Flight/train uchun context bilan boyitish
         if service in ('flight', 'train') and ctx:
-            msg = customer_message(service, exc.error_code, **ctx)
+            msg = customer_message(service, exc.error_code, lang=lang, **ctx)
         return {
             'status':     'error',
             'error_code': exc.error_code,
@@ -164,7 +141,7 @@ def integration_error_dict(
     return {
         'status':     'error',
         'error_code': 'unavailable',
-        'message':    customer_message(service, 'unavailable', **ctx),
+        'message':    customer_message(service, 'unavailable', lang=lang, **ctx),
     }
 
 

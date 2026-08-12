@@ -114,6 +114,178 @@ class TourSearchService:
         return qs
 
 
+# ─── TourDestinationSearchService ─────────────────────────────────────────────
+
+class TourDestinationSearchService:
+    """Mijozlar uchun yo'nalishlar — qidiruv, filter, saralash."""
+
+    _ORDERING = {
+        'popular':      ['-is_popular', '-package_count', 'name'],
+        'price_asc':    ['min_price', 'name'],
+        'price_desc':   ['-min_price', 'name'],
+        'name':         ['name'],
+        'name_desc':    ['-name'],
+        'packages':     ['-package_count', 'name'],
+        'newest':       ['-created_at'],
+        'rating':       ['-avg_rating', '-package_count'],
+    }
+
+    @classmethod
+    def _active_package_q(cls) -> Q:
+        return Q(packages__is_active=True) & Q(packages__organization__is_active=True)
+
+    @classmethod
+    def base_queryset(cls):
+        from django.db.models import Avg, Count, Max, Min, Prefetch
+
+        from .models import TourDestination, TourDestinationImage
+
+        active = cls._active_package_q()
+        return TourDestination.objects.filter(
+            is_active=True,
+        ).filter(active).prefetch_related(
+            Prefetch(
+                'images',
+                queryset=TourDestinationImage.objects.order_by('sort_order', 'created_at'),
+            ),
+        ).annotate(
+            package_count=Count('packages', filter=active, distinct=True),
+            min_price=Min('packages__base_price', filter=active),
+            max_price=Max('packages__base_price', filter=active),
+            avg_rating=Avg('packages__avg_rating', filter=active),
+        ).distinct()
+
+    @classmethod
+    def search(
+        cls,
+        *,
+        query: Optional[str] = None,
+        country: Optional[str] = None,
+        country_code: Optional[str] = None,
+        city: Optional[str] = None,
+        is_popular: Optional[bool] = None,
+        min_price: Optional[Decimal] = None,
+        max_price: Optional[Decimal] = None,
+        min_packages: Optional[int] = None,
+        category_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        min_days: Optional[int] = None,
+        max_days: Optional[int] = None,
+        difficulty: Optional[str] = None,
+        has_upcoming: Optional[bool] = None,
+        departure_from: Optional[str] = None,
+        departure_to: Optional[str] = None,
+        ordering: Optional[str] = None,
+    ):
+        qs = cls.base_queryset()
+        active = cls._active_package_q()
+
+        if query:
+            qs = qs.filter(
+                Q(name__icontains=query)
+                | Q(country__icontains=query)
+                | Q(city__icontains=query)
+                | Q(description__icontains=query)
+            )
+        if country:
+            qs = qs.filter(country__icontains=country)
+        if country_code:
+            qs = qs.filter(country_code__iexact=country_code.strip())
+        if city:
+            qs = qs.filter(city__icontains=city)
+        if is_popular is not None:
+            qs = qs.filter(is_popular=is_popular)
+        if min_price is not None:
+            qs = qs.filter(packages__base_price__gte=min_price).filter(active)
+        if max_price is not None:
+            qs = qs.filter(packages__base_price__lte=max_price).filter(active)
+        if min_packages is not None:
+            qs = qs.filter(package_count__gte=min_packages)
+        if category_id:
+            qs = qs.filter(packages__category_id=category_id, packages__is_active=True)
+        if organization_id:
+            qs = qs.filter(packages__organization_id=organization_id, packages__is_active=True)
+        if min_days is not None:
+            qs = qs.filter(packages__duration_days__gte=min_days, packages__is_active=True)
+        if max_days is not None:
+            qs = qs.filter(packages__duration_days__lte=max_days, packages__is_active=True)
+        if difficulty:
+            qs = qs.filter(packages__difficulty_level=difficulty, packages__is_active=True)
+        if has_upcoming:
+            today = timezone.now().date()
+            qs = qs.filter(
+                packages__availabilities__status='open',
+                packages__availabilities__departure_date__gte=today,
+                packages__is_active=True,
+            )
+        if departure_from or departure_to:
+            avail_q = Q(packages__availabilities__status='open')
+            if departure_from:
+                avail_q &= Q(packages__availabilities__departure_date__gte=departure_from)
+            if departure_to:
+                avail_q &= Q(packages__availabilities__departure_date__lte=departure_to)
+            qs = qs.filter(avail_q, packages__is_active=True)
+
+        order_fields = cls._ORDERING.get(ordering or 'popular', cls._ORDERING['popular'])
+        return qs.order_by(*order_fields)
+
+    @classmethod
+    def get_filter_metadata(cls) -> dict:
+        from django.db.models import Count, Min, Max
+
+        from .models import TourCategory, TourPackage
+
+        dest_qs = cls.base_queryset()
+        countries = list(
+            dest_qs.values('country', 'country_code')
+            .annotate(destination_count=Count('id', distinct=True))
+            .order_by('country')
+        )
+        pkg_qs = TourPackage.objects.filter(
+            is_active=True,
+            organization__is_active=True,
+        )
+        price_range = pkg_qs.aggregate(
+            min_price=Min('base_price'),
+            max_price=Max('base_price'),
+        )
+        categories = list(
+            TourCategory.objects.filter(
+                is_active=True,
+                packages__is_active=True,
+                packages__organization__is_active=True,
+            ).distinct().values('id', 'name', 'slug', 'icon').order_by('sort_order', 'name')
+        )
+        return {
+            'countries': countries,
+            'categories': categories,
+            'price_range': {
+                'min_price': str(price_range['min_price'] or 0),
+                'max_price': str(price_range['max_price'] or 0),
+            },
+            'sort_options': [
+                {'value': 'popular', 'label': 'Mashhur'},
+                {'value': 'price_asc', 'label': 'Narx: arzon → qimmat'},
+                {'value': 'price_desc', 'label': 'Narx: qimmat → arzon'},
+                {'value': 'name', 'label': 'Nom (A-Z)'},
+                {'value': 'name_desc', 'label': 'Nom (Z-A)'},
+                {'value': 'packages', 'label': 'Ko\'p turlar'},
+                {'value': 'rating', 'label': 'Reyting'},
+                {'value': 'newest', 'label': 'Yangi'},
+            ],
+            'difficulty_options': [
+                {'value': 'easy', 'label': 'Oson'},
+                {'value': 'moderate', 'label': "O'rta"},
+                {'value': 'hard', 'label': 'Qiyin'},
+                {'value': 'extreme', 'label': 'Ekstremal'},
+            ],
+        }
+
+    @classmethod
+    def get_detail(cls, destination_id: str):
+        return cls.base_queryset().filter(pk=destination_id).first()
+
+
 # ─── TourBookingService ───────────────────────────────────────────────────────
 
 class TourBookingService:
@@ -196,6 +368,12 @@ class TourBookingService:
             'TourBooking created: booking_id=%s, package=%s, user=%s',
             booking.id, package.title, user.id
         )
+
+        from apps.notifications.crm import notify_new_tour_lead, schedule_lead_notification
+        schedule_lead_notification(
+            lambda b=booking, tb=tour_booking: notify_new_tour_lead(b, tb)
+        )
+
         return booking, tour_booking
 
     @staticmethod
@@ -228,6 +406,23 @@ class TourBookingService:
         )
 
         logger.info('TourBooking confirmed: id=%s, operator=%s', tour_booking_id, operator.id)
+
+        from apps.notifications.crm import notify_customer_booking_confirmed, schedule_lead_notification
+        schedule_lead_notification(
+            lambda b=tour_booking.booking: notify_customer_booking_confirmed(
+                b,
+                message=(
+                    f'{tour_booking.package.title} — '
+                    f'{tour_booking.availability.departure_date} sanasidagi '
+                    f'tur broningiz tasdiqlandi.'
+                ),
+            )
+        )
+
+        from apps.crm_core.models import Lead
+        from apps.crm_core.services.leads import sync_lead_stage_for_booking
+        sync_lead_stage_for_booking(tour_booking.booking, Lead.Stage.WON)
+
         return tour_booking
 
     @staticmethod
@@ -250,6 +445,11 @@ class TourBookingService:
             tour_booking.save(update_fields=['ai_analysis', 'ai_reprocessed', 'updated_at'])
 
         logger.info('TourBooking in progress: id=%s, operator=%s', tour_booking_id, operator.id)
+
+        from apps.crm_core.models import Lead
+        from apps.crm_core.services.leads import sync_lead_stage_for_booking
+        sync_lead_stage_for_booking(tour_booking.booking, Lead.Stage.CONTACTED)
+
         return tour_booking
 
     @staticmethod
@@ -290,6 +490,18 @@ class TourBookingService:
             )
 
         logger.info('TourBooking rejected: id=%s, reason=%s', tour_booking_id, rejection_reason)
+
+        from apps.notifications.crm import notify_customer_booking_rejected, schedule_lead_notification
+        schedule_lead_notification(
+            lambda b=tour_booking.booking, r=rejection_reason: notify_customer_booking_rejected(
+                b, reason=r,
+            )
+        )
+
+        from apps.crm_core.models import Lead
+        from apps.crm_core.services.leads import sync_lead_stage_for_booking
+        sync_lead_stage_for_booking(tour_booking.booking, Lead.Stage.LOST)
+
         return tour_booking
 
 
@@ -366,6 +578,10 @@ class TourVoucherService:
             'TourVoucher generated: %s for booking %s by operator %s',
             voucher.voucher_number, tour_booking_id, operator.id
         )
+
+        from apps.tours.tasks import send_voucher_notification
+        send_voucher_notification.delay(str(voucher.id))
+
         return voucher
 
     @staticmethod

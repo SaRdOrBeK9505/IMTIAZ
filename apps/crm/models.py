@@ -10,6 +10,15 @@ from django.conf import settings
 from apps.core.models import BaseModel
 
 
+class BusinessType(models.TextChoices):
+    """
+    CRM vertikal yo'nalishi — qaysi panel, serializer va endpoint to'plami ishlatilishini belgilaydi.
+    org_type dan farqli: bu faqat CRM routing uchun (restaurant CRM, travel CRM, ...).
+    """
+    RESTAURANT = 'restaurant', 'Restoran'
+    TRAVEL     = 'travel',     'Sayohat kompaniyasi'
+
+
 class Organization(BaseModel):
     """Hamkor tashkilot (restoran zanjiri, aviakassa va h.k.)."""
 
@@ -24,6 +33,21 @@ class Organization(BaseModel):
 
     name = models.CharField(max_length=200)
     org_type = models.CharField(max_length=30, choices=OrgType.choices)
+    business_type = models.CharField(
+        max_length=20,
+        choices=BusinessType.choices,
+        default=BusinessType.RESTAURANT,
+        db_index=True,
+        help_text='CRM vertikali: qaysi panel va API namespace ishlatiladi',
+    )
+    owner = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='owned_organization',
+        help_text='Tashkilot egasi (UserRole.OWNER)',
+    )
     description = models.TextField(blank=True)
     logo = models.ImageField(upload_to='orgs/logos/', null=True, blank=True)
     website = models.URLField(blank=True, null=True)

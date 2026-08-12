@@ -43,6 +43,15 @@ class PaymentListView(generics.ListAPIView):
             .order_by('-created_at')
         )
 
+    @extend_schema(
+        tags=['Payments'],
+        summary='To\'lovlar tarixi',
+        description='Foydalanuvchining barcha to\'lovlari (AlifPay va boshqalar).',
+        responses={200: PaymentSerializer(many=True)},
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
+
 
 class PaymentInitiateView(APIView):
     """POST /api/payments/initiate/ — AlifPay orqali to'lov boshlash"""
@@ -55,7 +64,11 @@ class PaymentInitiateView(APIView):
             404: OpenApiResponse(description='Bron topilmadi'),
         },
         summary='To\'lov boshlash (AlifPay)',
-        description='Mijozni AlifPay checkout sahifasiga yo\'naltiradi.',
+        description=(
+            'Parvoz bronlari uchun avval Bookhara pre-flight tekshiruvi o\'tkaziladi '
+            '(hold, narx, depozit). Keyin AlifPay checkout ochiladi. '
+            'Mijoz to\'lagach Bookhara settlement saga ishga tushadi.'
+        ),
         tags=['Payments'],
     )
     def post(self, request):

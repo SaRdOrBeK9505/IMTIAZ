@@ -4,17 +4,31 @@ IMTIAZ — Django Settings
 
 from __future__ import annotations
 
+import logging
+import os
+import sys
+
 import environ
 from pathlib import Path
 from datetime import timedelta
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+_settings_logger = logging.getLogger('imtiaz.settings')
+
+
+def _log_dev_notice(message: str) -> None:
+    """runserver reloader settings ni ikki marta yuklaydi — faqat workerda log."""
+    if 'runserver' in sys.argv and os.environ.get('RUN_MAIN') != 'true':
+        return
+    _settings_logger.warning(message)
+
 env = environ.Env(DEBUG=(bool, True))
 environ.Env.read_env(BASE_DIR / '.env')
 
 SECRET_KEY    = env('SECRET_KEY', default='django-insecure-change-me-in-production')
 DEBUG         = env('DEBUG')
+ENABLE_API_DOCS = env.bool('ENABLE_API_DOCS', default=DEBUG)
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost', '127.0.0.1'])
 
 # ─── APPS ─────────────────────────────────────────────────────────────────────
@@ -47,6 +61,9 @@ LOCAL_APPS = [
     'apps.ai_assistant',
     'apps.payments',
     'apps.crm',
+    'apps.crm_core',
+    'apps.crm_restaurant',
+    'apps.crm_travel',
     'apps.notifications',
     'apps.events',
     'apps.integrations',
@@ -147,8 +164,7 @@ if _use_redis:
     SESSION_ENGINE     = 'django.contrib.sessions.backends.cache'
     SESSION_CACHE_ALIAS = 'default'
 else:
-    import warnings
-    warnings.warn('Redis ulanmadi — local-memory cache ishlatilmoqda. Celery ishlamaydi.')
+    _log_dev_notice('Redis ulanmadi — local-memory cache ishlatilmoqda. Celery ishlamaydi.')
     CACHES = {
         'default': {
             'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
@@ -366,26 +382,9 @@ JAZZMIN_UI_TWEAKS = {
 }
 
 # ─── SPECTACULAR ──────────────────────────────────────────────────────────────
-SPECTACULAR_SETTINGS = {
-    'TITLE':       'IMTIAZ API',
-    'DESCRIPTION': 'Premium Lifestyle Concierge Super-App',
-    'VERSION':     '1.0.0',
-    'SERVE_INCLUDE_SCHEMA': False,
-    'COMPONENT_SPLIT_REQUEST': True,
-    'ENUM_NAME_OVERRIDES': {
-        'AIAutonomyLevelEnum':    'apps.users.models.AIAutonomyLevel',
-        'BookingStatusEnum':      'apps.booking.models.BookingStatus',
-        'ServiceTypeEnum':        'apps.booking.models.ServiceType',
-        'PaymentStatusEnum':      'apps.payments.models.PaymentStatus',
-        'WaitlistStatusEnum':     'apps.membership.models.WaitlistApplication.Status',
-        'SubscriptionStatusEnum': 'apps.membership.models.Subscription.Status',
-        'NotificationStatusEnum': 'apps.notifications.models.Notification.Status',
-    },
-    'SWAGGER_UI_SETTINGS': {
-        'deepLinking': True,
-        'persistAuthorization': True,
-    },
-}
+from apps.core.openapi import build_spectacular_settings
+
+SPECTACULAR_SETTINGS = build_spectacular_settings()
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[
@@ -393,6 +392,8 @@ CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[
     'http://localhost:5173',
     'http://127.0.0.1:3000',
     'https://imtiaz-crm.vercel.app',
+    'https://imtiaz-crm-restaurant.vercel.app',
+    'https://imtiaz-crm-travel.vercel.app',
 ])
 CORS_ALLOW_CREDENTIALS = True
 
@@ -400,6 +401,8 @@ CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=[
     'http://localhost:3000',
     'http://localhost:5173',
     'https://imtiaz-crm.vercel.app',
+    'https://imtiaz-crm-restaurant.vercel.app',
+    'https://imtiaz-crm-travel.vercel.app',
 ])
 
 # ─── Frontend / QR ────────────────────────────────────────────────────────────
@@ -432,8 +435,7 @@ DEVSMS_TOKEN    = env('DEVSMS_TOKEN',    default='')
 DEVSMS_BASE_URL = env('DEVSMS_BASE_URL', default='https://devsms.uz/api/send_sms.php')
 
 if not DEVSMS_TOKEN:
-    import warnings
-    warnings.warn('DEVSMS_TOKEN topilmadi — SMS yuborish ishlamaydi. .env ga token qo\'shing.')
+    _log_dev_notice('DEVSMS_TOKEN topilmadi — SMS yuborish ishlamaydi. .env ga token qo\'shing.')
 
 # ─── SMS — ESKIZ (o'chirildi, DevSMS ga o'tildi) ──────────────────────────────
 # Qayta yoqish uchun: ESKIZ_EMAIL, ESKIZ_PASSWORD, ESKIZ_FROM ni .env ga qaytaring
@@ -465,6 +467,9 @@ BOOKHARA_EMAIL          = env('BOOKHARA_EMAIL',          default='')
 BOOKHARA_PASSWORD       = env('BOOKHARA_PASSWORD',       default='')
 BOOKHARA_BASE_URL       = env('BOOKHARA_BASE_URL',       default='https://avia-api-dev.bookhara.uz')
 BOOKHARA_WEBHOOK_SECRET = env('BOOKHARA_WEBHOOK_SECRET', default='')
+# Minimal depozit — pastga tushsa yangi bronlar to'xtatiladi (monitoring task)
+BOOKHARA_MIN_DEPOSIT     = env('BOOKHARA_MIN_DEPOSIT',     default='5000000')   # 5 mln UZS
+BOOKHARA_DEPOSIT_BUFFER  = env('BOOKHARA_DEPOSIT_BUFFER',  default='500000')    # pre-flight buffer
 
 # AlifPay — mijozdan pul olish (checkout modeli)
 ALIFPAY_TOKEN            = env('ALIFPAY_TOKEN',            default='')

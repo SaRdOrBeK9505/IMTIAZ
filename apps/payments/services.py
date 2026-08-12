@@ -1,11 +1,13 @@
 """
 PaymentService — to'lov oqimini boshqaradigan yagona entry point.
 
-To'lov oqimi:
-    1. initiate_payment()  → Payment yaratish + AlifPay orqali checkout URL
-    2. confirm_payment()   → polling (webhook yetmagan holatda)
-    3. apply_webhook_status() → webhook payload'dan to'g'ridan-to'g'ri holat yangilash
-    4. refund_payment()    → to'lovni qaytarish
+Parvoz (Bookhara) oqimi — saga pattern:
+    1. initiate_payment()  → pre-flight tekshiruv → PRICE_LOCKED → AlifPay invoice
+    2. confirm/webhook     → PAYMENT_CAPTURED → Bookhara settlement
+    3. Muvaffaqiyat        → COMPLETED → booking CONFIRMED
+    4. Bookhara xato       → hold cancel + avtomatik refund (Celery retry)
+
+Boshqa xizmatlar: to'lovdan keyin darhol CONFIRMED.
 
 State machine Payment.transition_to() orqali boshqariladi.
 Tashqi HTTP (AlifPay, Bookhara) DB qulfi ochiq holda chaqirilmaydi.
@@ -62,6 +64,17 @@ class PaymentService:
                 'success': False,
                 'message': f'Bu bron uchun to\'lov qabul qilinmaydi. Holat: {booking.status}',
             }
+
+        from apps.payments.settlement_service import FlightSettlementService
+        if FlightSettlementService.requires_settlement(booking):
+            preflight = FlightSettlementService.run_preflight(booking)
+            if not preflight.ok:
+                return {
+                    'success': False,
+                    'message': preflight.message,
+                    'error_code': preflight.error_code,
+                }
+
         active = Payment.objects.filter(
             booking=booking,
             status__in=[PaymentStatus.PENDING, PaymentStatus.PROCESSING],
@@ -404,63 +417,24 @@ class PaymentService:
 
     @staticmethod
     def _on_payment_success(payment: Payment) -> None:
-        """To'lov muvaffaqiyatli — booking va Bookhara settlement (qulfsiz)."""
+        """
+        To'lov muvaffaqiyatli — booking settlement saga (qulfsiz).
+
+        Parvoz: booking CONFIRMED faqat Bookhara settlement COMPLETED dan keyin.
+        Boshqa xizmatlar: darhol CONFIRMED.
+        """
         if not payment.booking:
             return
 
-        from apps.booking.models import BookingStatus, ServiceType
-        booking = payment.booking
+        from apps.payments.settlement_service import FlightSettlementService
 
-        if booking.status != BookingStatus.CONFIRMED:
-            booking.status = BookingStatus.CONFIRMED
-            booking.save(update_fields=['status', 'updated_at'])
-
-        if booking.service_type == ServiceType.FLIGHT:
-            PaymentService._settle_flight_booking(booking, payment)
+        FlightSettlementService.on_payment_captured(payment.booking, payment)
 
     @staticmethod
     def _settle_flight_booking(booking, payment: Payment) -> None:
-        """Mijoz to'lagach Bookhara orqali chipta rasmiylashtirish."""
-        try:
-            from apps.booking.models import FlightBooking, FlightPayment
-            fb = FlightBooking.objects.filter(booking=booking).first()
-            if not fb or not booking.external_booking_id:
-                logger.warning(
-                    'Flight booking settle: external_booking_id yo\'q. booking=%s', booking.id,
-                )
-                return
-
-            from apps.integrations.adapters.bookhara import BookharaAdapter
-            adapter = BookharaAdapter()
-            pay_result = adapter.pay_booking(booking.external_booking_id)
-
-            fiscal = pay_result.get('fiscalization_v2') or {}
-            receipt_url = (payment.provider_response or {}).get('_receipt_url', '')
-
-            FlightPayment.objects.update_or_create(
-                flight_booking=fb,
-                defaults={
-                    'amount':             fiscal.get('amount', payment.amount),
-                    'total_amount':       fiscal.get('total_amount', payment.amount),
-                    'receipt_url':        receipt_url,
-                    'ikpu_provider_1':    fiscal.get('ikpu_provider_1', ''),
-                    'package_code_prov1': fiscal.get('package_code_prov1', ''),
-                    'id_provider_1':      fiscal.get('id_provider_1', ''),
-                    'nds_provider_1':     fiscal.get('nds_provider_1', 0),
-                    'ikpu_bookhara':      fiscal.get('ikpu_bookhara', ''),
-                    'package_code_bkh':   fiscal.get('package_code_bkh', ''),
-                    'service_fee_bkh':    fiscal.get('service_fee_bkh', 0),
-                    'nds_bookhara':       fiscal.get('nds_bookhara', 0),
-                    'profit':             fiscal.get('profit', 0),
-                    'discount':           fiscal.get('discount', 0),
-                },
-            )
-            fb.provider_response = pay_result
-            fb.provider_status = pay_result.get('status', 'ticketed')
-            fb.save(update_fields=['provider_response', 'provider_status', 'updated_at'])
-            logger.info('Flight booking settled via Bookhara: booking=%s', booking.id)
-        except Exception:
-            logger.exception('Flight booking settle xato: booking=%s', booking.id)
+        """Deprecated — FlightSettlementService ga o'tkazildi."""
+        from apps.payments.settlement_service import FlightSettlementService
+        FlightSettlementService.settle_with_bookhara(booking, payment)
 
     @staticmethod
     def mark_payment_failed(payment_id: str, reason: str = '') -> None:

@@ -6,8 +6,12 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
-from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
-from apps.core.views import HealthCheckView
+from apps.core.views import HealthCheckView, RootView
+from apps.core.doc_views import (
+    GuardedSpectacularAPIView,
+    GuardedSpectacularRedocView,
+    GuardedSpectacularSwaggerView,
+)
 
 urlpatterns = [
     # Health check — load balancer uchun (auth talab qilmaydi)
@@ -36,14 +40,22 @@ urlpatterns = [
         # A'zolik
         path('membership/', include('apps.membership.urls')),
 
-        # CRM (filial paneli) — restoran, xodimlar
+        # CRM — vertikal namespace (rol asosida) — legacy dan OLDIN
+        path('crm/restaurant/', include('apps.crm_restaurant.urls')),
+        path('crm/tour/',       include('apps.crm_travel.urls')),
+        path('crm/travel/',     include('apps.crm_travel.urls')),  # alias
+
+        # CRM (filial paneli) — legacy endpointlar
         path('crm/', include('apps.crm.urls')),
 
-        # CRM — Tur kompaniyasi (alohida UI)
-        path('crm/tours/', include('apps.tours.urls.crm_urls')),
+        # CRM — Tur kompaniyasi (alohida UI, legacy)
+        path('crm/tours/', include('apps.crm_travel.legacy_urls')),
 
-        # CRM — QR kodlar boshqaruvi
+        # CRM — QR kodlar (legacy; yangi: /api/crm/restaurant/qr/)
         path('crm/qr/', include('apps.qr_codes.urls.crm_urls')),
+
+        # CRM — bildirishnomalar (lead, yangilanishlar)
+        path('crm/notifications/', include('apps.notifications.crm_urls')),
 
         # Tadbirlar
         path('events/', include('apps.events.urls')),
@@ -58,10 +70,11 @@ urlpatterns = [
         path('integrations/', include('apps.integrations.urls')),
     ])),
 
-    # API Docs (faqat DEBUG yoki ichki network)
-    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    path('',   SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
-    path('api/redoc/',  SpectacularRedocView.as_view(url_name='schema'),   name='redoc'),
+    # API Docs — ENABLE_API_DOCS=False bo'lsa 404 (runtime guard)
+    path('api/schema/', GuardedSpectacularAPIView.as_view(), name='schema'),
+    path('api/docs/', GuardedSpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('api/redoc/', GuardedSpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+    path('', RootView.as_view(), name='root'),
 ]
 
 if settings.DEBUG:

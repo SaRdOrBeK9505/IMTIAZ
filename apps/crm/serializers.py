@@ -128,9 +128,15 @@ class RestaurantTableWriteSerializer(serializers.ModelSerializer):
 
 
 class TableTimeSlotSerializer(serializers.ModelSerializer):
+    booking_id = serializers.SerializerMethodField()
+
     class Meta:
         model  = TableTimeSlot
-        fields = ['id', 'date', 'start_time', 'end_time', 'is_available', 'notes']
+        fields = ['id', 'date', 'start_time', 'end_time', 'is_available', 'notes', 'booking_id']
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_booking_id(self, obj):
+        return str(obj.booking_id) if obj.booking_id else None
 
 
 # ─── Staff ────────────────────────────────────────────────────────────────────

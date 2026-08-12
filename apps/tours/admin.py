@@ -3,7 +3,7 @@
 from django.contrib import admin
 from django.utils.html import format_html
 from .models import (
-    TourCategory, TourDestination, TourPackage,
+    TourCategory, TourDestination, TourDestinationImage, TourPackage,
     TourItineraryDay, TourAvailability, TourVoucher, TourReview,
 )
 
@@ -17,11 +17,21 @@ class TourCategoryAdmin(admin.ModelAdmin):
 
 @admin.register(TourDestination)
 class TourDestinationAdmin(admin.ModelAdmin):
-    list_display   = ['name', 'country', 'city', 'is_popular', 'is_active']
+    list_display   = ['name', 'country', 'city', 'organization', 'is_popular', 'is_active']
     list_editable  = ['is_popular', 'is_active']
-    list_filter    = ['country', 'is_popular']
+    list_filter    = ['country', 'is_popular', 'organization']
     search_fields  = ['name', 'country', 'city']
     prepopulated_fields = {'slug': ('country', 'city')}
+    inlines = []
+
+
+class TourDestinationImageInline(admin.TabularInline):
+    model = TourDestinationImage
+    extra = 1
+    fields = ['image', 'caption', 'sort_order', 'is_cover']
+
+
+TourDestinationAdmin.inlines = [TourDestinationImageInline]
 
 
 class TourItineraryDayInline(admin.TabularInline):

@@ -9,6 +9,7 @@ import logging
 
 from django.db import connection
 from django.core.cache import cache
+from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -24,6 +25,27 @@ class HealthCheckView(APIView):
     """
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        tags=['Health'],
+        summary='Sog\'lik tekshiruvi',
+        description='Auth talab qilmaydi. DB, Redis va Celery holatini qaytaradi.',
+        responses={
+            200: OpenApiResponse(
+                description='Barcha komponentlar ishlayapti',
+                examples=[
+                    OpenApiExample(
+                        'OK',
+                        value={
+                            'status': 'ok',
+                            'checks': {'database': 'ok', 'redis': 'ok', 'celery': 'ok'},
+                            'duration_ms': 12,
+                        },
+                    ),
+                ],
+            ),
+            503: OpenApiResponse(description='Kamida bitta komponent ishlamayapti'),
+        },
+    )
     def get(self, request):
         start  = time.monotonic()
         checks = {}
@@ -73,3 +95,38 @@ class HealthCheckView(APIView):
             },
             status=status_code,
         )
+
+
+def _api_docs_enabled() -> bool:
+    from django.conf import settings
+    return getattr(settings, 'ENABLE_API_DOCS', settings.DEBUG)
+
+
+class APIDocsGuardMixin:
+    """Swagger/Redoc faqat ENABLE_API_DOCS=True bo'lganda."""
+
+    def dispatch(self, request, *args, **kwargs):
+        from django.http import Http404
+        if not _api_docs_enabled():
+            raise Http404
+        return super().dispatch(request, *args, **kwargs)
+
+
+class RootView(APIView):
+    """Production: /health/ ga yo'naltirish; DEBUG: Swagger UI."""
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        tags=['Health'],
+        summary='Bosh sahifa',
+        description='DEBUG + API docs yoqilgan bo\'lsa `/api/docs/` ga, aks holda `/health/` ga yo\'naltiradi.',
+        responses={302: OpenApiResponse(description='Redirect')},
+    )
+    def get(self, request):
+        from django.conf import settings
+        from django.shortcuts import redirect
+
+        if _api_docs_enabled() and settings.DEBUG:
+            return redirect('/api/docs/')
+        return redirect('/health/')
+

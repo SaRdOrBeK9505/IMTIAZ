@@ -1,9 +1,14 @@
 """Tours — User-facing URL routes."""
 
 from django.urls import path
+from apps.tours.views.destination_views import (
+    TourDestinationDetailView,
+    TourDestinationFiltersView,
+    TourDestinationListView,
+    TourDestinationPackagesView,
+)
 from apps.tours.views.user_views import (
     TourCategoryListView,
-    TourDestinationListView,
     TourPackageListView,
     TourPackageDetailView,
     TourAvailabilityListView,
@@ -15,8 +20,12 @@ from apps.tours.views.user_views import (
 )
 
 urlpatterns = [
-    # Kategoriya va yo'nalishlar
     path('categories/',                      TourCategoryListView.as_view(),    name='tour-categories'),
+
+    # Yo'nalishlar — filter pathlari uuid dan oldin
+    path('destinations/filters/',            TourDestinationFiltersView.as_view(), name='tour-destination-filters'),
+    path('destinations/<uuid:pk>/packages/', TourDestinationPackagesView.as_view(), name='tour-destination-packages'),
+    path('destinations/<uuid:pk>/',          TourDestinationDetailView.as_view(), name='tour-destination-detail'),
     path('destinations/',                    TourDestinationListView.as_view(), name='tour-destinations'),
 
     # Paketlar

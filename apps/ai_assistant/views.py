@@ -1,6 +1,8 @@
 """AI Assistant views."""
 
 from drf_spectacular.utils import extend_schema, OpenApiResponse
+
+from apps.core.openapi_schemas import ErrorResponseSerializer
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -8,6 +10,7 @@ from rest_framework.views import APIView
 
 from apps.core.permissions import HasApprovedMembership
 from .confirmation import confirm_pending_action, reject_pending_action, ConfirmationError
+from .i18n import resolve_language, t
 from .models import ConversationSession, AIActionLog
 from .serializers import (
     ChatMessageSerializer,
@@ -29,12 +32,17 @@ class ChatView(APIView):
 
     @extend_schema(
         request=ChatMessageSerializer,
-        responses={200: ChatResponseSerializer},
+        responses={
+            200: ChatResponseSerializer,
+            400: ErrorResponseSerializer,
+            403: ErrorResponseSerializer,
+        },
         summary='AI bilan suhbat',
         description=(
-            '`requires_confirmation=true` bo\'lsa — Booking YARATILMADI.\n'
-            '`pending_action_id` ni olib alohida endpoint orqali tasdiqlang:\n'
-            'POST /api/ai/actions/{pending_action_id}/confirm'
+            'Gemini function-calling orqali bron qidiruv va booking takliflari.\n\n'
+            '`requires_confirmation=true` bo\'lsa — Booking **YARATILMADI**.\n'
+            '`pending_action_id` ni olib alohida tasdiqlang:\n'
+            '`POST /api/ai/actions/{pending_action_id}/confirm/`'
         ),
         tags=['AI Assistant'],
     )
@@ -82,7 +90,7 @@ class ActionConfirmView(APIView):
             'success':   True,
             'action_id': str(log.id),
             'result':    log.result,
-            'message':   'Harakat muvaffaqiyatli bajarildi.',
+            'message':   t('action_confirmed', resolve_language(request.user)),
         })
 
 
@@ -104,7 +112,10 @@ class ActionRejectView(APIView):
                 {'success': False, 'message': str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        return Response({'success': True, 'message': 'Harakat bekor qilindi.'})
+        return Response({
+            'success': True,
+            'message': t('action_rejected', resolve_language(request.user)),
+        })
 
 
 class SessionListView(generics.ListAPIView):
@@ -120,6 +131,15 @@ class SessionListView(generics.ListAPIView):
             user=self.request.user, is_active=True
         ).order_by('-updated_at')
 
+    @extend_schema(
+        tags=['AI Assistant'],
+        summary='AI suhbat sessiyalari',
+        description='Faol sessiyalar ro\'yxati.',
+        responses={200: SessionListSerializer(many=True)},
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
+
 
 class SessionDetailView(generics.RetrieveDestroyAPIView):
     """GET / DELETE /api/ai/sessions/{id}/"""
@@ -131,7 +151,21 @@ class SessionDetailView(generics.RetrieveDestroyAPIView):
             return ConversationSession.objects.none()
         return ConversationSession.objects.filter(user=self.request.user)
 
-    def destroy(self, request, *args, **kwargs):
+    @extend_schema(
+        tags=['AI Assistant'],
+        summary='Sessiya tafsilotlari va xabarlar tarixi',
+        responses={200: ConversationSessionSerializer, 404: OpenApiResponse(description='Topilmadi')},
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['AI Assistant'],
+        summary='Sessiyani yopish (soft delete)',
+        description='`is_active=False` qilinadi.',
+        responses={204: OpenApiResponse(description='Yopildi')},
+    )
+    def delete(self, request, *args, **kwargs):
         session = self.get_object()
         session.is_active = False
         session.save(update_fields=['is_active'])
@@ -150,3 +184,12 @@ class AIActionLogListView(generics.ListAPIView):
         return AIActionLog.objects.filter(
             user=self.request.user
         ).order_by('-created_at')[:50]
+
+    @extend_schema(
+        tags=['AI Assistant'],
+        summary='AI harakatlar audit jurnali',
+        description='Oxirgi 50 ta AI action (booking, search, ...).',
+        responses={200: AIActionLogSerializer(many=True)},
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)

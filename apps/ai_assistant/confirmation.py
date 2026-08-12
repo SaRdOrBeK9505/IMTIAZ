@@ -167,9 +167,8 @@ def confirm_pending_action(
         log.status = AIActionLog.ActionStatus.FAILED
         log.error_message = 'Tasdiqlash muddati o\'tdi (5 daqiqa)'
         log.save(update_fields=['status', 'error_message', 'updated_at'])
-        raise ConfirmationError(
-            "Tasdiqlash muddati o'tib ketdi. Iltimos, qaytadan so'rang."
-        )
+        from .i18n import resolve_language, t
+        raise ConfirmationError(t('confirm_expired', resolve_language(user)))
 
     # ── Haqiqiy bajarish ──────────────────────────────────────────────────────
     try:
@@ -227,7 +226,8 @@ def _execute_confirmed_action(log: 'AIActionLog', user) -> dict:
 
     if action_type == 'cancel':
         from .tool_handlers import handle_cancel_booking
-        return handle_cancel_booking(user=user, **payload)
+        from .i18n import resolve_language
+        return handle_cancel_booking(user=user, lang=resolve_language(user), **payload)
 
     raise ValueError(f"Noma'lum action_type: '{action_type}'")
 
@@ -248,7 +248,9 @@ def _create_restaurant_booking(user, log: 'AIActionLog', payload: dict) -> dict:
     """Tasdiqlangan restoran bronini yaratadi."""
     from django.utils.dateparse import parse_datetime
     from apps.booking.models import Booking, RestaurantBooking, ServiceType, BookingStatus
+    from .i18n import booking_title_restaurant, resolve_language, t
 
+    lang   = resolve_language(user)
     date   = payload.get('date', '')
     time   = payload.get('time', '')
     guests = payload.get('guests', 2)
@@ -258,7 +260,7 @@ def _create_restaurant_booking(user, log: 'AIActionLog', payload: dict) -> dict:
         user=user,
         service_type=ServiceType.RESTAURANT,
         status=BookingStatus.PENDING,
-        title=f'Restoran — {date} {time}, {guests} kishi',
+        title=booking_title_restaurant(lang, date, time, guests),
         booking_date=reservation_at,
         base_price=log.amount_requiring_confirmation or 0,
         final_price=log.amount_requiring_confirmation or 0,
@@ -272,7 +274,7 @@ def _create_restaurant_booking(user, log: 'AIActionLog', payload: dict) -> dict:
     except Exception:
         pass
 
-    RestaurantBooking.objects.create(
+    rb = RestaurantBooking.objects.create(
         booking=booking,
         branch=branch,
         reservation_at=reservation_at,
@@ -280,10 +282,17 @@ def _create_restaurant_booking(user, log: 'AIActionLog', payload: dict) -> dict:
         special_requests=payload.get('special_requests', ''),
     )
     logger.info('Tasdiqlangan restoran broni yaratildi: booking=%s, user=%s', booking.id, user.id)
+
+    if branch:
+        from apps.notifications.crm import notify_new_restaurant_lead, schedule_lead_notification
+        schedule_lead_notification(
+            lambda b=booking, r=rb: notify_new_restaurant_lead(b, r)
+        )
+
     return {
         'status':     'ok',
         'booking_id': str(booking.id),
-        'message':    f"Restoran stoli muvaffaqiyatli band qilindi. Bron ID: {booking.id}",
+        'message':    t('restaurant_booked', lang, booking_id=booking.id),
     }
 
 
@@ -295,9 +304,13 @@ def _create_flight_booking(user, log: 'AIActionLog', payload: dict) -> dict:
     """
     from django.utils.dateparse import parse_datetime
     from apps.booking.models import Booking, FlightBooking, ServiceType, BookingStatus
+    from .i18n import booking_title_flight, resolve_language, t
 
+    lang       = resolve_language(user)
     offer_id   = payload.get('offer_id', '')
     passengers = payload.get('passengers', 1)
+    origin     = payload.get('origin', '?')
+    destination = payload.get('destination', '?')
 
     from apps.integrations.errors import is_bookhara_configured
 
@@ -311,27 +324,18 @@ def _create_flight_booking(user, log: 'AIActionLog', payload: dict) -> dict:
             result = adapter.create_booking(offer_id=offer_id, passengers=passengers)
             ext_id = result.external_booking_id if result.success else None
             if not ext_id:
-                bookhara_note = (
-                    'Aviachipta tizimi hozir javob bermadi — '
-                    'bron saqlandi, menejer qo\'lda tekshiradi.'
-                )
+                bookhara_note = t('bookhara_no_response', lang)
         else:
-            bookhara_note = (
-                'Aviachipta tizimi bilan bog\'lanishda kechikish — '
-                'bron qayd etildi, menejer tez orada chiptani tasdiqlaydi.'
-            )
+            bookhara_note = t('bookhara_delay', lang)
     except Exception as exc:
         logger.warning('Bookhara booking xato: %s', exc)
-        bookhara_note = (
-            'Aviachipta tizimi vaqtincha ishlamayapti — '
-            'bron saqlandi, menejer siz bilan bog\'lanadi.'
-        )
+        bookhara_note = t('bookhara_unavailable', lang)
 
     booking = Booking.objects.create(
         user=user,
         service_type=ServiceType.FLIGHT,
         status=BookingStatus.PENDING,
-        title=f'Parvoz broni — {payload.get("origin", "?")}→{payload.get("destination", "?")}',
+        title=booking_title_flight(lang, origin, destination),
         base_price=log.amount_requiring_confirmation or 0,
         final_price=log.amount_requiring_confirmation or 0,
         created_by_ai=True,
@@ -356,7 +360,7 @@ def _create_flight_booking(user, log: 'AIActionLog', payload: dict) -> dict:
         'Tasdiqlangan parvoz broni yaratildi: booking=%s, user=%s, ext_id=%s',
         booking.id, user.id, ext_id,
     )
-    message = f"Parvoz broni yaratildi. Bron ID: {booking.id}"
+    message = t('flight_booked', lang, booking_id=booking.id)
     if bookhara_note and not ext_id:
         message = f"{message}\n\n⚠️ {bookhara_note}"
     return {

@@ -3,7 +3,10 @@ Tours — User-facing views.
 
 Endpointlar:
     GET  /api/tours/categories/
-    GET  /api/tours/destinations/
+    GET  /api/tours/destinations/              — filter, qidiruv, pagination
+    GET  /api/tours/destinations/filters/      — filter metadata
+    GET  /api/tours/destinations/<id>/         — yo'nalish tafsiloti
+    GET  /api/tours/destinations/<id>/packages/ — yo'nalishdagi turlar
     GET  /api/tours/                    — qidiruv, filter, pagination
     GET  /api/tours/<id>/               — to'liq detail
     GET  /api/tours/<id>/availability/  — bo'sh sanalar
@@ -23,7 +26,7 @@ from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
 
 from apps.booking.models import TourBooking, BookingStatus
-from ..models import TourCategory, TourDestination, TourPackage, TourAvailability, TourReview
+from ..models import TourCategory, TourPackage, TourAvailability, TourReview
 from ..serializers import (
     TourCategorySerializer, TourDestinationSerializer,
     TourPackageListSerializer, TourPackageDetailSerializer,
@@ -43,24 +46,10 @@ class TourCategoryListView(generics.ListAPIView):
     serializer_class   = TourCategorySerializer
     queryset           = TourCategory.objects.filter(is_active=True)
 
-    @extend_schema(summary='Tur kategoriyalari', tags=['Tours'])
+    @extend_schema(summary='Tur kategoriyalari', tags=['Tours — User'])
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
-
-# ─── Yo'nalishlar ─────────────────────────────────────────────────────────────
-
-class TourDestinationListView(generics.ListAPIView):
-    """GET /api/tours/destinations/"""
-    permission_classes  = [AllowAny]
-    serializer_class    = TourDestinationSerializer
-    filter_backends     = [filters.SearchFilter]
-    search_fields       = ['name', 'country', 'city']
-    queryset            = TourDestination.objects.filter(is_active=True)
-
-    @extend_schema(summary='Sayohat yo\'nalishlari', tags=['Tours'])
-    def get(self, request, *args, **kwargs):
-        return super().get(request, *args, **kwargs)
 
 
 # ─── Tur Paketlari ────────────────────────────────────────────────────────────
@@ -74,10 +63,12 @@ class TourPackageListView(generics.ListAPIView):
     """
     permission_classes = [AllowAny]
     serializer_class   = TourPackageListSerializer
+    queryset           = TourPackage.objects.none()
 
     @extend_schema(
         summary   = 'Tur paketlari ro\'yxati (qidiruv)',
-        tags      = ['Tours'],
+        tags      = ['Tours — User'],
+        responses = {200: TourPackageListSerializer(many=True)},
         parameters = [
             OpenApiParameter('destination_id', str, description='Yo\'nalish ID'),
             OpenApiParameter('category_id',    str, description='Kategoriya ID'),
@@ -127,7 +118,7 @@ class TourPackageDetailView(generics.RetrieveAPIView):
         'destination', 'category', 'organization'
     ).prefetch_related('itinerary_days', 'availabilities')
 
-    @extend_schema(summary='Tur paketi tafsiloti', tags=['Tours'])
+    @extend_schema(summary='Tur paketi tafsiloti', tags=['Tours — User'])
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
@@ -136,10 +127,12 @@ class TourAvailabilityListView(generics.ListAPIView):
     """GET /api/tours/<package_id>/availability/"""
     permission_classes = [AllowAny]
     serializer_class   = TourAvailabilitySerializer
+    queryset           = TourAvailability.objects.none()
 
     @extend_schema(
         summary    = 'Tur mavjud sanalari',
-        tags       = ['Tours'],
+        tags       = ['Tours — User'],
+        responses  = {200: TourAvailabilitySerializer(many=True)},
         parameters = [OpenApiParameter('month', str, description='YYYY-MM formatida oy')]
     )
     def get(self, request, package_id=None, *args, **kwargs):
@@ -176,11 +169,11 @@ class TourReviewListCreateView(generics.ListCreateAPIView):
             is_published=True,
         ).select_related('user')
 
-    @extend_schema(summary='Tur sharhlari', tags=['Tours'])
+    @extend_schema(summary='Tur sharhlari', tags=['Tours — User'])
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
-    @extend_schema(summary='Sharh qoldirish', tags=['Tours'])
+    @extend_schema(summary='Sharh qoldirish', tags=['Tours — User'])
     def post(self, request, package_id=None, *args, **kwargs):
         # Faqat haqiqiy bronchilar sharh yozishi mumkin
         has_booking = TourBooking.objects.filter(
@@ -215,7 +208,7 @@ class TourBookView(APIView):
         request   = TourBookingCreateSerializer,
         responses = {201: TourBookingDetailSerializer},
         summary   = 'Tur bron qilish',
-        tags      = ['Tours'],
+        tags      = ['Tours — User'],
     )
     def post(self, request, package_id=None):
         serializer = TourBookingCreateSerializer(data=request.data)
@@ -267,7 +260,7 @@ class MyTourBookingsView(generics.ListAPIView):
             'booking', 'package__destination', 'availability'
         ).prefetch_related('voucher')
 
-    @extend_schema(summary='Mening tur bronlarim', tags=['Tours'])
+    @extend_schema(summary='Mening tur bronlarim', tags=['Tours — User'])
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
@@ -284,7 +277,7 @@ class MyTourBookingDetailView(generics.RetrieveAPIView):
             booking__user=self.request.user
         ).select_related('booking', 'package__destination', 'availability')
 
-    @extend_schema(summary='Tur bron tafsiloti', tags=['Tours'])
+    @extend_schema(summary='Tur bron tafsiloti', tags=['Tours — User'])
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
@@ -296,7 +289,7 @@ class TourBookingVoucherView(APIView):
     @extend_schema(
         responses = {200: TourVoucherSerializer},
         summary   = 'Tur voaucheri',
-        tags      = ['Tours'],
+        tags      = ['Tours — User'],
     )
     def get(self, request, pk=None):
         try:

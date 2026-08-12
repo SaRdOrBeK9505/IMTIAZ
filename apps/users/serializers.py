@@ -35,6 +35,8 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.crm.models import Organization
+
 from .models import AIAutonomyLevel, OTPCode, User, UserRole
 
 # ─── Yordamchi ────────────────────────────────────────────────────────────────
@@ -51,10 +53,15 @@ def _normalize_phone(value: str) -> str:
 
 
 def _build_jwt_response(user: User) -> dict:
-    """JWT yaratadi; token ichiga role va aud claim yoziladi."""
+    """JWT yaratadi; token ichiga role, aud va CRM claim'lar yoziladi."""
     refresh = RefreshToken.for_user(user)
     refresh['role'] = user.role
     refresh['aud']  = user.jwt_audience
+
+    organization = user.organization
+    if organization:
+        refresh['organization_id'] = str(organization.id)
+
     return {
         'success': True,
         'access':  str(refresh.access_token),
@@ -337,9 +344,37 @@ class LoginSerializer(serializers.Serializer):
 
 class CRMLoginSerializer(LoginSerializer):
     """
-    POST /api/crm/auth/login/   — faqat owner va branch_staff (crm audience)
+    POST /api/crm/auth/login/ — CRM rollari (restoran yoki tur).
+
+    Ruxsat etilgan rollar: owner_restaurant, restaurant_staff, owner_tour, tour_staff.
+    Frontend `user.role` asosida qaysi panelga yo'naltirishni hal qiladi.
     """
-    allowed_roles = [UserRole.OWNER, UserRole.BRANCH_STAFF]
+    allowed_roles = [
+        UserRole.OWNER_RESTAURANT,
+        UserRole.RESTAURANT_STAFF,
+        UserRole.OWNER_TOUR,
+        UserRole.TOUR_STAFF,
+    ]
+
+    phone = serializers.CharField(help_text='Telefon: +998XXXXXXXXX')
+    password = serializers.CharField(write_only=True, help_text='Parol')
+
+    def validate(self, attrs: dict) -> dict:
+        attrs = super().validate(attrs)
+        user = attrs['user']
+        organization = user.organization
+
+        if not organization:
+            raise serializers.ValidationError(
+                'Foydalanuvchi hech qanday tashkilotga biriktirilmagan.'
+            )
+        if not organization.is_active:
+            raise serializers.ValidationError(
+                'Tashkilot vaqtincha faol emas. Administrator bilan bog\'laning.'
+            )
+
+        attrs['organization'] = organization
+        return attrs
 
 
 class AdminLoginSerializer(LoginSerializer):
@@ -351,8 +386,25 @@ class AdminLoginSerializer(LoginSerializer):
 
 # ─── Profile ──────────────────────────────────────────────────────────────────
 
+class OrganizationBriefSerializer(serializers.ModelSerializer):
+    """CRM login javobida qaytariladigan tashkilot qisqa profili."""
+
+    class Meta:
+        model  = Organization
+        fields = ['id', 'name', 'business_type', 'logo']
+        extra_kwargs = {
+            'id': {'help_text': 'Tashkilot UUID'},
+            'name': {'help_text': 'Tashkilot nomi'},
+            'business_type': {
+                'help_text': 'Tashkilot turi (informativ). Asosiy routing — user.role',
+            },
+            'logo': {'help_text': 'Logo URL (media)'},
+        }
+
+
 class UserProfileSerializer(serializers.ModelSerializer):
     full_name             = serializers.CharField(read_only=True)
+    organization          = OrganizationBriefSerializer(read_only=True)
     membership_tier_name  = serializers.SerializerMethodField()
     waitlist_status       = serializers.SerializerMethodField()
     effective_ai_autonomy = serializers.SerializerMethodField()
@@ -363,6 +415,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'id', 'telegram_id', 'telegram_username',
             'phone', 'is_phone_verified', 'role',
             'first_name', 'last_name', 'full_name',
+            'organization',
             'avatar_url', 'language_code',
             'ai_autonomy_level', 'ai_auto_price_limit',
             'balance', 'bonus_points',

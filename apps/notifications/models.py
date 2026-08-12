@@ -22,6 +22,7 @@ class Notification(BaseModel):
         SUBSCRIPTION_RENEWAL = 'subscription_renewal', 'Obuna yangilandi'
         SUBSCRIPTION_PAST_DUE = 'subscription_past_due', 'Obuna to\'lovi o\'tmadi'
         WAITLIST_APPROVED = 'waitlist_approved', 'A\'zolik tasdiqlandi'
+        NEW_LEAD = 'new_lead', 'Yangi lead (CRM)'
         GENERAL = 'general', 'Umumiy'
 
     class Channel(models.TextChoices):

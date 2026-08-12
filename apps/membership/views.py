@@ -23,6 +23,15 @@ class MembershipTierListView(generics.ListAPIView):
     serializer_class   = MembershipTierSerializer
     queryset           = MembershipTier.objects.all()
 
+    @extend_schema(
+        tags=['Membership'],
+        summary='A\'zolik darajalari ro\'yxati',
+        description='Auth talab qilmaydi. Tier cheklovlari va imtiyozlari.',
+        responses={200: MembershipTierSerializer(many=True)},
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
+
 
 class MyMembershipView(APIView):
     """GET /api/membership/my/ — joriy foydalanuvchi a'zoligi"""

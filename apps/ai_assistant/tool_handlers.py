@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 def handle_search_flights(
     user, origin: str, destination: str, departure_date: str,
     return_date: str = None, passengers: int = 1,
-    seat_class: str = 'economy', **kwargs,
+    seat_class: str = 'economy', lang: str = 'uz', **kwargs,
 ) -> dict:
     """
     Parvoz qidirish — BookharaAdapter orqali.
@@ -37,6 +37,7 @@ def handle_search_flights(
             destination=destination,
             departure_date=departure_date,
             detail='bookhara_not_configured',
+            lang=lang,
         )
 
     try:
@@ -74,7 +75,7 @@ def handle_search_flights(
     except Exception as e:
         return {
             **integration_error_dict(
-                e, service='flight',
+                e, service='flight', lang=lang,
                 origin=origin, destination=destination, departure_date=departure_date,
             ),
             'origin': origin,
@@ -85,7 +86,7 @@ def handle_search_flights(
 
 def handle_search_trains(
     user, origin: str, destination: str, departure_date: str,
-    passengers: int = 1, wagon_type: str = 'coupe', **kwargs,
+    passengers: int = 1, wagon_type: str = 'coupe', lang: str = 'uz', **kwargs,
 ) -> dict:
     from django.conf import settings
     from apps.integrations.errors import integration_error_dict, train_search_error
@@ -99,6 +100,7 @@ def handle_search_trains(
             origin=origin,
             destination=destination,
             detail='railway_not_configured',
+            lang=lang,
         )
 
     return train_search_error(
@@ -106,14 +108,17 @@ def handle_search_trains(
         origin=origin,
         destination=destination,
         detail='railway_not_implemented',
+        lang=lang,
     )
 
 
 def handle_search_restaurants(
     user, city: str, date: str, time: str,
-    guests: int = 2, cuisine: str = None, **kwargs,
+    guests: int = 2, cuisine: str = None, lang: str = 'uz', **kwargs,
 ) -> dict:
     from apps.crm.models import Branch
+    from .i18n import localized_field
+
     qs = Branch.objects.filter(
         organization__org_type='restaurant',
         organization__is_active=True,
@@ -123,9 +128,9 @@ def handle_search_restaurants(
     results = [
         {
             'branch_id':   str(b.id),
-            'name':        b.organization.name,
-            'branch_name': b.name,
-            'address':     b.address,
+            'name':        localized_field(b.organization, 'name', lang),
+            'branch_name': localized_field(b, 'name', lang),
+            'address':     localized_field(b, 'address', lang),
             'city':        b.city,
             'phone':       b.phone,
         }
@@ -178,9 +183,10 @@ def handle_book_flight(
 
 def handle_search_events(
     user, city: str = None, date_from: str = None,
-    date_to: str = None, category: str = None, **kwargs,
+    date_to: str = None, category: str = None, lang: str = 'uz', **kwargs,
 ) -> dict:
     from apps.events.models import Event
+    from .i18n import localized_field
     try:
         has_exclusive = user.membership_tier.exclusive_events_access
     except Exception:
@@ -195,9 +201,9 @@ def handle_search_events(
         'results': [
             {
                 'event_id':          str(e.id),
-                'title':             e.title,
+                'title':             localized_field(e, 'title', lang),
                 'starts_at':         e.starts_at.isoformat(),
-                'venue':             e.venue_name,
+                'venue':             localized_field(e, 'venue_name', lang),
                 'price':             float(e.ticket_price),
                 'available_tickets': e.available_tickets,
                 'is_exclusive':      e.is_exclusive,
@@ -207,28 +213,36 @@ def handle_search_events(
     }
 
 
-def handle_cancel_booking(user, booking_id: str, reason: str = '', **kwargs) -> dict:
+def handle_cancel_booking(user, booking_id: str, reason: str = '', lang: str = 'uz', **kwargs) -> dict:
     from django.utils import timezone
     from apps.booking.models import Booking, BookingStatus
+    from .i18n import status_label, t
 
     try:
         booking = Booking.objects.get(id=booking_id, user=user)
     except Booking.DoesNotExist:
-        return {'status': 'error', 'message': 'Bron topilmadi.'}
+        return {'status': 'error', 'message': t('booking_not_found', lang)}
 
     if booking.status in (BookingStatus.CANCELLED, BookingStatus.COMPLETED):
-        return {'status': 'error', 'message': f'Bron allaqachon {booking.status}.'}
+        return {
+            'status': 'error',
+            'message': t(
+                'booking_already_status', lang,
+                status=status_label(booking.status, lang),
+            ),
+        }
 
     booking.status              = BookingStatus.CANCELLED
     booking.cancellation_reason = reason
     booking.cancelled_at        = timezone.now()
     booking.save(update_fields=['status', 'cancellation_reason', 'cancelled_at', 'updated_at'])
     logger.info('AI bron bekor qildi: booking=%s, user=%s', booking_id, user.id)
-    return {'status': 'ok', 'message': 'Bron bekor qilindi.'}
+    return {'status': 'ok', 'message': t('booking_cancelled', lang)}
 
 
 def handle_get_user_bookings(
-    user, status: str = 'all', service_type: str = None, limit: int = 10, **kwargs
+    user, status: str = 'all', service_type: str = None, limit: int = 10,
+    lang: str = 'uz', **kwargs,
 ) -> dict:
     from apps.booking.models import Booking
     qs = Booking.objects.filter(user=user).order_by('-created_at')
@@ -254,10 +268,11 @@ def handle_get_user_bookings(
 
 def handle_get_nearby_places(
     user, latitude: float, longitude: float,
-    service_type: str = 'restaurant', radius_km: float = 5, **kwargs,
+    service_type: str = 'restaurant', radius_km: float = 5, lang: str = 'uz', **kwargs,
 ) -> dict:
     import math
     from apps.crm.models import Branch
+    from .i18n import localized_field
 
     def haversine(lat1, lon1, lat2, lon2):
         R = 6371
@@ -280,9 +295,9 @@ def handle_get_nearby_places(
         if dist <= radius_km:
             nearby.append({
                 'branch_id':   str(branch.id),
-                'name':        branch.organization.name,
-                'branch_name': branch.name,
-                'address':     branch.address,
+                'name':        localized_field(branch.organization, 'name', lang),
+                'branch_name': localized_field(branch, 'name', lang),
+                'address':     localized_field(branch, 'address', lang),
                 'distance_km': round(dist, 2),
                 'phone':       branch.phone,
             })

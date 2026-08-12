@@ -46,6 +46,13 @@ def send_notification(self, notification_id: str) -> bool:
         return True
 
     try:
+        if notif.channel == Notification.Channel.IN_APP:
+            notif.status = Notification.Status.SENT
+            notif.sent_at = timezone.now()
+            notif.save(update_fields=['status', 'sent_at'])
+            logger.info('In-app bildirishnoma: id=%s, user=%s', notif.id, notif.user_id)
+            return True
+
         if notif.channel == Notification.Channel.TELEGRAM:
             success = _send_telegram(notif)
         else:
@@ -53,7 +60,7 @@ def send_notification(self, notification_id: str) -> bool:
             success = False
 
         if success:
-            notif.status  = Notification.Status.SENT
+            notif.status = Notification.Status.SENT
             notif.sent_at = timezone.now()
             notif.save(update_fields=['status', 'sent_at'])
             logger.info('Bildirishnoma yuborildi: id=%s, user=%s', notif.id, notif.user_id)
@@ -94,6 +101,15 @@ def _send_telegram(notif) -> bool:
     elif notif.notification_type == 'payment_success' and notif.metadata:
         amount = notif.metadata.get('amount', 0)
         message_id = bot.send_payment_success(notif.user.telegram_id, amount)
+
+    elif notif.notification_type == 'new_lead' and notif.metadata:
+        text = f"🔔 <b>{notif.title}</b>\n\n{notif.body}"
+        panel = notif.metadata.get('panel', '')
+        if panel == 'tour':
+            text += "\n\n📋 CRM: Tur arizalar bo'limini oching."
+        elif panel == 'restaurant':
+            text += "\n\n📋 CRM: Bronlar bo'limini oching."
+        message_id = bot.send_message(notif.user.telegram_id, text)
 
     elif notif.notification_type == 'waitlist_approved' and notif.metadata:
         tier_name = notif.metadata.get('tier_name', 'Standard')

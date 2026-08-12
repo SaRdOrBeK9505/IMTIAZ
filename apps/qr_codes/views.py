@@ -5,7 +5,7 @@ User:
     GET  /api/qr/<code>/           — QR ma'lumotlari (scan)
     POST /api/qr/<code>/redeem/    — chegirmani qo'llash
 
-CRM:
+CRM (asosiy: /api/crm/restaurant/qr/, legacy: /api/crm/qr/):
     GET/POST         /api/crm/qr/
     GET/PATCH/DELETE /api/crm/qr/<id>/
     POST             /api/crm/qr/<id>/regenerate/   — yangi QR PNG
@@ -19,11 +19,15 @@ from datetime import timedelta
 
 from django.db.models import Sum, Count, Q
 from django.utils import timezone
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, extend_schema_view
 from rest_framework import generics, status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from apps.core.authentication import CRMJWTAuthentication
+from apps.crm_restaurant.helpers import log_staff_activity
 
 from .models import QRCode, QRCodeRedemption, QRAnalyticsSummary
 from .serializers import (
@@ -34,29 +38,36 @@ from .serializers import (
     QRRedemptionCRMSerializer, QRAnalyticsSummarySerializer,
 )
 from .services import QRScanService, QRRedemptionService, QRGeneratorService
-from .permissions import IsQRManager
+from .permissions import IsRestaurantQRManager
 from apps.crm.models import StaffActivityLog
 
 logger = logging.getLogger(__name__)
 
+_QR_CRM_TAG = 'CRM Restaurant — QR Codes'
 
-def _get_staff_org(request):
-    return request.user.branch_staff_profile.branch.organization
+
+class RestaurantQRCRMMixin:
+    """Restoran CRM JWT + owner/staff QR ruxsatlari."""
+    authentication_classes = [CRMJWTAuthentication]
+    permission_classes = [IsAuthenticated, IsRestaurantQRManager]
+
+
+def _get_crm_org(request):
+    org = request.user.organization
+    if not org:
+        raise PermissionDenied('Tashkilot topilmadi.')
+    return org
 
 
 def _log_qr_action(request, description, entity_id=None):
-    try:
-        staff = request.user.branch_staff_profile
-        StaffActivityLog.objects.create(
-            staff       = staff,
-            action_type = StaffActivityLog.ActionType.MANAGE_QR,
-            entity_type = 'QRCode',
-            entity_id   = entity_id,
-            description = description,
-            ip_address  = request.META.get('REMOTE_ADDR'),
-        )
-    except Exception:
-        pass
+    log_staff_activity(
+        request.user,
+        action_type=StaffActivityLog.ActionType.MANAGE_QR,
+        entity_type='QRCode',
+        entity_id=entity_id,
+        description=description,
+        request=request,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -70,7 +81,7 @@ class QRCodeInfoView(APIView):
     @extend_schema(
         responses = {200: QRCodePublicSerializer},
         summary   = 'QR kod ma\'lumotlari',
-        tags      = ['QR Codes'],
+        tags      = ['QR Codes — User'],
     )
     def get(self, request, code: str):
         info = QRScanService.validate_and_get_info(
@@ -96,7 +107,7 @@ class QRRedeemView(APIView):
         request   = QRRedeemRequestSerializer,
         responses = {200: QRRedeemResponseSerializer},
         summary   = 'QR kod chegirmasini qo\'llash',
-        tags      = ['QR Codes'],
+        tags      = ['QR Codes — User'],
     )
     def post(self, request, code: str):
         serializer = QRRedeemRequestSerializer(data=request.data)
@@ -135,13 +146,11 @@ class QRRedeemView(APIView):
 # CRM
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class QRCodeCRMListCreateView(generics.ListCreateAPIView):
+class QRCodeCRMListCreateView(RestaurantQRCRMMixin, generics.ListCreateAPIView):
     """
-    GET  /api/crm/qr/ — kompaniya QR kodlari
-    POST /api/crm/qr/ — yangi QR kod yaratish
+    GET  /api/crm/restaurant/qr/ — kompaniya QR kodlari
+    POST /api/crm/restaurant/qr/ — yangi QR kod yaratish
     """
-    permission_classes = [IsAuthenticated, IsQRManager]
-
     def get_serializer_class(self):
         if self.request.method == 'POST':
             return QRCodeCRMCreateSerializer
@@ -150,7 +159,7 @@ class QRCodeCRMListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return QRCode.objects.none()
-        org = _get_staff_org(self.request)
+        org = _get_crm_org(self.request)
         qs  = QRCode.objects.filter(organization=org).select_related('branch')
 
         params = self.request.query_params
@@ -160,7 +169,7 @@ class QRCodeCRMListCreateView(generics.ListCreateAPIView):
             qs = qs.filter(qr_type=qr_type)
         return qs
 
-    @extend_schema(summary='QR kodlar ro\'yxati (CRM)', tags=['CRM QR'])
+    @extend_schema(summary='QR kodlar ro\'yxati (CRM)', tags=[_QR_CRM_TAG])
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
@@ -168,12 +177,12 @@ class QRCodeCRMListCreateView(generics.ListCreateAPIView):
         request   = QRCodeCRMCreateSerializer,
         responses = {201: QRCodeCRMSerializer},
         summary   = 'Yangi QR kod yaratish (CRM)',
-        tags      = ['CRM QR'],
+        tags      = [_QR_CRM_TAG],
     )
     def post(self, request, *args, **kwargs):
         serializer = QRCodeCRMCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        org = _get_staff_org(request)
+        org = _get_crm_org(request)
 
         qr = QRCode.objects.create(
             organization = org,
@@ -190,10 +199,8 @@ class QRCodeCRMListCreateView(generics.ListCreateAPIView):
         return Response(QRCodeCRMSerializer(qr).data, status=status.HTTP_201_CREATED)
 
 
-class QRCodeCRMDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """GET/PATCH/DELETE /api/crm/qr/<id>/"""
-    permission_classes = [IsAuthenticated, IsQRManager]
-
+class QRCodeCRMDetailView(RestaurantQRCRMMixin, generics.RetrieveUpdateDestroyAPIView):
+    """GET/PATCH/DELETE /api/crm/restaurant/qr/<id>/"""
     def get_serializer_class(self):
         if self.request.method in ('PUT', 'PATCH'):
             return QRCodeCRMUpdateSerializer
@@ -202,7 +209,7 @@ class QRCodeCRMDetailView(generics.RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return QRCode.objects.none()
-        org = _get_staff_org(self.request)
+        org = _get_crm_org(self.request)
         return QRCode.objects.filter(organization=org)
 
     def perform_destroy(self, instance):
@@ -210,27 +217,28 @@ class QRCodeCRMDetailView(generics.RetrieveUpdateDestroyAPIView):
         instance.save(update_fields=['is_active', 'updated_at'])
         _log_qr_action(self.request, f'QR kod o\'chirildi: {instance.code}', entity_id=instance.id)
 
-    @extend_schema(summary='QR kod tafsiloti (CRM)', tags=['CRM QR'])
+    @extend_schema(summary='QR kod tafsiloti (CRM)', tags=[_QR_CRM_TAG])
     def get(self, request, *args, **kwargs): return super().get(request, *args, **kwargs)
 
-    @extend_schema(summary='QR kodni yangilash (CRM)', tags=['CRM QR'])
+    @extend_schema(summary='QR kodni yangilash (CRM)', tags=[_QR_CRM_TAG])
     def patch(self, request, *args, **kwargs): return super().patch(request, *args, **kwargs)
 
-    @extend_schema(summary='QR kodni o\'chirish (soft, CRM)', tags=['CRM QR'])
+    @extend_schema(summary='QR kodni o\'chirish (soft, CRM)', tags=[_QR_CRM_TAG])
     def delete(self, request, *args, **kwargs): return super().delete(request, *args, **kwargs)
 
 
-class QRCodeRegenerateView(APIView):
-    """POST /api/crm/qr/<id>/regenerate/ — yangi QR PNG yaratish."""
-    permission_classes = [IsAuthenticated, IsQRManager]
-
-    @extend_schema(
-        responses = {200: QRCodeCRMSerializer},
-        summary   = 'QR PNG qayta generatsiya (CRM)',
-        tags      = ['CRM QR'],
-    )
+@extend_schema_view(
+    post=extend_schema(
+        responses={200: QRCodeCRMSerializer},
+        summary='QR PNG qayta generatsiya (CRM)',
+        tags=[_QR_CRM_TAG],
+        request=None,
+    ),
+)
+class QRCodeRegenerateView(RestaurantQRCRMMixin, APIView):
+    """POST /api/crm/restaurant/qr/<id>/regenerate/ — yangi QR PNG yaratish."""
     def post(self, request, pk=None):
-        org = _get_staff_org(request)
+        org = _get_crm_org(request)
         try:
             qr = QRCode.objects.get(id=pk, organization=org)
         except QRCode.DoesNotExist:
@@ -246,20 +254,18 @@ class QRCodeRegenerateView(APIView):
 # CRM — UI sahifalari (screenshot mos)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class QRScannerDashboardView(APIView):
+class QRScannerDashboardView(RestaurantQRCRMMixin, APIView):
     """
-    GET /api/crm/qr/scanner/
+    GET /api/crm/restaurant/qr/scanner/
     UI: /qr/scanner — skaner sahifasi uchun boshlang'ich ma'lumotlar.
     """
-    permission_classes = [IsAuthenticated, IsQRManager]
-
     @extend_schema(
         responses={200: OpenApiResponse(description='QR skaner dashboard')},
         summary='QR skaner sahifasi (CRM — /qr/scanner)',
-        tags=['CRM QR'],
+        tags=[_QR_CRM_TAG],
     )
     def get(self, request):
-        org = _get_staff_org(request)
+        org = _get_crm_org(request)
         applied = QRCodeRedemption.objects.filter(
             qr_code__organization=org, status='applied',
         ).select_related('qr_code', 'user').order_by('-scanned_at')
@@ -272,37 +278,33 @@ class QRScannerDashboardView(APIView):
         })
 
 
-class QRBonusesListView(generics.ListAPIView):
+class QRBonusesListView(RestaurantQRCRMMixin, generics.ListAPIView):
     """
-    GET /api/crm/qr/bonuses/
+    GET /api/crm/restaurant/qr/bonuses/
     UI: /qr/bonuses — alias for QR kodlar ro'yxati.
     """
-    permission_classes = [IsAuthenticated, IsQRManager]
     serializer_class   = QRCodeCRMSerializer
-
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return QRCode.objects.none()
-        org = _get_staff_org(self.request)
+        org = _get_crm_org(self.request)
         qs  = QRCode.objects.filter(organization=org).select_related('branch')
         if is_active := self.request.query_params.get('is_active'):
             qs = qs.filter(is_active=(is_active.lower() == 'true'))
         return qs
 
-    @extend_schema(summary='Bonuslar ro\'yxati (CRM — /qr/bonuses)', tags=['CRM QR'])
+    @extend_schema(summary='Bonuslar ro\'yxati (CRM — /qr/bonuses)', tags=[_QR_CRM_TAG])
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
 
-class QRAllRedemptionsListView(generics.ListAPIView):
-    """GET /api/crm/qr/redemptions/ — barcha so'nggi skanlar (org bo'yicha)."""
-    permission_classes = [IsAuthenticated, IsQRManager]
+class QRAllRedemptionsListView(RestaurantQRCRMMixin, generics.ListAPIView):
+    """GET /api/crm/restaurant/qr/redemptions/ — barcha so'nggi skanlar (org bo'yicha)."""
     serializer_class   = QRRedemptionCRMSerializer
-
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return QRCodeRedemption.objects.none()
-        org = _get_staff_org(self.request)
+        org = _get_crm_org(self.request)
         qs = QRCodeRedemption.objects.filter(
             qr_code__organization=org,
             status='applied',
@@ -316,23 +318,22 @@ class QRAllRedemptionsListView(generics.ListAPIView):
         return qs[:20]
 
     @extend_schema(
-        summary    = 'Barcha QR qo\'llashlar (CRM)',
-        tags       = ['CRM QR'],
-        parameters = [OpenApiParameter('limit', int, description='Natijalar soni (default: 20, max: 100)')],
+        summary='Barcha QR qo\'llashlar (CRM)',
+        tags=[_QR_CRM_TAG],
+        operation_id='crm_restaurant_qr_all_redemptions_list',
+        parameters=[OpenApiParameter('limit', int, description='Natijalar soni (default: 20, max: 100)')],
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
 
-class QRStaffScanView(APIView):
-    """POST /api/crm/qr/scan/ — CRM xodimi QR kodni tekshiradi."""
-    permission_classes = [IsAuthenticated, IsQRManager]
-
+class QRStaffScanView(RestaurantQRCRMMixin, APIView):
+    """POST /api/crm/restaurant/qr/scan/ — CRM xodimi QR kodni tekshiradi."""
     @extend_schema(
         request   = QRStaffScanRequestSerializer,
         responses = {200: QRStaffScanResponseSerializer},
         summary   = 'QR kodni skanerlash (CRM)',
-        tags      = ['CRM QR'],
+        tags      = [_QR_CRM_TAG],
     )
     def post(self, request):
         serializer = QRStaffScanRequestSerializer(data=request.data)
@@ -351,7 +352,7 @@ class QRStaffScanView(APIView):
             }, status=status.HTTP_404_NOT_FOUND)
 
         qr = info['qr_code']
-        org = _get_staff_org(request)
+        org = _get_crm_org(request)
         if qr.organization_id != org.id:
             return Response({'is_valid': False, 'message': 'QR kod sizning tashkilotingizga tegishli emas.'},
                             status=status.HTTP_403_FORBIDDEN)
@@ -369,22 +370,20 @@ class QRStaffScanView(APIView):
         })
 
 
-class QRStaffRedeemView(APIView):
-    """POST /api/crm/qr/redeem/ — CRM xodimi chegirmani qo'llaydi."""
-    permission_classes = [IsAuthenticated, IsQRManager]
-
+class QRStaffRedeemView(RestaurantQRCRMMixin, APIView):
+    """POST /api/crm/restaurant/qr/redeem/ — CRM xodimi chegirmani qo'llaydi."""
     @extend_schema(
         request   = QRStaffRedeemRequestSerializer,
         responses = {200: QRRedeemResponseSerializer},
         summary   = 'Chegirmani qo\'llash (CRM skaner)',
-        tags      = ['CRM QR'],
+        tags      = [_QR_CRM_TAG],
     )
     def post(self, request):
         serializer = QRStaffRedeemRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        org = _get_staff_org(request)
+        org = _get_crm_org(request)
         try:
             qr = QRCode.objects.get(code=data['code'], organization=org)
         except QRCode.DoesNotExist:
@@ -424,38 +423,38 @@ class QRStaffRedeemView(APIView):
         })
 
 
-class QRCodeRedemptionListView(generics.ListAPIView):
-    """GET /api/crm/qr/<id>/redemptions/ — qo'llashlar tarixi."""
-    permission_classes = [IsAuthenticated, IsQRManager]
+class QRCodeRedemptionListView(RestaurantQRCRMMixin, generics.ListAPIView):
+    """GET /api/crm/restaurant/qr/<id>/redemptions/ — qo'llashlar tarixi."""
     serializer_class   = QRRedemptionCRMSerializer
-
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return QRCodeRedemption.objects.none()
-        org = _get_staff_org(self.request)
+        org = _get_crm_org(self.request)
         return QRCodeRedemption.objects.filter(
             qr_code_id=self.kwargs['pk'],
             qr_code__organization=org,
         ).select_related('user').order_by('-scanned_at')
 
-    @extend_schema(summary='QR qo\'llashlar tarixi (CRM)', tags=['CRM QR'])
+    @extend_schema(
+        summary='QR qo\'llashlar tarixi (CRM)',
+        tags=[_QR_CRM_TAG],
+        operation_id='crm_restaurant_qr_code_redemptions_list',
+    )
     def get(self, request, *args, **kwargs): return super().get(request, *args, **kwargs)
 
 
-class QRCodeAnalyticsView(APIView):
-    """GET /api/crm/qr/<id>/analytics/ — bitta QR kod statistikasi."""
-    permission_classes = [IsAuthenticated, IsQRManager]
-
+class QRCodeAnalyticsView(RestaurantQRCRMMixin, APIView):
+    """GET /api/crm/restaurant/qr/<id>/analytics/ — bitta QR kod statistikasi."""
     @extend_schema(
         responses  = {200: QRAnalyticsSummarySerializer(many=True)},
         summary    = 'QR kod analitikasi (CRM)',
-        tags       = ['CRM QR'],
+        tags       = [_QR_CRM_TAG],
         parameters = [
             OpenApiParameter('days', int, description='Oxirgi N kun (default: 30)'),
         ]
     )
     def get(self, request, pk=None):
-        org = _get_staff_org(request)
+        org = _get_crm_org(request)
         try:
             qr = QRCode.objects.get(id=pk, organization=org)
         except QRCode.DoesNotExist:
@@ -485,20 +484,18 @@ class QRCodeAnalyticsView(APIView):
         })
 
 
-class QRAllAnalyticsView(APIView):
-    """GET /api/crm/qr/analytics/ — barcha QR kodlar umumiy statistikasi."""
-    permission_classes = [IsAuthenticated, IsQRManager]
-
+class QRAllAnalyticsView(RestaurantQRCRMMixin, APIView):
+    """GET /api/crm/restaurant/qr/analytics/ — barcha QR kodlar umumiy statistikasi."""
     @extend_schema(
         responses  = {200: OpenApiResponse(description='Umumiy QR analitika')},
         summary    = 'Barcha QR kodlar analitikasi (CRM)',
-        tags       = ['CRM QR'],
+        tags       = [_QR_CRM_TAG],
         parameters = [
             OpenApiParameter('period', str, description='daily | weekly | monthly'),
         ]
     )
     def get(self, request):
-        org    = _get_staff_org(request)
+        org    = _get_crm_org(request)
         period = request.query_params.get('period', 'monthly')
         now    = timezone.now()
 

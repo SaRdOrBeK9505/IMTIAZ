@@ -1,5 +1,4 @@
 from django.urls import path
-from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
     RequestOTPView,
@@ -9,15 +8,22 @@ from .views import (
     CRMLoginView,
     AdminLoginView,
     LogoutView,
+    TokenRefreshView,
     UserMeView,
     AISettingsView,
 )
+from .crm_onboarding_views import CRMOwnerRegisterDisabledView
 
 urlpatterns = [
-    # ── Ro'yxatdan o'tish ─────────────────────────────────────────────────────
+    # ── Ro'yxatdan o'tish (customer) ──────────────────────────────────────────
     path('auth/register/request-otp/', RequestOTPView.as_view(),          name='register-request-otp'),
     path('auth/register/verify-otp/',  VerifyOTPView.as_view(),           name='register-verify-otp'),
     path('auth/register/complete/',    CompleteRegistrationView.as_view(), name='register-complete'),
+
+    # CRM owner self-register o'chirilgan — faqat Django admin
+    path('crm/auth/register/request-otp/', CRMOwnerRegisterDisabledView.as_view(), name='crm-owner-register-request-otp'),
+    path('crm/auth/register/verify-otp/',  CRMOwnerRegisterDisabledView.as_view(), name='crm-owner-register-verify-otp'),
+    path('crm/auth/register/complete/',    CRMOwnerRegisterDisabledView.as_view(), name='crm-owner-register-complete'),
 
     # ── Login (phone + password) ──────────────────────────────────────────────
     path('auth/login/',       LoginView.as_view(),      name='auth-login'),

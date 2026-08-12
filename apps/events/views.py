@@ -1,10 +1,15 @@
 """Events app views."""
 
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
 
+from apps.core.openapi_schemas import ErrorResponseSerializer
+
 from .models import Event
 from .serializers import EventSerializer
+
+_TAG = 'Events'
 
 
 class EventListView(generics.ListAPIView):
@@ -26,12 +31,25 @@ class EventListView(generics.ListAPIView):
         if not has_exclusive:
             qs = qs.filter(is_exclusive=False)
 
-        # Filtrlash
         category = self.request.query_params.get('category')
         if category:
             qs = qs.filter(category__slug=category)
 
         return qs.order_by('starts_at')
+
+    @extend_schema(
+        tags=[_TAG],
+        summary='Tadbirlar ro\'yxati',
+        description=(
+            'Published tadbirlar. Eksklyuziv tadbirlar faqat premium tier foydalanuvchilariga ko\'rinadi.'
+        ),
+        parameters=[
+            OpenApiParameter('category', str, description='Kategoriya slug'),
+        ],
+        responses={200: EventSerializer(many=True)},
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
 
 
 class EventDetailView(generics.RetrieveAPIView):
@@ -50,3 +68,11 @@ class EventDetailView(generics.RetrieveAPIView):
         if not has_exclusive:
             qs = qs.filter(is_exclusive=False)
         return qs
+
+    @extend_schema(
+        tags=[_TAG],
+        summary='Tadbir tafsilotlari',
+        responses={200: EventSerializer, 404: ErrorResponseSerializer},
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)

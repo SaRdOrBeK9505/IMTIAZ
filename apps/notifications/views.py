@@ -8,7 +8,7 @@ POST /api/notifications/read-all/  — barchasini o'qildi
 
 from __future__ import annotations
 
-from drf_spectacular.utils import extend_schema, OpenApiResponse
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -32,11 +32,22 @@ class NotificationListView(generics.ListAPIView):
             user=self.request.user
         ).order_by('-created_at')
 
-        # ?unread=true — faqat o'qilmaganlar
         if self.request.query_params.get('unread') == 'true':
             qs = qs.exclude(status=Notification.Status.READ)
 
         return qs[:50]
+
+    @extend_schema(
+        tags=['Notifications'],
+        summary='Bildirishnomalar ro\'yxati',
+        description='Oxirgi 50 ta yozuv. `?unread=true` — faqat o\'qilmaganlar.',
+        parameters=[
+            OpenApiParameter('unread', str, description='true — faqat o\'qilmaganlar'),
+        ],
+        responses={200: NotificationSerializer(many=True)},
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
 
 
 class NotificationReadView(APIView):

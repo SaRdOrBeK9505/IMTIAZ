@@ -20,6 +20,7 @@ import logging
 from django.conf import settings
 
 from .confirmation import create_pending_action, requires_confirmation
+from .i18n import build_confirmation_summary, build_system_prompt, resolve_language, t
 from .models import ConversationSession, ConversationMessage, AIActionLog
 from .providers.base import BaseAIProvider, AIMessage
 from .response_builder import (
@@ -30,24 +31,6 @@ from .response_builder import (
 from .tools import get_all_tools
 
 logger = logging.getLogger(__name__)
-
-SYSTEM_PROMPT = """\
-Sen IMTIAZ premium lifestyle concierge AI assistantsan.
-Xizmatlar: parvoz, poyezd, restoran, tadbirlar, bronlar.
-
-Qoidalar:
-1. Faqat IMTIAZ mavzularida yordam ber
-2. Avtonomiya: {autonomy_level} | limit: {price_limit} UZS
-   - manual: har bron uchun tasdiqlash
-   - semi_auto: 300,000 UZS gacha mustaqil
-   - full_auto: limitgacha mustaqil
-3. Foydalanuvchi tilida, iliq va professional javob ber
-4. Tashqi xizmat ishlamasa:
-   - HECH QACHON .env, API, server, Bookhara, konfiguratsiya haqida gapirma
-   - "Tizimda kechikish bor" deb yumshoq ayt
-   - Alternativa taklif qil (boshqa sana, restoran, menejer orqali qo'lda yordam)
-5. Tool xato xabarini mijozga moslab yetkaz, texnik so'zlarni olib tashla
-"""
 
 # Yozish tool'lari — requires_confirmation() ga yuboriladi
 WRITE_TOOL_TO_ACTION: dict[str, tuple[str, str]] = {
@@ -85,13 +68,15 @@ class AIAssistantService:
 
     def chat(self, user, message: str, session_id: str | None = None) -> dict:
         session = self.get_or_create_session(user, session_id)
+        lang    = resolve_language(user, message)
 
         ConversationMessage.objects.create(
             session=session, role='user', content=message,
         )
 
         history = self._load_history(session)
-        system  = SYSTEM_PROMPT.format(
+        system  = build_system_prompt(
+            lang=lang,
             price_limit=f"{user.ai_auto_price_limit:,.0f}",
             autonomy_level=user.ai_autonomy_level,
         )
@@ -104,7 +89,7 @@ class AIAssistantService:
             )
         except Exception as e:
             logger.exception('AI provider xatosi: %s', e)
-            err = "Kechirasiz, texnik muammo. Qayta urinib ko'ring."
+            err = t('ai_provider_error', lang)
             ConversationMessage.objects.create(
                 session=session, role='assistant', content=err,
             )
@@ -130,7 +115,7 @@ class AIAssistantService:
 
         if ai_response.tool_calls:
             tool_results, pending_action_id, pending_summary = (
-                self._execute_tool_calls(user, session, ai_response.tool_calls)
+                self._execute_tool_calls(user, session, ai_response.tool_calls, lang=lang)
             )
 
             if pending_action_id:
@@ -138,9 +123,10 @@ class AIAssistantService:
                 final_content = pending_summary
             elif can_reply_without_ai(tool_results) and getattr(
                 settings, 'AI_SKIP_SECOND_CALL', True
-            ):
-                # Token tejash: tool natijasidan javob yig'amiz
-                final_content = build_reply_from_tools(tool_results)
+            ) and lang == 'uz':
+                # Token tejash: o'zbek tilida tool natijasidan javob yig'amiz.
+                # ru/en uchun LLM DB ma'lumotlarini tarjima qiladi.
+                final_content = build_reply_from_tools(tool_results, lang=lang)
             else:
                 # Murakkab holat — AI ga qisqartirilgan natija yuboriladi
                 tool_msgs = [
@@ -173,12 +159,14 @@ class AIAssistantService:
                         tools=tools, system=system,
                         max_tokens=getattr(settings, 'AI_FOLLOWUP_MAX_TOKENS', 512),
                     )
-                    final_content = final_resp.content or build_reply_from_tools(tool_results)
+                    final_content = (
+                        final_resp.content
+                        or build_reply_from_tools(tool_results, lang=lang)
+                    )
                 except Exception as e:
                     logger.exception('Tool result qayta chaqiruvda xato: %s', e)
-                    final_content = build_reply_from_tools(tool_results) or (
-                        "Ma'lumot olindi, lekin javobni shakllantirishda muammo bo'ldi. "
-                        "Qayta urinib ko'ring."
+                    final_content = build_reply_from_tools(tool_results, lang=lang) or t(
+                        'reply_format_error', lang
                     )
 
         msg = ConversationMessage.objects.create(
@@ -224,6 +212,7 @@ class AIAssistantService:
         user,
         session: ConversationSession,
         tool_calls: list[dict],
+        lang: str = 'uz',
     ) -> tuple[list[dict], str | None, str]:
         """
         Returns: (results, pending_action_id | None, pending_summary)
@@ -251,7 +240,9 @@ class AIAssistantService:
                         payload=tool_input,
                         amount=amount,
                     )
-                    summary = self._build_confirmation_summary(tool_name, tool_input, amount)
+                    summary = build_confirmation_summary(
+                        tool_name, tool_input, amount, lang=lang
+                    )
                     logger.info(
                         'Tool [%s] tasdiqlash kerak: action_id=%s, user=%s',
                         tool_name, log.id, user.id,
@@ -268,7 +259,7 @@ class AIAssistantService:
                 payload=tool_input,
             )
             try:
-                result         = self._dispatch_tool(user, tool_name, tool_input)
+                result         = self._dispatch_tool(user, tool_name, tool_input, lang=lang)
                 log_entry.result = result
                 log_entry.status = AIActionLog.ActionStatus.SUCCESS
                 logger.info('Tool [%s] OK: user=%s', tool_name, user.id)
@@ -278,7 +269,7 @@ class AIAssistantService:
                 service = 'flight' if tool_name == 'search_flights' else (
                     'train' if tool_name == 'search_trains' else 'generic'
                 )
-                result = integration_error_dict(e, service=service)
+                result = integration_error_dict(e, service=service, lang=lang)
                 log_entry.result = result
                 log_entry.status = AIActionLog.ActionStatus.FAILED
                 log_entry.error_message = str(e)
@@ -293,12 +284,12 @@ class AIAssistantService:
         return results, None, ''
 
     @staticmethod
-    def _dispatch_tool(user, tool_name: str, tool_input: dict) -> dict:
+    def _dispatch_tool(user, tool_name: str, tool_input: dict, lang: str = 'uz') -> dict:
         from .tool_handlers import TOOL_DISPATCH
         handler = TOOL_DISPATCH.get(tool_name)
         if not handler:
             raise ValueError(f"Noma'lum tool: {tool_name!r}")
-        return handler(user=user, **tool_input)
+        return handler(user=user, lang=lang, **tool_input)
 
     @staticmethod
     def _extract_amount(tool_input: dict) -> Decimal | None:
@@ -311,36 +302,6 @@ class AIAssistantService:
                 except Exception:
                     pass
         return None
-
-    @staticmethod
-    def _build_confirmation_summary(
-        tool_name: str, tool_input: dict, amount: 'Decimal | None'
-    ) -> str:
-        amount_str = f"\n💰 Taxminiy narx: {amount:,.0f} UZS" if amount else ''
-        if tool_name == 'book_flight':
-            return (
-                f"✈️ Parvoz bron so'rovi:\n"
-                f"📍 {tool_input.get('origin', '?')} → {tool_input.get('destination', '?')}\n"
-                f"📅 {tool_input.get('departure_at', tool_input.get('departure_date', '?'))}\n"
-                f"👥 {tool_input.get('passengers', 1)} yo'lovchi"
-                f"{amount_str}\n\n"
-                f"Tasdiqlash uchun ilovadagi «✅ Tasdiqlash» tugmasini bosing."
-            )
-        if tool_name == 'book_restaurant':
-            return (
-                f"🍽 Restoran bron so'rovi:\n"
-                f"📅 {tool_input.get('date', '?')} {tool_input.get('time', '?')}\n"
-                f"👥 {tool_input.get('guests', '?')} kishi"
-                f"{amount_str}\n\n"
-                f"Tasdiqlash uchun ilovadagi «✅ Tasdiqlash» tugmasini bosing."
-            )
-        if tool_name == 'cancel_booking':
-            return (
-                f"❌ Bronni bekor qilish so'rovi:\n"
-                f"🆔 {tool_input.get('booking_id', '?')}\n\n"
-                f"Tasdiqlash uchun ilovadagi «✅ Tasdiqlash» tugmasini bosing."
-            )
-        return f"Harakat: {tool_name}\n\nTasdiqlash uchun «✅ Tasdiqlash» tugmasini bosing."
 
     @staticmethod
     def _tool_to_action_type(name: str) -> str:

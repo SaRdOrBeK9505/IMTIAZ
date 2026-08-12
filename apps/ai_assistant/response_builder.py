@@ -1,11 +1,13 @@
 """
 Tool natijalaridan foydalanuvchiga javob yig'ish — ikkinchi AI chaqiruvsiz.
-Token tejash va barqaror xato xabarlari uchun.
+Token tejash va barqaror xato xabarlari uchun (asosan o'zbek tilida).
 """
 
 from __future__ import annotations
 
 import json
+
+from .i18n import normalize_language, service_label, status_label, t
 
 
 def trim_tool_result_for_ai(result: dict, max_offers: int = 5) -> dict:
@@ -33,8 +35,9 @@ def can_reply_without_ai(tool_results: list[dict]) -> bool:
     return True
 
 
-def build_reply_from_tools(tool_results: list[dict]) -> str:
-    """Tool natijalaridan o'zbekcha javob — AI chaqiruvsiz."""
+def build_reply_from_tools(tool_results: list[dict], lang: str = 'uz') -> str:
+    """Tool natijalaridan foydalanuvchiga javob — tilga mos."""
+    lang = normalize_language(lang)
     parts: list[str] = []
 
     for item in tool_results:
@@ -42,117 +45,137 @@ def build_reply_from_tools(tool_results: list[dict]) -> str:
         result = item.get('result') or {}
 
         if result.get('status') == 'error':
-            parts.append(result.get('message') or 'Xizmat vaqtincha ishlamayapti.')
+            parts.append(result.get('message') or t('service_unavailable', lang))
             continue
 
         if name == 'search_flights':
-            parts.append(_format_flights(result))
+            parts.append(_format_flights(result, lang))
         elif name == 'search_trains':
-            parts.append(_format_trains(result))
+            parts.append(_format_trains(result, lang))
         elif name == 'search_restaurants':
-            parts.append(_format_restaurants(result))
+            parts.append(_format_restaurants(result, lang))
         elif name == 'search_events':
-            parts.append(_format_events(result))
+            parts.append(_format_events(result, lang))
         elif name == 'get_user_bookings':
-            parts.append(_format_bookings(result))
+            parts.append(_format_bookings(result, lang))
         elif name == 'get_nearby_places':
-            parts.append(_format_nearby(result))
+            parts.append(_format_nearby(result, lang))
         elif name == 'get_user_preferences':
-            parts.append(_format_preferences(result))
+            parts.append(_format_preferences(result, lang))
         elif name == 'cancel_booking':
-            parts.append(result.get('message', 'Amal bajarildi.'))
+            parts.append(result.get('message', t('action_done', lang)))
         else:
             parts.append(json.dumps(result, ensure_ascii=False)[:500])
 
-    return '\n\n'.join(p for p in parts if p).strip() or (
-        "So'rovingiz bo'yicha ma'lumot topildi."
-    )
+    return '\n\n'.join(p for p in parts if p).strip() or t('default_tool_reply', lang)
 
 
-def _format_flights(result: dict) -> str:
+def _format_flights(result: dict, lang: str) -> str:
     offers = result.get('offers') or []
     if not offers:
         route = f"{result.get('origin', '?')} → {result.get('destination', '?')}"
-        return f"{route} yo'nalishida {result.get('departure_date', '')} sanasida parvoz topilmadi."
+        return t(
+            'flights_not_found', lang,
+            route=route,
+            date=result.get('departure_date', ''),
+        )
 
     lines = [
-        f"✈️ {result.get('origin')} → {result.get('destination')} "
-        f"({result.get('departure_date')}) — {len(offers)} ta variant:"
+        t(
+            'flights_header', lang,
+            origin=result.get('origin'),
+            destination=result.get('destination'),
+            date=result.get('departure_date'),
+            count=len(offers),
+        )
     ]
     for i, o in enumerate(offers[:5], 1):
         price = o.get('price', 0)
         currency = o.get('currency', 'UZS')
-        lines.append(
-            f"{i}. {o.get('airline', '?')} {o.get('flight_number', '')} — "
-            f"{price:,.0f} {currency}"
-        )
+        lines.append(t(
+            'flight_item', lang,
+            i=i,
+            airline=o.get('airline', '?'),
+            number=o.get('flight_number', ''),
+            price=price,
+            currency=currency,
+        ))
     if len(offers) > 5:
-        lines.append(f"... va yana {len(offers) - 5} ta variant.")
+        lines.append(t('flights_more', lang, count=len(offers) - 5))
     return '\n'.join(lines)
 
 
-def _format_trains(result: dict) -> str:
+def _format_trains(result: dict, lang: str) -> str:
     offers = result.get('offers') or []
     if not offers:
-        return "Poyezd reyslari topilmadi."
-    lines = [f"🚂 {len(offers)} ta poyezd varianti:"]
+        return t('trains_not_found', lang)
+    lines = [t('trains_header', lang, count=len(offers))]
     for i, o in enumerate(offers[:5], 1):
-        lines.append(
-            f"{i}. Poyezd {o.get('train_number', '?')} — {o.get('price', 0):,.0f} UZS"
-        )
+        lines.append(t(
+            'train_item', lang,
+            i=i,
+            number=o.get('train_number', '?'),
+            price=o.get('price', 0),
+        ))
     return '\n'.join(lines)
 
 
-def _format_restaurants(result: dict) -> str:
+def _format_restaurants(result: dict, lang: str) -> str:
     items = result.get('results') or []
     if not items:
-        return "Restoran topilmadi."
-    lines = [f"🍽 {len(items)} ta restoran:"]
+        return t('restaurants_not_found', lang)
+    lines = [t('restaurants_header', lang, count=len(items))]
     for i, r in enumerate(items[:5], 1):
         lines.append(f"{i}. {r.get('name', '?')} — {r.get('address', '')}")
     return '\n'.join(lines)
 
 
-def _format_events(result: dict) -> str:
+def _format_events(result: dict, lang: str) -> str:
     items = result.get('results') or []
     if not items:
-        return "Tadbir topilmadi."
-    lines = [f"🎭 {len(items)} ta tadbir:"]
+        return t('events_not_found', lang)
+    lines = [t('events_header', lang, count=len(items))]
     for i, e in enumerate(items[:5], 1):
         lines.append(f"{i}. {e.get('title', '?')} — {e.get('venue', '')}")
     return '\n'.join(lines)
 
 
-def _format_bookings(result: dict) -> str:
+def _format_bookings(result: dict, lang: str) -> str:
     bookings = result.get('bookings') or []
     if not bookings:
-        return "Sizda hozircha bronlar yo'q."
-    lines = [f"📋 {len(bookings)} ta bron:"]
+        return t('bookings_empty', lang)
+    lines = [t('bookings_header', lang, count=len(bookings))]
     for b in bookings[:5]:
-        lines.append(
-            f"• {b.get('title', '?')} — {b.get('status', '?')} "
-            f"({b.get('final_price', 0):,.0f} UZS)"
-        )
+        lines.append(t(
+            'booking_item', lang,
+            title=b.get('title', '?'),
+            status=status_label(b.get('status', '?'), lang),
+            price=b.get('final_price', 0),
+        ))
     return '\n'.join(lines)
 
 
-def _format_nearby(result: dict) -> str:
+def _format_nearby(result: dict, lang: str) -> str:
     items = result.get('results') or []
     if not items:
-        return "Yaqin atrofda xizmat topilmadi."
-    lines = [f"📍 Yaqin atrofda {len(items)} ta joy:"]
+        return t('nearby_not_found', lang)
+    lines = [t('nearby_header', lang, count=len(items))]
     for r in items:
-        lines.append(
-            f"• {r.get('name', '?')} — {r.get('distance_km', '?')} km"
-        )
+        lines.append(t(
+            'nearby_item', lang,
+            name=r.get('name', '?'),
+            distance=r.get('distance_km', '?'),
+        ))
     return '\n'.join(lines)
 
 
-def _format_preferences(result: dict) -> str:
-    preferred = result.get('preferred_service') or 'aniqlanmadi'
+def _format_preferences(result: dict, lang: str) -> str:
+    preferred = service_label(result.get('preferred_service'), lang)
     total = result.get('total_bookings', 0)
     spent = result.get('total_spent_uzs', 0)
-    return (
-        f"Sizda {total} ta bron, jami {spent:,.0f} UZS. "
-        f"Afzal xizmat: {preferred}."
+    return t(
+        'preferences_summary', lang,
+        total=total,
+        spent=spent,
+        preferred=preferred,
     )

@@ -41,11 +41,21 @@ from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from drf_spectacular.utils import extend_schema, OpenApiResponse
+from drf_spectacular.types import OpenApiTypes
+
 from apps.integrations.adapters.bookhara import BOOKHARA_STATUS_MAP
 
 logger = logging.getLogger(__name__)
 
 
+@extend_schema(
+    tags=['Integrations'],
+    summary='Bookhara bron holati webhook',
+    description='Bookhara provayderidan bron holati o\'zgarishi. Har doim 200 qaytariladi.',
+    request=OpenApiTypes.OBJECT,
+    responses={200: OpenApiResponse(description='Webhook qabul qilindi')},
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def bookhara_status_webhook(request: Request) -> Response:
