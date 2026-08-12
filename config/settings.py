@@ -28,6 +28,7 @@ environ.Env.read_env(BASE_DIR / '.env')
 
 SECRET_KEY    = env('SECRET_KEY', default='django-insecure-change-me-in-production')
 DEBUG         = env('DEBUG')
+# Swagger UI: production API server uchun .env ga ENABLE_API_DOCS=True qo'ying
 ENABLE_API_DOCS = env.bool('ENABLE_API_DOCS', default=DEBUG)
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost', '127.0.0.1'])
 
