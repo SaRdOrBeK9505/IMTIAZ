@@ -86,20 +86,29 @@ class HealthCheckView(APIView):
 
         duration_ms = int((time.monotonic() - start) * 1000)
 
-        status_code = 200 if ok else 503
-        return Response(
-            {
-                'status':      'ok' if ok else 'degraded',
-                'checks':      checks,
-                'duration_ms': duration_ms,
+        from django.conf import settings as dj_settings
+
+        payload = {
+            'status':      'ok' if ok else 'degraded',
+            'checks':      checks,
+            'duration_ms': duration_ms,
+            'runtime': {
+                'debug': dj_settings.DEBUG,
+                'api_docs': _api_docs_enabled(),
+                'allowed_hosts': list(dj_settings.ALLOWED_HOSTS),
             },
-            status=status_code,
-        )
+        }
+
+        status_code = 200 if ok else 503
+        return Response(payload, status=status_code)
 
 
 def _api_docs_enabled() -> bool:
+    """DEBUG=True bo'lsa Swagger doim ochiq; productionda ENABLE_API_DOCS kerak."""
     from django.conf import settings
-    return getattr(settings, 'ENABLE_API_DOCS', settings.DEBUG)
+    if settings.DEBUG:
+        return True
+    return bool(getattr(settings, 'ENABLE_API_DOCS', False))
 
 
 class APIDocsGuardMixin:

@@ -40,6 +40,11 @@ class APIDocsEnabledTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn(b'swagger', resp.content.lower())
 
+    def test_root_is_swagger_when_debug_even_if_docs_flag_false(self):
+        with self.settings(DEBUG=True, ENABLE_API_DOCS=False):
+            resp = self.client.get('/')
+            self.assertEqual(resp.status_code, 200)
+
     def test_disabled_crm_endpoints_visible_in_schema(self):
         from drf_spectacular.generators import SchemaGenerator
 

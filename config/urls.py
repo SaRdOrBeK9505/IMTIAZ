@@ -4,6 +4,7 @@ IMTIAZ — Asosiy URL konfiguratsiyasi.
 
 from django.contrib import admin
 from django.urls import path, include
+from django.views.generic import RedirectView
 from django.conf import settings
 from django.conf.urls.static import static
 from apps.core.views import HealthCheckView
@@ -73,6 +74,7 @@ urlpatterns = [
     # API Docs — ENABLE_API_DOCS=False bo'lsa 404 (runtime guard)
     path('api/schema/', GuardedSpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', GuardedSpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('api/docs', RedirectView.as_view(url='/api/docs/', permanent=False)),
     path('api/redoc/', GuardedSpectacularRedocView.as_view(url_name='schema'), name='redoc'),
     path('', GuardedSpectacularSwaggerView.as_view(url_name='schema'), name='root'),
 ]
