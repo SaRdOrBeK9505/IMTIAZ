@@ -6,7 +6,7 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
-from apps.core.views import HealthCheckView, RootView
+from apps.core.views import HealthCheckView
 from apps.core.doc_views import (
     GuardedSpectacularAPIView,
     GuardedSpectacularRedocView,
@@ -74,7 +74,7 @@ urlpatterns = [
     path('api/schema/', GuardedSpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', GuardedSpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('api/redoc/', GuardedSpectacularRedocView.as_view(url_name='schema'), name='redoc'),
-    path('', RootView.as_view(), name='root'),
+    path('', GuardedSpectacularSwaggerView.as_view(url_name='schema'), name='root'),
 ]
 
 if settings.DEBUG:

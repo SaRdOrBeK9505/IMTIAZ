@@ -111,22 +111,3 @@ class APIDocsGuardMixin:
             raise Http404
         return super().dispatch(request, *args, **kwargs)
 
-
-class RootView(APIView):
-    """Production: /health/ ga yo'naltirish; DEBUG: Swagger UI."""
-    permission_classes = [AllowAny]
-
-    @extend_schema(
-        tags=['Health'],
-        summary='Bosh sahifa',
-        description='DEBUG + API docs yoqilgan bo\'lsa `/api/docs/` ga, aks holda `/health/` ga yo\'naltiradi.',
-        responses={302: OpenApiResponse(description='Redirect')},
-    )
-    def get(self, request):
-        from django.conf import settings
-        from django.shortcuts import redirect
-
-        if _api_docs_enabled() and settings.DEBUG:
-            return redirect('/api/docs/')
-        return redirect('/health/')
-

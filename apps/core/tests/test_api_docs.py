@@ -17,10 +17,9 @@ class APIDocsDisabledTests(TestCase):
         resp = self.client.get('/api/docs/')
         self.assertEqual(resp.status_code, 404)
 
-    def test_root_redirects_to_health(self):
+    def test_root_not_exposed_when_docs_disabled(self):
         resp = self.client.get('/')
-        self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp.url, '/health/')
+        self.assertEqual(resp.status_code, 404)
 
 
 @override_settings(DEBUG=True, ENABLE_API_DOCS=True)
@@ -36,10 +35,10 @@ class APIDocsEnabledTests(TestCase):
         resp = self.client.get('/api/docs/')
         self.assertEqual(resp.status_code, 200)
 
-    def test_root_redirects_to_docs_when_enabled(self):
+    def test_root_is_swagger_when_docs_enabled(self):
         resp = self.client.get('/')
-        self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp.url, '/api/docs/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b'swagger', resp.content.lower())
 
     def test_disabled_crm_endpoints_visible_in_schema(self):
         from drf_spectacular.generators import SchemaGenerator
