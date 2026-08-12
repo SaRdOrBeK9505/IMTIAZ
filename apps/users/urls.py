@@ -2,19 +2,15 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
-    # Register (4 qadam)
     RequestOTPView,
     VerifyOTPView,
     CompleteRegistrationView,
-    # Login
     LoginView,
     CRMLoginView,
     AdminLoginView,
     LogoutView,
-    # Profile & Wallet
     UserMeView,
     AISettingsView,
-    WalletView,
 )
 
 urlpatterns = [
@@ -35,7 +31,4 @@ urlpatterns = [
     # ── Profile ───────────────────────────────────────────────────────────────
     path('users/me/',             UserMeView.as_view(),     name='user-me'),
     path('users/me/ai-settings/', AISettingsView.as_view(), name='user-ai-settings'),
-
-    # ── Wallet ────────────────────────────────────────────────────────────────
-    # path('wallet/', WalletView.as_view(), name='wallet'),
 ]

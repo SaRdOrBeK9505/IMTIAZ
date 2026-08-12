@@ -1,13 +1,10 @@
 """
-StubPaymentProvider — haqiqiy provayder tanlanmaguncha ishlatiladigan placeholder.
+StubPaymentProvider — faqat unit testlar uchun mock.
 
-Development va test muhitida to'lov oqimini sinash imkonini beradi:
-    - create_payment()  → har doim success=True, mock URL qaytaradi
-    - check_status()    → har doim is_paid=True qaytaradi
-    - refund()          → har doim success=True qaytaradi
-
-DIQQAT: Bu provider faqat DEBUG=True muhitida ro'yxatga olingan.
-        Production'da haqiqiy provider bilan almashtirilishi shart.
+DIQQAT: get_provider() registry'siga KIRITILMAGAN.
+        Production va API orqali hech qachon ishlatilmaydi.
+        check_status() har doim is_paid=True qaytaradi — API'ga ulansa
+        bepul booking xavfi yuzaga keladi.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """Payments app serializers."""
 
 from rest_framework import serializers
-from .models import Payment, PaymentLog, PaymentProvider, PaymentStatus
+from .models import Payment, PaymentLog, PaymentProvider
 
 
 class PaymentLogSerializer(serializers.ModelSerializer):
@@ -29,16 +29,12 @@ class PaymentSerializer(serializers.ModelSerializer):
 
 
 class PaymentInitiateSerializer(serializers.Serializer):
-    """Tashqi provayder orqali to'lov boshlash."""
+    """AlifPay orqali to'lov boshlash — mijoz to'g'ridan-to'g'ri tashqi provayderda to'laydi."""
     booking_id = serializers.UUIDField()
     provider = serializers.ChoiceField(
-        choices=[
-            PaymentProvider.ALIFPAY,
-            PaymentProvider.PAYME,
-            PaymentProvider.CLICK,
-            PaymentProvider.MULTICARD,
-        ],
-        help_text='To\'lov provayderi. Production uchun alifpay tavsiya etiladi.',
+        choices=[PaymentProvider.ALIFPAY],
+        default=PaymentProvider.ALIFPAY,
+        help_text='Hozir faqat AlifPay qo\'llab-quvvatlanadi.',
     )
     return_url = serializers.URLField(
         required=False, allow_blank=True,
@@ -48,8 +44,3 @@ class PaymentInitiateSerializer(serializers.Serializer):
         required=False, allow_blank=True,
         help_text='To\'lov bekor qilinganda qaytish URL',
     )
-
-
-class WalletPaymentSerializer(serializers.Serializer):
-    """IMTIAZ ichki hamyon orqali to'lov."""
-    booking_id = serializers.UUIDField()

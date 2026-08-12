@@ -2,13 +2,11 @@
 Payments app — To'lov tizimi modellari.
 
 Arxitektura:
-    - PaymentProvider: qaysi provayder ishlatilishi hali tanlanmagan.
-      Enum qiymatlari future-proof tarzda saqlanadi.
-      Hozir barcha provayderlar StubPaymentProvider bilan ishlaydi.
+    - PaymentProvider: hozir faqat AlifPay faol.
     - PAYMENT_STATUS_TRANSITIONS: state machine — noto'g'ri o'tishlar
       Payment.transition_to() da exception bilan bloklangan.
     - commission_amount / commission_percent: platforma komissiyasi uchun
-      tayyor maydonlar (to'lov oqimi aniqlanganida doldiriladi).
+      tayyor maydonlar.
 
 TZ 3.5 bo'limiga mos.
 """
@@ -22,17 +20,14 @@ from apps.core.models import BaseModel
 
 class PaymentProvider(models.TextChoices):
     """
-    Qo'llab-quvvatlanadigan to'lov provayderlari.
-    Hozir tanlanmagan — barcha variantlar saqlanadi.
+    To'lov provayderlari.
+    Hozir faqat AlifPay faol — mijoz to'g'ridan-to'g'ri tashqi checkout orqali to'laydi.
     """
-    PAYME      = 'payme',      'Payme'
-    CLICK      = 'click',      'Click'
-    MULTICARD  = 'multicard',  'Multicard'
-    WALLET     = 'wallet',     'IMTIAZ Hamyon'
-    ALIFPAY    = 'alifpay',   'AlifPay'
-    # Kelajak uchun joy qoldirilgan:
-    # STRIPE   = 'stripe',   'Stripe'
-    # UZCARD   = 'uzcard',   'Uzcard'
+    ALIFPAY    = 'alifpay',    'AlifPay'
+    # Kelajakda qo'shiladi:
+    # PAYME      = 'payme',      'Payme'
+    # CLICK      = 'click',      'Click'
+    # MULTICARD  = 'multicard',  'Multicard'
 
 
 class PaymentStatus(models.TextChoices):
@@ -88,7 +83,7 @@ class Payment(BaseModel):
     provider = models.CharField(
         max_length=20,
         choices=PaymentProvider.choices,
-        help_text='To\'lov provayderi — hali tanlanmagan, stub bilan ishlaydi',
+        help_text='To\'lov provayderi (hozir faqat AlifPay)',
     )
     status = models.CharField(
         max_length=30,

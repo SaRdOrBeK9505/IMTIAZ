@@ -17,9 +17,6 @@ Profile:
     GET  /api/users/me/
     PATCH /api/users/me/
     PATCH /api/users/me/ai-settings/
-
-Wallet:
-    GET  /api/wallet/
 """
 
 from __future__ import annotations
@@ -35,7 +32,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import OTPCode, WalletTransaction
+from .models import OTPCode
 from .serializers import (
     AdminLoginSerializer,
     AISettingsSerializer,
@@ -45,7 +42,6 @@ from .serializers import (
     RequestOTPSerializer,
     UserProfileSerializer,
     VerifyOTPSerializer,
-    WalletTransactionSerializer,
 )
 from .sms import send_otp_sms
 
@@ -316,24 +312,3 @@ class AISettingsView(generics.UpdateAPIView):
     def update(self, request, *args, **kwargs):
         kwargs['partial'] = True
         return super().update(request, *args, **kwargs)
-
-
-# ─── Wallet ───────────────────────────────────────────────────────────────────
-
-class WalletView(APIView):
-    """GET /api/wallet/"""
-    permission_classes = [IsAuthenticated]
-
-    @extend_schema(
-        responses={200: OpenApiResponse(description='Hamyon holati')},
-        summary='Hamyon balansi va oxirgi operatsiyalar',
-        tags=['Users'],
-    )
-    def get(self, request):
-        user   = request.user
-        recent = WalletTransaction.objects.filter(user=user)[:10]
-        return Response({
-            'balance':             user.balance,
-            'bonus_points':        user.bonus_points,
-            'recent_transactions': WalletTransactionSerializer(recent, many=True).data,
-        })

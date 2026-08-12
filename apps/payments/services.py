@@ -1,18 +1,14 @@
 """
 PaymentService — to'lov oqimini boshqaradigan yagona entry point.
 
-Provider abstraction:
-    - Hozir: StubPaymentProvider (haqiqiy API yo'q)
-    - Kelajak: get_provider() funksiyasiga yangi provider qo'shiladi,
-      boshqa hech narsa o'zgarmaydi.
-
 To'lov oqimi:
-    1. initiate_payment()  → Payment yaratish + provider orqali URL olish
-    2. confirm_payment()   → provider'dan holat tekshirish (polling / webhook)
-    3. refund_payment()    → to'lovni qaytarish
+    1. initiate_payment()  → Payment yaratish + AlifPay orqali checkout URL
+    2. confirm_payment()   → polling (webhook yetmagan holatda)
+    3. apply_webhook_status() → webhook payload'dan to'g'ridan-to'g'ri holat yangilash
+    4. refund_payment()    → to'lovni qaytarish
 
-State machine Payment.transition_to() orqali boshqariladi —
-noto'g'ri holatlar exception bilan bloklangan.
+State machine Payment.transition_to() orqali boshqariladi.
+Tashqi HTTP (AlifPay, Bookhara) DB qulfi ochiq holda chaqirilmaydi.
 """
 
 from __future__ import annotations
@@ -20,51 +16,25 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
+from django.db import transaction
+
 from .models import Payment, PaymentLog, PaymentStatus, PaymentProvider
-from .providers.base import BasePaymentProvider
 
 logger = logging.getLogger(__name__)
 
+_ACTIVE_PROVIDER = PaymentProvider.ALIFPAY
 
-# ─── Provider registry ────────────────────────────────────────────────────────
 
-def get_provider(provider_name: str) -> BasePaymentProvider:
-    """
-    Provider nomiga qarab implementatsiyani qaytaradi.
-
-    Yangi provider qo'shish:
-        1. apps/payments/providers/<name>.py → BasePaymentProvider implement
-        2. Shu yerga import va mapping qo'shing
-        3. PaymentProvider enum'ga nom qo'shing (models.py)
-    """
-    from .providers.stub import StubPaymentProvider
-    from .providers.alifpay import AlifPayProvider
-
-    # TODO: haqiqiy provayderlar tayyor bo'lganda quyidagilarni yoqing:
-    # from .providers.payme import PaymeProvider
-    # from .providers.click import ClickProvider
-    # from .providers.multicard import MulticardProvider
-
-    registry: dict[str, type[BasePaymentProvider]] = {
-        # Hozirda faqat stub — development uchun
-        PaymentProvider.PAYME:     StubPaymentProvider,
-        PaymentProvider.CLICK:     StubPaymentProvider,
-        PaymentProvider.MULTICARD: StubPaymentProvider,
-        PaymentProvider.WALLET:    StubPaymentProvider,
-        # AlifPay — real implementatsiya tayyor
-        PaymentProvider.ALIFPAY:   AlifPayProvider,
-    }
-
-    provider_class = registry.get(provider_name)
-    if not provider_class:
+def get_provider(provider_name: str):
+    """Hozir faqat AlifPay qo'llab-quvvatlanadi."""
+    if provider_name != _ACTIVE_PROVIDER:
         raise ValueError(
-            f"Noma'lum to'lov provayderi: '{provider_name}'. "
-            f"Mavjudlar: {list(registry.keys())}"
+            f"To'lov provayderi '{provider_name}' qo'llab-quvvatlanmaydi. "
+            f"Faqat '{_ACTIVE_PROVIDER}' mavjud."
         )
-    return provider_class()
+    from .providers.alifpay import AlifPayProvider
+    return AlifPayProvider()
 
-
-# ─── Service ──────────────────────────────────────────────────────────────────
 
 class PaymentService:
     """To'lov yaratish, tasdiqlash va qaytarish."""
@@ -79,18 +49,13 @@ class PaymentService:
         return_url: str | None = None,
         cancel_url: str | None = None,
     ) -> dict:
-        """
-        Yangi to'lov yaratadi va payment URL qaytaradi.
-
-        Returns:
-            {
-                payment_id: str,
-                status: str,
-                payment_url: str | None,
-                success: bool,
+        """Yangi to'lov yaratadi va AlifPay checkout URL qaytaradi."""
+        if provider_name != _ACTIVE_PROVIDER:
+            return {
+                'success': False,
+                'message': f"Faqat {_ACTIVE_PROVIDER} provayderi orqali to'lov mumkin.",
             }
-        """
-        # 1. DB yozuvi — faqat bitta faol to'lov
+
         from apps.booking.models import BookingStatus
         if booking.status not in (BookingStatus.PENDING, BookingStatus.IN_PROGRESS):
             return {
@@ -121,8 +86,13 @@ class PaymentService:
             note='To\'lov sessiyasi yaratildi',
         )
 
-        # 2. Provider chaqiruvi
-        provider = get_provider(provider_name)
+        try:
+            provider = get_provider(provider_name)
+        except ValueError as exc:
+            payment.error_message = str(exc)
+            payment.transition_to(PaymentStatus.FAILED)
+            return {'success': False, 'message': str(exc)}
+
         intent = provider.create_payment(
             order_id=str(payment.id),
             amount=amount,
@@ -134,7 +104,6 @@ class PaymentService:
             },
         )
 
-        # 3. Natijaga qarab holat o'zgartirish
         if intent.success:
             payment.external_transaction_id = intent.external_transaction_id
             payment.provider_response = intent.raw or {}
@@ -158,55 +127,212 @@ class PaymentService:
             'status': payment.status,
             'payment_url': intent.payment_url,
             'success': intent.success,
+            'message': intent.error_message if not intent.success else '',
         }
 
     @staticmethod
     def confirm_payment(payment_id: str) -> dict:
         """
-        Provayderdan to'lov holatini tekshiradi.
-        Webhook yetib kelmagan yoki polling kerak bo'lganda chaqiriladi.
+        Polling: provayderdan to'lov holatini tekshiradi.
+        AlifPay HTTP qulfdan tashqarida — faqat DB yangilanishi qulf ichida.
         """
+        with transaction.atomic():
+            try:
+                payment = (
+                    Payment.objects
+                    .select_for_update()
+                    .select_related('booking')
+                    .get(id=payment_id)
+                )
+            except Payment.DoesNotExist:
+                return {'success': False, 'message': 'To\'lov topilmadi'}
+
+            if payment.status == PaymentStatus.SUCCESS:
+                return {'success': True, 'status': payment.status, 'is_paid': True}
+            if payment.status in (PaymentStatus.CANCELLED, PaymentStatus.REFUNDED):
+                return {'success': True, 'status': payment.status, 'is_paid': False}
+            if payment.status not in (PaymentStatus.PENDING, PaymentStatus.PROCESSING):
+                return {'success': True, 'status': payment.status, 'is_paid': False}
+
+            ext_id = payment.external_transaction_id or ''
+            provider_name = payment.provider
+
         try:
-            payment = Payment.objects.select_related('booking').get(id=payment_id)
-        except Payment.DoesNotExist:
-            return {'success': False, 'message': 'To\'lov topilmadi'}
+            provider = get_provider(provider_name)
+        except ValueError as exc:
+            return {'success': False, 'message': str(exc)}
 
-        # Allaqachon yakunlangan
-        if payment.status == PaymentStatus.SUCCESS:
-            return {'success': True, 'status': payment.status, 'is_paid': True}
-        if payment.status in (PaymentStatus.CANCELLED, PaymentStatus.REFUNDED):
-            return {'success': True, 'status': payment.status, 'is_paid': False}
+        result = provider.check_status(ext_id)
 
-        provider = get_provider(payment.provider)
-        result = provider.check_status(payment.external_transaction_id or '')
+        settle_id: str | None = None
+        final_status: str
+        is_paid: bool
 
-        old_status = payment.status
-
-        if result.is_paid:
-            payment.transition_to(PaymentStatus.SUCCESS)
-            PaymentService._on_payment_success(payment)
-            logger.info('Payment %s muvaffaqiyatli tasdiqlandi', payment_id)
-
-        elif result.is_failed:
-            payment.error_message = result.error_message
-            payment.save(update_fields=['error_message', 'updated_at'])
-            payment.transition_to(PaymentStatus.FAILED)
-            logger.warning('Payment %s muvaffaqiyatsiz: %s', payment_id, result.error_message)
-
-        if old_status != payment.status:
-            PaymentLog.objects.create(
-                payment=payment,
-                from_status=old_status,
-                to_status=payment.status,
-                note='Provayder orqali tasdiqlandi',
-                metadata=result.raw or {},
+        with transaction.atomic():
+            payment = (
+                Payment.objects
+                .select_for_update()
+                .select_related('booking')
+                .get(id=payment_id)
             )
 
-        return {
-            'success': True,
-            'status': payment.status,
-            'is_paid': result.is_paid,
-        }
+            if payment.status == PaymentStatus.SUCCESS:
+                return {'success': True, 'status': payment.status, 'is_paid': True}
+            if payment.status not in (PaymentStatus.PENDING, PaymentStatus.PROCESSING):
+                return {
+                    'success': True,
+                    'status': payment.status,
+                    'is_paid': False,
+                }
+
+            if result.is_paid:
+                if PaymentService._mark_success_locked(
+                    payment,
+                    receipt_url=(result.raw or {}).get('_receipt_url'),
+                    log_note='Polling orqali tasdiqlandi',
+                    metadata=result.raw,
+                ):
+                    settle_id = str(payment.id)
+                    logger.info('Payment %s polling orqali tasdiqlandi', payment_id)
+            elif result.is_failed:
+                PaymentService._mark_failed_locked(
+                    payment,
+                    reason=result.error_message or 'To\'lov muvaffaqiyatsiz',
+                    log_note='Polling orqali rad etildi',
+                    metadata=result.raw,
+                )
+                logger.warning(
+                    'Payment %s polling muvaffaqiyatsiz: %s',
+                    payment_id, result.error_message,
+                )
+
+            final_status = payment.status
+            is_paid = payment.status == PaymentStatus.SUCCESS
+
+        if settle_id:
+            payment = Payment.objects.select_related('booking').get(id=settle_id)
+            PaymentService._on_payment_success(payment)
+
+        return {'success': True, 'status': final_status, 'is_paid': is_paid}
+
+    @staticmethod
+    def apply_webhook_status(
+        invoice_id: str,
+        pay_status: str,
+        *,
+        webhook_amount: Decimal | None = None,
+        receipt_url: str | None = None,
+        raw: dict | None = None,
+    ) -> None:
+        """
+        AlifPay webhook payload'dan to'g'ridan-to'g'ri holat yangilash.
+        Bookhara settlement qulfdan keyin alohida chaqiriladi.
+        """
+        settle_id: str | None = None
+
+        with transaction.atomic():
+            try:
+                payment = (
+                    Payment.objects
+                    .select_for_update()
+                    .select_related('booking')
+                    .get(external_transaction_id=invoice_id)
+                )
+            except Payment.DoesNotExist:
+                logger.warning(
+                    'AlifPay webhook: Payment topilmadi. invoice_id=%s', invoice_id,
+                )
+                return
+
+            if payment.status == PaymentStatus.SUCCESS:
+                return
+
+            if pay_status == 'SUCCEEDED':
+                if webhook_amount is not None and webhook_amount != payment.amount:
+                    logger.error(
+                        'AlifPay webhook: summa nomuvofiqlik. payment=%s '
+                        'kutilgan=%s kelgan=%s invoice_id=%s',
+                        payment.id, payment.amount, webhook_amount, invoice_id,
+                    )
+                    return
+
+                if PaymentService._mark_success_locked(
+                    payment,
+                    receipt_url=receipt_url,
+                    log_note='AlifPay webhook orqali tasdiqlandi',
+                    metadata=raw,
+                ):
+                    settle_id = str(payment.id)
+
+            elif pay_status in ('FAILED', 'CANCELLED', 'EXPIRED'):
+                PaymentService._mark_failed_locked(
+                    payment,
+                    reason=f'AlifPay status: {pay_status}',
+                    log_note='AlifPay webhook orqali rad etildi',
+                    metadata=raw,
+                )
+
+        if settle_id:
+            payment = Payment.objects.select_related('booking').get(id=settle_id)
+            PaymentService._on_payment_success(payment)
+
+    @staticmethod
+    def _mark_success_locked(
+        payment: Payment,
+        *,
+        receipt_url: str | None,
+        log_note: str,
+        metadata: dict | None = None,
+    ) -> bool:
+        """
+        DB holatini SUCCESS ga o'tkazadi (qulf ichida).
+        Tashqi HTTP chaqirilmaydi. True — yangi o'tish bo'ldi.
+        """
+        if payment.status == PaymentStatus.SUCCESS:
+            return False
+
+        old_status = payment.status
+        if receipt_url:
+            payment.provider_response = {
+                **(payment.provider_response or {}),
+                '_receipt_url': receipt_url,
+            }
+            payment.save(update_fields=['provider_response', 'updated_at'])
+
+        payment.transition_to(PaymentStatus.SUCCESS)
+
+        PaymentLog.objects.create(
+            payment=payment,
+            from_status=old_status,
+            to_status=PaymentStatus.SUCCESS,
+            note=log_note,
+            metadata=metadata,
+        )
+        return True
+
+    @staticmethod
+    def _mark_failed_locked(
+        payment: Payment,
+        *,
+        reason: str,
+        log_note: str,
+        metadata: dict | None = None,
+    ) -> None:
+        if payment.status not in (PaymentStatus.PENDING, PaymentStatus.PROCESSING):
+            return
+
+        old_status = payment.status
+        payment.error_message = reason
+        payment.save(update_fields=['error_message', 'updated_at'])
+        payment.transition_to(PaymentStatus.FAILED)
+
+        PaymentLog.objects.create(
+            payment=payment,
+            from_status=old_status,
+            to_status=PaymentStatus.FAILED,
+            note=log_note,
+            metadata=metadata,
+        )
 
     @staticmethod
     def refund_payment(
@@ -227,8 +353,25 @@ class PaymentService:
                            f'Joriy holat: {payment.status}',
             }
 
-        provider = get_provider(payment.provider)
-        result = provider.refund(payment.external_transaction_id or '', amount)
+        if payment.provider != _ACTIVE_PROVIDER:
+            msg = (
+                f"Bu to'lov provayderi ({payment.provider!r}) endi qo'llab-quvvatlanmaydi. "
+                f"Faqat {_ACTIVE_PROVIDER} orqali qaytarish mumkin."
+            )
+            logger.error('Payment %s refund rad etildi: %s', payment_id, msg)
+            return {'success': False, 'message': msg}
+
+        try:
+            provider = get_provider(payment.provider)
+        except ValueError as exc:
+            logger.error('Payment %s refund: %s', payment_id, exc)
+            return {'success': False, 'message': str(exc)}
+
+        try:
+            result = provider.refund(payment.external_transaction_id or '', amount)
+        except NotImplementedError as exc:
+            logger.warning('Payment %s qisman qaytarish rad etildi: %s', payment_id, exc)
+            return {'success': False, 'message': str(exc)}
 
         if result.success:
             refund_amount = amount or payment.amount
@@ -261,7 +404,7 @@ class PaymentService:
 
     @staticmethod
     def _on_payment_success(payment: Payment) -> None:
-        """To'lov muvaffaqiyatli bo'lganda booking va xizmat-specific amallar."""
+        """To'lov muvaffaqiyatli — booking va Bookhara settlement (qulfsiz)."""
         if not payment.booking:
             return
 
@@ -272,7 +415,6 @@ class PaymentService:
             booking.status = BookingStatus.CONFIRMED
             booking.save(update_fields=['status', 'updated_at'])
 
-        # Parvoz — Bookhara'ga to'lov (GDS ticket)
         if booking.service_type == ServiceType.FLIGHT:
             PaymentService._settle_flight_booking(booking, payment)
 
@@ -322,82 +464,14 @@ class PaymentService:
 
     @staticmethod
     def mark_payment_failed(payment_id: str, reason: str = '') -> None:
-        """Webhook yoki polling orqali to'lovni failed deb belgilash."""
-        try:
-            payment = Payment.objects.get(id=payment_id)
-        except Payment.DoesNotExist:
-            return
-        if payment.status not in (PaymentStatus.PENDING, PaymentStatus.PROCESSING):
-            return
-        old = payment.status
-        if reason:
-            payment.error_message = reason
-            payment.save(update_fields=['error_message', 'updated_at'])
-        payment.transition_to(PaymentStatus.FAILED)
-        PaymentLog.objects.create(
-            payment=payment,
-            from_status=old,
-            to_status=PaymentStatus.FAILED,
-            note=reason or 'To\'lov muvaffaqiyatsiz',
-        )
-
-    @staticmethod
-    def process_wallet_payment(
-        booking,
-        amount: Decimal,
-        user,
-    ) -> dict:
-        """
-        IMTIAZ ichki hamyon orqali to'lov.
-        Tashqi API talab qilmaydi — balans yetarli bo'lsa darhol tasdiqlaydi.
-        """
-        if user.balance < amount:
-            return {
-                'success': False,
-                'message': f'Hamyon balansi yetarli emas. '
-                           f'Kerak: {amount} UZS, mavjud: {user.balance} UZS',
-            }
-
-        # Balansdan yechish
-        user.balance -= amount
-        user.save(update_fields=['balance', 'updated_at'])
-
-        # WalletTransaction yozuvi
-        from apps.users.models import WalletTransaction
-        WalletTransaction.objects.create(
-            user=user,
-            transaction_type=WalletTransaction.TransactionType.PAYMENT,
-            amount=-amount,
-            balance_after=user.balance,
-            description=f'Bron to\'lovi: {booking.title if booking else ""}',
-        )
-
-        # Payment yozuvi
-        payment = Payment.objects.create(
-            booking=booking,
-            user=user,
-            provider=PaymentProvider.WALLET,
-            status=PaymentStatus.SUCCESS,
-            amount=amount,
-            external_transaction_id=f'wallet-{booking.id if booking else "direct"}',
-        )
-
-        # Booking tasdiqlash
-        if booking:
-            from apps.booking.models import BookingStatus
-            booking.status = BookingStatus.CONFIRMED
-            booking.save(update_fields=['status', 'updated_at'])
-            PaymentService._on_payment_success(payment)
-
-        PaymentLog.objects.create(
-            payment=payment,
-            from_status='',
-            to_status=PaymentStatus.SUCCESS,
-            note='Hamyon orqali to\'lov amalga oshirildi',
-        )
-
-        return {
-            'payment_id': str(payment.id),
-            'status': PaymentStatus.SUCCESS,
-            'success': True,
-        }
+        """Polling orqali to'lovni failed deb belgilash."""
+        with transaction.atomic():
+            try:
+                payment = Payment.objects.select_for_update().get(id=payment_id)
+            except Payment.DoesNotExist:
+                return
+            PaymentService._mark_failed_locked(
+                payment,
+                reason=reason or 'To\'lov muvaffaqiyatsiz',
+                log_note=reason or 'To\'lov muvaffaqiyatsiz',
+            )

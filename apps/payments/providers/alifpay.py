@@ -2,14 +2,6 @@
 AlifPay to'lov provayderi — checkout (invoice) modeli.
 
 Hujjat: https://docs.alifpay.uz/ru
-
-Muhim farqlar Bookhara'dan:
-  - Autentifikatsiya: "Token <token>" header'i (Bearer emas)
-  - Barcha metodlar POST
-  - HTTP 200 har doim qaytariladi — xato body'dagi "error" maydonida
-  - Summa TIYINDA (1 so'm = 100 tiyin): # AlifPay tiyin kutadi, shu yerda *100 qilinadi
-  - Prod:    https://api.alifpay.uz/v2
-  - Sandbox: https://api-sandbox.alifpay.uz/v2  (ALIFPAY_TEST_MODE=True)
 """
 
 from __future__ import annotations
@@ -32,10 +24,10 @@ SANDBOX_BASE_URL = 'https://api-sandbox.alifpay.uz/v2'
 CHECKOUT_PROD    = 'https://checkout.alifpay.uz'
 CHECKOUT_SANDBOX = 'https://checkout-dev.alifpay.uz'
 
+# AlifPay tiyin oralig'i (500 UZS — 200 mlrd UZS)
+MIN_AMOUNT_TIYIN = 50_000
+MAX_AMOUNT_TIYIN = 20_000_000_000
 
-# ---------------------------------------------------------------------------
-# Xatolik klasslari
-# ---------------------------------------------------------------------------
 
 class AlifPayError(Exception):
     """AlifPay API umumiy xatoligi."""
@@ -96,7 +88,6 @@ ERROR_MESSAGES: dict[int, str] = {
 
 
 def _raise_for_alifpay_error(body: dict) -> None:
-    """AlifPay HTTP 200 javobida error maydonini tekshirib, mos exception ko'taradi."""
     error = body.get('error')
     if not error:
         return
@@ -106,19 +97,24 @@ def _raise_for_alifpay_error(body: dict) -> None:
         else str(error)
     )
     message = message or ERROR_MESSAGES.get(code, f'AlifPay xatosi: {code}')
-
     exc_class = ERROR_CLASS_MAP.get(code, AlifPayError)
     raise exc_class(message, code=code)
 
 
-# ---------------------------------------------------------------------------
-# Provider
-# ---------------------------------------------------------------------------
+def extract_receipt_url(payment_data: dict) -> str | None:
+    """AlifPay payment/receipt blokidan OFD chek URL'ini ajratadi."""
+    receipt = payment_data.get('receipt')
+    if not isinstance(receipt, dict):
+        return None
+    results = receipt.get('results') or []
+    if results and isinstance(results, list):
+        url = results[0].get('url')
+        return url if url else None
+    return None
+
 
 class AlifPayProvider(BasePaymentProvider):
-    """
-    AlifPay provayderi — invoice yaratish, holat tekshirish, qaytarish.
-    """
+    """AlifPay provayderi — invoice yaratish, holat tekshirish, qaytarish."""
 
     def __init__(self, token: str | None = None, secret_key: str | None = None):
         self.token      = token      or settings.ALIFPAY_TOKEN
@@ -126,14 +122,9 @@ class AlifPayProvider(BasePaymentProvider):
         self.test_mode  = getattr(settings, 'ALIFPAY_TEST_MODE', True)
         self.base_url   = SANDBOX_BASE_URL if self.test_mode else PROD_BASE_URL
         self._checkout  = CHECKOUT_SANDBOX if self.test_mode else CHECKOUT_PROD
-        self._http      = httpx.Client(timeout=30)
 
     def get_provider_name(self) -> str:
         return 'alifpay'
-
-    # -------------------------------------------------------------------
-    # To'lov yaratish
-    # -------------------------------------------------------------------
 
     def create_payment(
         self,
@@ -143,29 +134,44 @@ class AlifPayProvider(BasePaymentProvider):
         return_url: str | None = None,
         extra: dict | None = None,
     ) -> PaymentIntent:
-        """
-        POST /invoice — yangi to'lov invoice'i yaratadi.
-
-        Muhim: AlifPay summani TIYINDA kutadi.
-        # AlifPay tiyin kutadi, shu yerda *100 qilinadi
-        """
+        """POST /invoice — yangi to'lov invoice'i yaratadi."""
         extra = extra or {}
-        # AlifPay tiyin kutadi, shu yerda *100 qilinadi
         amount_tiyin = int(amount * 100)
 
+        if amount_tiyin < MIN_AMOUNT_TIYIN or amount_tiyin > MAX_AMOUNT_TIYIN:
+            return PaymentIntent(
+                success=False,
+                error_message=(
+                    f'Summa {MIN_AMOUNT_TIYIN // 100:,} — '
+                    f'{MAX_AMOUNT_TIYIN // 100:,} UZS oralig\'ida bo\'lishi kerak.'
+                ),
+            )
+
+        item: dict = {
+            'name':   description or f'IMTIAZ #{order_id}',
+            'amount': 1,
+            'price':  amount_tiyin,
+        }
+
+        receipt_enabled = getattr(settings, 'ALIFPAY_RECEIPT_ENABLED', False)
+        spic = getattr(settings, 'ALIFPAY_SPIC', '')
+        if receipt_enabled:
+            if spic:
+                item['spic'] = spic
+            else:
+                logger.warning(
+                    'ALIFPAY_RECEIPT_ENABLED=True, lekin ALIFPAY_SPIC sozlanmagan — '
+                    'receipt o\'chirildi.'
+                )
+                receipt_enabled = False
+
         body: dict = {
-            'items': [
-                {
-                    'name':   description or f'IMTIAZ #{order_id}',
-                    'amount': 1,
-                    'price':  amount_tiyin,  # tiyin
-                }
-            ],
-            'redirectUrl': return_url or '',
-            'cancelUrl':   extra.get('cancel_url') or return_url or '',
-            'webhookUrl':  getattr(settings, 'ALIFPAY_WEBHOOK_URL', ''),
-            'meta':        {'order_id': str(order_id)},
-            'receipt':     True,
+            'items':        [item],
+            'redirect_url': return_url or '',
+            'cancel_url':   extra.get('cancel_url') or return_url or '',
+            'webhook_url':  getattr(settings, 'ALIFPAY_WEBHOOK_URL', ''),
+            'meta':         {'order_id': str(order_id)},
+            'receipt':      receipt_enabled,
         }
         phone = extra.get('phone')
         if phone:
@@ -188,12 +194,8 @@ class AlifPayProvider(BasePaymentProvider):
             raw=resp_body,
         )
 
-    # -------------------------------------------------------------------
-    # Holat tekshirish
-    # -------------------------------------------------------------------
-
     def check_status(self, external_transaction_id: str) -> PaymentCheckResult:
-        """POST /getInvoice — invoice holati."""
+        """POST /getInvoice — polling uchun invoice holati."""
         try:
             resp_body = self._post('/getInvoice', {'id': external_transaction_id})
         except AlifPayError as exc:
@@ -204,12 +206,7 @@ class AlifPayProvider(BasePaymentProvider):
         status  = payment.get('status', '')
         is_paid = status == 'SUCCEEDED'
         is_failed = status in ('FAILED', 'CANCELLED', 'EXPIRED')
-
-        # Receipt URL — keyinroq FlightPayment'ga saqlanadi
-        receipt_url = None
-        results = (payment.get('receipt') or {}).get('results', [])
-        if results and isinstance(results, list):
-            receipt_url = results[0].get('url')
+        receipt_url = extract_receipt_url(payment)
 
         raw = resp_body
         if receipt_url:
@@ -222,20 +219,12 @@ class AlifPayProvider(BasePaymentProvider):
             raw=raw,
         )
 
-    # -------------------------------------------------------------------
-    # Qaytarish
-    # -------------------------------------------------------------------
-
     def refund(
         self,
         external_transaction_id: str,
         amount: Decimal | None = None,
     ) -> RefundResult:
-        """POST /refundInvoice — to'lovni qaytarish.
-
-        AlifPay faqat to'liq qaytarishni qo'llaydi.
-        Qisman qaytarish (amount != None) so'ralsa NotImplementedError ko'tariladi.
-        """
+        """POST /refundInvoice — faqat to'liq qaytarish."""
         if amount is not None:
             raise NotImplementedError(
                 'AlifPay qisman qaytarishni (partial refund) qo\'llab-quvvatlamaydi. '
@@ -249,38 +238,29 @@ class AlifPayProvider(BasePaymentProvider):
 
         return RefundResult(success=True, raw=resp_body)
 
-    # -------------------------------------------------------------------
-    # Ichki yordamchi
-    # -------------------------------------------------------------------
-
     def _post(self, path: str, body: dict) -> dict:
-        """AlifPay API'ga POST yuboradi va javobni tekshiradi."""
+        """Har bir so'rov uchun alohida httpx client — fd sizib chiqishini oldini oladi."""
         url = f'{self.base_url}{path}'
-        resp = self._http.post(
-            url,
-            json=body,
-            headers={
-                'Token':        self.token,
-                'Content-Type': 'application/json',
-                'Accept':       'application/json',
-            },
-        )
+        with httpx.Client(timeout=30) as client:
+            resp = client.post(
+                url,
+                json=body,
+                headers={
+                    'Token':        self.token,
+                    'Content-Type': 'application/json',
+                    'Accept':       'application/json',
+                },
+            )
         resp.raise_for_status()
         resp_body = resp.json()
         _raise_for_alifpay_error(resp_body)
         return resp_body
 
 
-# ---------------------------------------------------------------------------
-# Webhook signature tekshiruvi (views.py da ishlatiladi)
-# ---------------------------------------------------------------------------
-
 def verify_alifpay_signature(body: bytes, secret_key: str, received: str) -> bool:
-    """
-    AlifPay webhook imzosini tekshiradi.
-    HMAC-SHA256(body, secret_key) → Base64 → received bilan taqqoslash.
-    hmac.compare_digest — timing attack'dan himoya.
-    """
+    """HMAC-SHA256(body, secret_key) → Base64 → received bilan taqqoslash."""
+    if not secret_key or not received:
+        return False
     expected = base64.b64encode(
         hmac.new(secret_key.encode('utf-8'), body, hashlib.sha256).digest()
     ).decode('utf-8')

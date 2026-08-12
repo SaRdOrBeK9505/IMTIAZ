@@ -13,8 +13,8 @@ Boshqa loginlar:
     CRMLoginSerializer   — phone + password, faqat owner/branch_staff
     AdminLoginSerializer — phone + password, faqat admin
 
-Profile & Wallet:
-    UserProfileSerializer, AISettingsSerializer, WalletTransactionSerializer
+Profile:
+    UserProfileSerializer, AISettingsSerializer
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import AIAutonomyLevel, OTPCode, User, UserRole, WalletTransaction
+from .models import AIAutonomyLevel, OTPCode, User, UserRole
 
 # ─── Yordamchi ────────────────────────────────────────────────────────────────
 
@@ -404,10 +404,3 @@ class AISettingsSerializer(serializers.ModelSerializer):
         if value not in AIAutonomyLevel.values:
             raise serializers.ValidationError("Noto'g'ri daraja.")
         return value
-
-
-class WalletTransactionSerializer(serializers.ModelSerializer):
-    class Meta:
-        model  = WalletTransaction
-        fields = ['id', 'transaction_type', 'amount', 'balance_after', 'description', 'created_at']
-        read_only_fields = fields

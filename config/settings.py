@@ -467,10 +467,12 @@ BOOKHARA_BASE_URL       = env('BOOKHARA_BASE_URL',       default='https://avia-a
 BOOKHARA_WEBHOOK_SECRET = env('BOOKHARA_WEBHOOK_SECRET', default='')
 
 # AlifPay — mijozdan pul olish (checkout modeli)
-ALIFPAY_TOKEN       = env('ALIFPAY_TOKEN',       default='')
-ALIFPAY_SECRET_KEY  = env('ALIFPAY_SECRET_KEY',  default='')
-ALIFPAY_WEBHOOK_URL = env('ALIFPAY_WEBHOOK_URL', default='')
-ALIFPAY_TEST_MODE   = env.bool('ALIFPAY_TEST_MODE', default=True)
+ALIFPAY_TOKEN            = env('ALIFPAY_TOKEN',            default='')
+ALIFPAY_SECRET_KEY       = env('ALIFPAY_SECRET_KEY',       default='')
+ALIFPAY_WEBHOOK_URL      = env('ALIFPAY_WEBHOOK_URL',      default='')
+ALIFPAY_TEST_MODE        = env.bool('ALIFPAY_TEST_MODE',    default=True)
+ALIFPAY_RECEIPT_ENABLED  = env.bool('ALIFPAY_RECEIPT_ENABLED', default=False)
+ALIFPAY_SPIC             = env('ALIFPAY_SPIC',             default='')
 
 # ─── SENTRY (production error tracking) ───────────────────────────────────────
 SENTRY_DSN = env('SENTRY_DSN', default='')

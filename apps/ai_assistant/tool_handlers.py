@@ -159,7 +159,7 @@ def handle_book_restaurant(
 
 def handle_book_flight(
     user, offer_id: str, passengers: int = 1,
-    payment_method: str = 'wallet', **kwargs,
+    payment_method: str = 'alifpay', **kwargs,
 ) -> dict:
     """
     Bu handler services.py tomonidan WRITE_TOOL_TO_ACTION orqali

@@ -1,13 +1,9 @@
 """
 Payment providers registry.
 
-Qo'shilgan provayderlar:
-    stub     — development placeholder (haqiqiy API yo'q)
+Faol provayder: apps/payments/providers/alifpay.py → AlifPayProvider
 
-Kelajakda qo'shiladigan provayderlar (provider tanlanganida):
-    payme    — apps/payments/providers/payme.py
-    click    — apps/payments/providers/click.py
-    multicard — apps/payments/providers/multicard.py
+StubPaymentProvider faqat unit testlar uchun — get_provider() ga kiritilmagan.
 """
 
 from .base import BasePaymentProvider, PaymentIntent, PaymentCheckResult, RefundResult

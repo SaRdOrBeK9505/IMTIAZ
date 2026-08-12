@@ -87,8 +87,9 @@ FLIGHT_BOOK_TOOL = {
             'passengers': {'type': 'integer'},
             'payment_method': {
                 'type': 'string',
-                'enum': ['payme', 'click', 'multicard', 'wallet'],
-                'default': 'wallet',
+                'enum': ['alifpay'],
+                'default': 'alifpay',
+                'description': 'Mijoz AlifPay checkout orqali to\'laydi',
             },
         },
         'required': ['offer_id'],
