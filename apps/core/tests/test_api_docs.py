@@ -13,15 +13,15 @@ class OpenAPIServersTests(TestCase):
             debug=False,
         )
         self.assertEqual(len(servers), 1)
-        self.assertEqual(servers[0]['url'], 'https://api.medhomee.uz')
+        self.assertEqual(servers[0]['url'], 'https://api.medhomee.uz/api')
 
     def test_debug_adds_localhost_servers(self):
         servers = build_openapi_servers(
             api_base_url='https://api.medhomee.uz',
             debug=True,
         )
-        self.assertEqual(servers[0]['url'], 'https://api.medhomee.uz')
-        self.assertEqual(servers[1]['url'], 'http://127.0.0.1:8000')
+        self.assertEqual(servers[0]['url'], 'https://api.medhomee.uz/api')
+        self.assertEqual(servers[1]['url'], 'http://127.0.0.1:8000/api')
 
     def test_production_without_base_url_omits_servers_key(self):
         settings = build_spectacular_settings(api_base_url='', debug=False)

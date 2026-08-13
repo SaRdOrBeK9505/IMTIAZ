@@ -260,21 +260,29 @@ def spectacular_postprocess_fix_legacy_operation_ids(result, generator, request,
     return result
 
 
+def _openapi_server_url(base_url: str) -> str:
+    """SCHEMA_PATH_PREFIX_TRIM=True bo'lganda server URL oxirida /api bo'lishi kerak."""
+    return f'{base_url.rstrip("/")}/api'
+
+
 def build_openapi_servers(*, api_base_url: str = '', debug: bool = True) -> list[dict]:
     """Swagger UI uchun server ro'yxati.
 
-    Production: API_BASE_URL birinchi (masalan https://api.medhomee.uz).
+    Production: API_BASE_URL (masalan https://api.medhomee.uz) + /api suffix.
+    SCHEMA_PATH_PREFIX_TRIM tufayli path lar /crm/... ko'rinishida — server /api bilan
+    birga to'liq URL hosil qiladi: .../api/crm/auth/login/
     DEBUG=True: localhost serverlar ham qo'shiladi.
-    Production va API_BASE_URL bo'sh bo'lsa — SERVERS qo'shilmaydi; Swagger joriy
-    domenni (api.medhomee.uz) ishlatadi.
     """
     servers: list[dict] = []
     if api_base_url:
-        servers.append({'url': api_base_url.rstrip('/'), 'description': 'Production'})
+        servers.append({
+            'url': _openapi_server_url(api_base_url),
+            'description': 'Production',
+        })
     if debug:
         servers.extend([
-            {'url': 'http://127.0.0.1:8000', 'description': 'Local development'},
-            {'url': 'http://localhost:8000', 'description': 'Local development (alt)'},
+            {'url': _openapi_server_url('http://127.0.0.1:8000'), 'description': 'Local development'},
+            {'url': _openapi_server_url('http://localhost:8000'), 'description': 'Local development (alt)'},
         ])
     return servers
 
