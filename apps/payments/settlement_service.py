@@ -306,7 +306,18 @@ class FlightSettlementService:
 
             price_check = adapter.check_price(booking.external_booking_id)
             if price_check.get('is_price_changed'):
-                new_price = price_check.get('new_price')
+                # Bookhara check-price javobida yangi narx qaytmaydi —
+                # yangilangan narxni olish uchun bron ma'lumotini qayta
+                # so'rash kerak (update-avia-booking.md).
+                new_price = None
+                try:
+                    booking_data = adapter.get_booking(booking.external_booking_id)
+                    price_block = (booking_data.get('price') or {})
+                    amount = price_block.get('amount')
+                    if amount is not None:
+                        new_price = Decimal(str(amount))
+                except (BookharaError, IntegrationError) as exc:
+                    logger.warning('Yangilangan narxni olib bolmadi: %s', exc)
                 return PreflightResult(
                     ok=False,
                     error_code='price_changed',
@@ -314,7 +325,7 @@ class FlightSettlementService:
                     locked_price=new_price,
                 )
 
-            locked_price = price_check.get('new_price') or booking.final_price
+            locked_price = booking.final_price
 
             balance = adapter.check_balance()
             deposit = Decimal(str(balance.get('deposit') or 0))

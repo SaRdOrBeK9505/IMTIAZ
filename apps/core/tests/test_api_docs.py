@@ -3,6 +3,30 @@
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
+from apps.core.openapi import build_openapi_servers, build_spectacular_settings
+
+
+class OpenAPIServersTests(TestCase):
+    def test_production_servers_use_api_base_url(self):
+        servers = build_openapi_servers(
+            api_base_url='https://api.medhomee.uz',
+            debug=False,
+        )
+        self.assertEqual(len(servers), 1)
+        self.assertEqual(servers[0]['url'], 'https://api.medhomee.uz')
+
+    def test_debug_adds_localhost_servers(self):
+        servers = build_openapi_servers(
+            api_base_url='https://api.medhomee.uz',
+            debug=True,
+        )
+        self.assertEqual(servers[0]['url'], 'https://api.medhomee.uz')
+        self.assertEqual(servers[1]['url'], 'http://127.0.0.1:8000')
+
+    def test_production_without_base_url_omits_servers_key(self):
+        settings = build_spectacular_settings(api_base_url='', debug=False)
+        self.assertNotIn('SERVERS', settings)
+
 
 @override_settings(DEBUG=False, ENABLE_API_DOCS=False)
 class APIDocsDisabledTests(TestCase):

@@ -260,8 +260,27 @@ def spectacular_postprocess_fix_legacy_operation_ids(result, generator, request,
     return result
 
 
-def build_spectacular_settings() -> dict:
-    return {
+def build_openapi_servers(*, api_base_url: str = '', debug: bool = True) -> list[dict]:
+    """Swagger UI uchun server ro'yxati.
+
+    Production: API_BASE_URL birinchi (masalan https://api.medhomee.uz).
+    DEBUG=True: localhost serverlar ham qo'shiladi.
+    Production va API_BASE_URL bo'sh bo'lsa — SERVERS qo'shilmaydi; Swagger joriy
+    domenni (api.medhomee.uz) ishlatadi.
+    """
+    servers: list[dict] = []
+    if api_base_url:
+        servers.append({'url': api_base_url.rstrip('/'), 'description': 'Production'})
+    if debug:
+        servers.extend([
+            {'url': 'http://127.0.0.1:8000', 'description': 'Local development'},
+            {'url': 'http://localhost:8000', 'description': 'Local development (alt)'},
+        ])
+    return servers
+
+
+def build_spectacular_settings(*, api_base_url: str = '', debug: bool = True) -> dict:
+    settings = {
         'TITLE': 'IMTIAZ API',
         'DESCRIPTION': API_DESCRIPTION,
         'VERSION': '1.1.0',
@@ -272,10 +291,6 @@ def build_spectacular_settings() -> dict:
         'LICENSE': {
             'name': 'Proprietary',
         },
-        'SERVERS': [
-            {'url': 'http://127.0.0.1:8000', 'description': 'Local development'},
-            {'url': 'http://localhost:8000', 'description': 'Local development (alt)'},
-        ],
         'SERVE_INCLUDE_SCHEMA': False,
         'COMPONENT_SPLIT_REQUEST': True,
         'SCHEMA_PATH_PREFIX': r'/api/',
@@ -323,3 +338,7 @@ def build_spectacular_settings() -> dict:
             'pathInMiddlePanel': True,
         },
     }
+    servers = build_openapi_servers(api_base_url=api_base_url, debug=debug)
+    if servers:
+        settings['SERVERS'] = servers
+    return settings

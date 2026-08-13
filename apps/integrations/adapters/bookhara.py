@@ -114,22 +114,37 @@ class BookharaAdapter(FlightProviderAdapter):
         destination: str,
         departure_date: str,
         passengers: int = 1,
-        seat_class: str = 'economy',
+        seat_class: str = 'E',
         return_date: str | None = None,
+        children: int = 0,
+        infants: int = 0,
+        infants_with_seat: int = 0,
     ) -> list[FlightOffer]:
-        """GET /api/v1/offers"""
+        """GET /api/v1/offers
+
+        Bookhara so'rov formati "directions[N][...]" bracket-notatsiyasida
+        kutiladi (standart flat query-parametr emas). `service_class`
+        qiymatlari: 'E' (economy), 'B' (business), 'A' (any) —
+        directory.md ga qarang. adults/children/infants/infants_with_seat
+        HAMMASI majburiy (0 bo'lsa ham yuborilishi kerak).
+        """
         params: dict = {
-            'origin': origin,
-            'destination': destination,
-            'departure_date': departure_date,
-            'passengers': passengers,
-            'seat_class': seat_class,
+            'directions[0][departure_airport]': origin,
+            'directions[0][arrival_airport]': destination,
+            'directions[0][date]': departure_date,
+            'service_class': seat_class,
+            'adults': passengers,
+            'children': children,
+            'infants': infants,
+            'infants_with_seat': infants_with_seat,
         }
         if return_date:
-            params['return_date'] = return_date
+            params['directions[1][departure_airport]'] = destination
+            params['directions[1][arrival_airport]'] = origin
+            params['directions[1][date]'] = return_date
 
         data = self._call('search', lambda: self.client.get('/api/v1/offers', params=params))
-        offers_raw = data.get('offers') or data.get('data') or []
+        offers_raw = data.get('data') or data.get('offers') or []
         offers: list[FlightOffer] = []
         for raw_offer in offers_raw:
             try:
@@ -155,12 +170,16 @@ class BookharaAdapter(FlightProviderAdapter):
     # -------------------------------------------------------------------
 
     def get_price(self, offer_id: str) -> Decimal:
-        """GET /api/v1/offers/{id}"""
+        """GET /api/v1/offers/{id}
+
+        Javobda `price` — obyekt ({amount, currency}), scalar emas.
+        """
         data = self._call('get_price', lambda: self.client.get(f'/api/v1/offers/{offer_id}'))
-        price = data.get('price') or data.get('total_price')
-        if price is None and 'data' in data:
-            price = data['data'].get('price')
-        return Decimal(str(price))
+        price_block = data.get('price') or {}
+        amount = price_block.get('amount') if isinstance(price_block, dict) else price_block
+        if amount is None:
+            raise ValueError(f'Bookhara get_price: price.amount topilmadi. Body: {data}')
+        return Decimal(str(amount))
 
     # -------------------------------------------------------------------
     # 5. Offer qoidalari
@@ -183,9 +202,43 @@ class BookharaAdapter(FlightProviderAdapter):
     # 6. Bron yaratish
     # -------------------------------------------------------------------
 
-    def create_booking(self, offer_id: str, passengers: list[dict], **kwargs) -> BookingResult:
-        """POST /api/v1/offers/{id}/booking"""
-        body: dict = {'offer_id': offer_id, 'passengers': passengers, **kwargs}
+    def create_booking(
+        self,
+        offer_id: str,
+        passengers: list[dict],
+        payer_name: str,
+        payer_email: str,
+        payer_tel: str,
+        order_note: str | None = None,
+        additional_services: list[str] | None = None,
+        **kwargs,
+    ) -> BookingResult:
+        """POST /api/v1/offers/{id}/booking
+
+        Har bir `passengers[i]` quyidagi maydonlarni o'z ichiga olishi
+        kerak (bookhara wiki / create-avia-booking.md):
+            first_name, last_name, middle_name (ixtiyoriy, yo'q bo'lsa
+            maydonni butunlay chiqarib tashlang), age ('adt'/'chd'/
+            'inf'/'ins'), birthdate ('YYYY-MM-DD'), gender ('M'/'F'),
+            citizenship (ISO 3166-1 alpha-2), tel (+XXXXXXXXXXXX),
+            doc_type, doc_number, doc_expire ('YYYY-MM-DD').
+
+        DIQQAT: Bookhara qoidasiga ko'ra sinov bronlarida ham HAQIQIY
+        (o'ylab topilmagan) F.I.Sh. va pasport ma'lumotlari ishlatilishi
+        SHART — "Test Testov" kabi soxta ism aviakompaniya tomonidan
+        jarimaga sabab bo'lishi mumkin.
+        """
+        body: dict = {
+            'payer_name': payer_name,
+            'payer_email': payer_email,
+            'payer_tel': payer_tel,
+            'passengers': passengers,
+        }
+        if order_note:
+            body['order_note'] = order_note
+        if additional_services:
+            body['additional_services'] = additional_services
+        body.update(kwargs)
         start = time.monotonic()
         try:
             data = self.client.post(f'/api/v1/offers/{offer_id}/booking', body)
@@ -212,11 +265,21 @@ class BookharaAdapter(FlightProviderAdapter):
         return BookingResult(
             success=True,
             external_booking_id=data.get('id') or data.get('booking_id'),
-            confirmation_code=data.get('pnr') or data.get('confirmation_code'),
+            confirmation_code=self._extract_pnr(data),
             error_message='',
             error_code=None,
             raw=data,
         )
+
+    @staticmethod
+    def _extract_pnr(data: dict) -> str | None:
+        """PNR top-level'da emas — passengers[0].tickets[0].pnr ichida."""
+        passengers = data.get('passengers') or []
+        if passengers:
+            tickets = passengers[0].get('tickets') or []
+            if tickets:
+                return tickets[0].get('pnr')
+        return data.get('pnr') or data.get('confirmation_code')
 
     # -------------------------------------------------------------------
     # 7. Bron malumotlarini olish
@@ -274,11 +337,14 @@ class BookharaAdapter(FlightProviderAdapter):
             'check_price', {'booking_id': booking_id}, data, 200, True,
             self._elapsed_ms(start), booking_id=booking_id,
         )
+        # DIQQAT: Bookhara javobida faqat is_price_changed keladi,
+        # yangi narx (new_price) qaytarilmaydi. Narx o'zgargan bo'lsa,
+        # yangilangan narxni olish uchun get_booking() chaqiring
+        # (update-avia-booking.md).
         is_changed = bool(data.get('is_price_changed'))
-        new_price_raw = data.get('new_price')
         return {
             'is_price_changed': is_changed,
-            'new_price': Decimal(str(new_price_raw)) if new_price_raw is not None else None,
+            'new_price': None,
         }
 
     # -------------------------------------------------------------------
@@ -347,10 +413,28 @@ class BookharaAdapter(FlightProviderAdapter):
     # -------------------------------------------------------------------
 
     def void_booking(self, booking_id: str) -> dict:
-        """DELETE /api/v1/booking/{id}/void"""
+        """DELETE /api/v1/booking/{id}/void
+
+        Faqat TO'LANGAN (paid, ticketed) bronlar uchun — shtrafsiz
+        bekor qilish. To'lanmagan (booked) bronlar uchun
+        `cancel_unpaid_booking()` dan foydalaning.
+        """
         return self._call(
             'void_booking',
             lambda: self.client.delete(f'/api/v1/booking/{booking_id}/void'),
+            booking_id=booking_id,
+        )
+
+    def cancel_unpaid_booking(self, booking_id: str) -> dict:
+        """DELETE /api/v1/booking/{id}/cancel-unpaid
+
+        Faqat TO'LANMAGAN (status: booked) bronlarni bekor qilish uchun.
+        void_booking() bilan ALMASHTIRIB BO'LMAYDI — bular boshqa-boshqa
+        endpointlar (cancelling-unpaid.md vs void.md).
+        """
+        return self._call(
+            'cancel_unpaid_booking',
+            lambda: self.client.delete(f'/api/v1/booking/{booking_id}/cancel-unpaid'),
             booking_id=booking_id,
         )
 
@@ -418,10 +502,26 @@ class BookharaAdapter(FlightProviderAdapter):
     def cancel_booking(self, external_booking_id: str) -> BookingResult:
         """Smart dispatch: qaysi cancel turi ishlashini ketma-ket sinaydi.
 
-          1. void_booking()           — 410 kelsa keyingisiga otadi
-          2. auto_cancel_booking()    — muvaffaqiyatsiz bolsa keyingisiga otadi
-          3. request_manual_refund()  — oxirgi variant
+          1. cancel_unpaid_booking()  — bron hali TO'LANMAGAN (booked) bo'lsa
+          2. void_booking()           — TO'LANGAN, shtrafsiz bekor qilish
+          3. auto_cancel_booking()    — TO'LANGAN, shtrafli bekor qilish
+          4. request_manual_refund()  — oxirgi variant (qo'lda ko'rib chiqish)
+
+        Bron holati (booked/paid/ticketed) oldindan noma'lum bo'lgani
+        uchun, mos endpoint topilguncha ketma-ket sinaladi.
         """
+        try:
+            data = self.cancel_unpaid_booking(external_booking_id)
+            return BookingResult(
+                success=True, external_booking_id=external_booking_id,
+                confirmation_code=None, error_message='', error_code=None, raw=data,
+            )
+        except httpx.HTTPStatusError as exc:
+            logger.info(
+                'Bookhara cancel_unpaid muvaffaqiyatsiz (ehtimol bron to\'langan), '
+                'void sinaladi: %s', exc,
+            )
+
         try:
             data = self.void_booking(external_booking_id)
             return BookingResult(
@@ -580,7 +680,18 @@ class BookharaAdapter(FlightProviderAdapter):
     def _parse_offer(raw: dict) -> FlightOffer:
         """Bookhara javobidagi bitta offer obyektini FlightOffer'ga ogiradi.
 
-        Struktura: offer -> directions[0] -> segments[0].
+        Haqiqiy struktura (bookhara wiki / search-for-avia-offers.md):
+            offer.price = {amount, currency}                (obyekt!)
+            offer.directions[0].departure.airport.code       (IATA)
+            offer.directions[0].departure.datetime
+            offer.directions[0].arrival.airport.code
+            offer.directions[0].arrival.datetime
+            offer.directions[0].segments[0].airline = {code, title}
+            offer.directions[0].segments[0].flight_number
+            offer.directions[0].segments[0].service_class
+            offer.directions[0].segments[0].seats             (bo'sh joylar)
+            offer.directions[0].segments[0].baggage = {piece, weight} | null
+
         Faqat birinchi yonalishning birinchi segmenti asosiy FlightOffer
         maydonlarini toldirish uchun ishlatiladi; toliq struktura
         `raw` maydonida saqlanib qoladi.
@@ -590,24 +701,29 @@ class BookharaAdapter(FlightProviderAdapter):
         segments = first_direction.get('segments') or []
         first_segment = segments[0] if segments else {}
 
+        departure = first_direction.get('departure') or {}
+        arrival = first_direction.get('arrival') or {}
+        departure_airport = departure.get('airport') or {}
+        arrival_airport = arrival.get('airport') or {}
+
+        airline = first_segment.get('airline') or {}
+        price_block = raw.get('price') or {}
+
         baggage = first_segment.get('baggage')
-        if isinstance(baggage, dict):
-            baggage_included = bool(baggage.get('included', False))
-        else:
-            baggage_included = bool(baggage)
+        baggage_included = bool(baggage)  # null yoki {} -> False, {piece,weight} -> True
 
         return FlightOffer(
             offer_id=raw.get('id'),
-            airline=first_segment.get('airline', ''),
+            airline=airline.get('title') or airline.get('code') or '',
             flight_number=first_segment.get('flight_number', ''),
-            origin=first_segment.get('origin', ''),
-            destination=first_segment.get('destination', ''),
-            departure_at=first_segment.get('departure_at', ''),
-            arrival_at=first_segment.get('arrival_at', ''),
-            price=Decimal(str(raw.get('price', 0))),
-            currency=raw.get('currency', 'UZS'),
-            seat_class=raw.get('cabin_class', ''),
-            available_seats=int(raw.get('available_seats', 0)),
+            origin=departure_airport.get('code', ''),
+            destination=arrival_airport.get('code', ''),
+            departure_at=departure.get('datetime', ''),
+            arrival_at=arrival.get('datetime', ''),
+            price=Decimal(str(price_block.get('amount', 0))),
+            currency=price_block.get('currency', 'UZS'),
+            seat_class=first_segment.get('service_class', ''),
+            available_seats=int(first_segment.get('seats') or 0),
             baggage_included=baggage_included,
             raw=raw,
         )

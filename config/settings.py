@@ -385,7 +385,11 @@ JAZZMIN_UI_TWEAKS = {
 # ─── SPECTACULAR ──────────────────────────────────────────────────────────────
 from apps.core.openapi import build_spectacular_settings
 
-SPECTACULAR_SETTINGS = build_spectacular_settings()
+API_BASE_URL = env('API_BASE_URL', default='')
+SPECTACULAR_SETTINGS = build_spectacular_settings(
+    api_base_url=API_BASE_URL,
+    debug=DEBUG,
+)
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[

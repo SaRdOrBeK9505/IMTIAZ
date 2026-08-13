@@ -1,0 +1,15 @@
+[
+  {
+    "first_name": "ISMINGIZ",
+    "last_name": "FAMILIYANGIZ",
+    "middle_name": null,
+    "age": "adt",
+    "birthdate": "1995-01-01",
+    "gender": "M",
+    "citizenship": "UZ",
+    "tel": "+998901234567",
+    "doc_type": "A",
+    "doc_number": "AB1234567",
+    "doc_expire": "2030-01-01"
+  }
+]

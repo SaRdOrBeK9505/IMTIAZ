@@ -6,7 +6,9 @@ Token boshqaruvi:
     body: {email, password, access_type: "avia"}
     Javob: {"data": {"token": "..."}} yoki {"token": "..."}
 
-Token Redis'da 55 daqiqa keshlanadi (token 60 daqiqa amal qiladi).
+Token Redis'da 28 kun keshlanadi (hujjatga ko'ra token 29 kun amal
+qiladi — bookhara/wiki "tavsiyalar" bo'limi: "Tokenning ishlash muddati
+29 kun").
 401 kelsa — keshni tozalab, tokenni qayta olib, so'rovni bir marta
 qayta yuboradi.
 """
@@ -28,7 +30,7 @@ from apps.integrations.errors import (
 logger = logging.getLogger(__name__)
 
 TOKEN_CACHE_KEY = 'bookhara_access_token'
-TOKEN_TTL_SECONDS = 55 * 60  # 55 daqiqa
+TOKEN_TTL_SECONDS = 28 * 24 * 60 * 60  # 28 kun (haqiqiy muddat: 29 kun)
 
 
 class BookharaClient:

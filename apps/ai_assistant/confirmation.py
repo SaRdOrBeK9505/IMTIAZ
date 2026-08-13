@@ -233,7 +233,7 @@ def _execute_confirmed_action(log: 'AIActionLog', user) -> dict:
 
 
 def _execute_booking(service_type: str, user, log: 'AIActionLog', payload: dict) -> dict:
-    """Bron turига qarab tegishli handler chaqiriladi."""
+    """Bron turіga qarab tegishli handler chaqiriladi."""
 
     if service_type == 'flight':
         return _create_flight_booking(user, log, payload)
@@ -309,6 +309,14 @@ def _create_flight_booking(user, log: 'AIActionLog', payload: dict) -> dict:
     lang       = resolve_language(user)
     offer_id   = payload.get('offer_id', '')
     passengers = payload.get('passengers', 1)
+    # Bookhara /booking so'rovi uchun har bir yo'lovchining to'liq
+    # ma'lumoti (F.I.Sh., tug'ilgan sana, pasport) kerak — shunchaki son
+    # YETARLI EMAS. Bu ma'lumot alohida bosqichda (masalan, AI chat orqali
+    # yoki forma orqali) yig'ilib, 'passenger_details' sifatida payload'ga
+    # qo'shilishi kerak. Bookhara qoidasiga ko'ra soxta (o'ylab topilgan)
+    # ma'lumot bilan bron qilish TAQIQLANGAN — shuning uchun bu yerda
+    # hech qanday placeholder ma'lumot ISHLATILMAYDI.
+    passenger_details = payload.get('passenger_details')
     origin     = payload.get('origin', '?')
     destination = payload.get('destination', '?')
 
@@ -319,14 +327,28 @@ def _create_flight_booking(user, log: 'AIActionLog', payload: dict) -> dict:
     try:
         from apps.integrations.adapters.bookhara import BookharaAdapter
 
-        if is_bookhara_configured():
+        if not is_bookhara_configured():
+            bookhara_note = t('bookhara_delay', lang)
+        elif not passenger_details:
+            # To'liq yo'lovchi ma'lumoti hali yig'ilmagan — Bookhara'ga
+            # soxta/yetarsiz ma'lumot bilan murojaat qilinmaydi.
+            logger.info(
+                'Bookhara create_booking otkazib yuborildi: passenger_details yoq (booking user=%s)',
+                user.id,
+            )
+            bookhara_note = t('bookhara_delay', lang)
+        else:
             adapter = BookharaAdapter()
-            result = adapter.create_booking(offer_id=offer_id, passengers=passengers)
+            result = adapter.create_booking(
+                offer_id=offer_id,
+                passengers=passenger_details,
+                payer_name=user.full_name or user.phone,
+                payer_email=user.email or 'noreply@imtiaz.uz',
+                payer_tel=user.phone,
+            )
             ext_id = result.external_booking_id if result.success else None
             if not ext_id:
                 bookhara_note = t('bookhara_no_response', lang)
-        else:
-            bookhara_note = t('bookhara_delay', lang)
     except Exception as exc:
         logger.warning('Bookhara booking xato: %s', exc)
         bookhara_note = t('bookhara_unavailable', lang)
