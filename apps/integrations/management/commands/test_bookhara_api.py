@@ -250,8 +250,15 @@ class BookharaApiTestSuite:
         return body
 
     def _load_passengers(self):
-        with open(self.opts['passenger_json'], encoding='utf-8') as fh:
-            data = json.load(fh)
+        path = self.opts['passenger_json']
+        try:
+            with open(path, encoding='utf-8') as fh:
+                data = json.load(fh)
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                f'{path} topilmadi. Masalan: '
+                f'--passenger-json /home/imtiaz/app/passengers.sample.json'
+            ) from exc
         self.passengers = data if isinstance(data, list) else [data]
 
     # ------------------------------------------------------------------
@@ -672,6 +679,10 @@ class BookharaApiTestSuite:
 
             try:
                 handler(spec)
+            except SkipTest as exc:
+                self._record(spec, TestStatus.SKIP, str(exc))
+            except WarnTest as exc:
+                self._record(spec, TestStatus.WARN, str(exc))
             except Exception:
                 self._record(
                     spec, TestStatus.FAIL, error=traceback.format_exc().splitlines()[-1],
@@ -817,6 +828,15 @@ class Command(BaseCommand):
             raise CommandError(
                 'BOOKHARA_EMAIL / BOOKHARA_PASSWORD .env da sozlanmagan.'
             )
+
+        if not opts['passenger_json'] and not opts['search_only']:
+            from django.conf import settings
+            default = settings.BASE_DIR / 'passengers.sample.json'
+            if default.is_file():
+                opts['passenger_json'] = str(default)
+                self.stdout.write(
+                    f'  {DIM}passenger-json avtomatik: {default}{RESET}\n'
+                )
 
         suite = BookharaApiTestSuite(self.stdout, opts)
         exit_code = suite.run_all()
