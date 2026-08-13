@@ -12,6 +12,7 @@ from .models import (
     StaffActivityLog,
     StaffPerformanceSummary,
     TableTimeSlot,
+    TourLead,
 )
 
 
@@ -48,7 +49,10 @@ class OrganizationAdmin(admin.ModelAdmin):
         }),
         ('Qo\'shimcha', {
             'classes': ('collapse',),
-            'fields': ('description', 'logo', 'website', 'contact_email', 'contact_phone'),
+            'fields': (
+                'description', 'logo', 'website', 'contact_email', 'contact_phone',
+                'crm_webhook_url', 'crm_webhook_secret',
+            ),
         }),
     )
 
@@ -105,3 +109,12 @@ class StaffPerformanceSummaryAdmin(admin.ModelAdmin):
     list_display = ['staff', 'period_type', 'period_start', 'period_end', 'table_bookings_confirmed']
     list_filter = ['period_type', 'period_start']
     search_fields = ['staff__user__phone']
+
+
+@admin.register(TourLead)
+class TourLeadAdmin(admin.ModelAdmin):
+    list_display = ['phone', 'full_name', 'organization', 'package', 'status', 'created_at']
+    list_filter = ['status', 'organization']
+    search_fields = ['phone', 'full_name', 'note']
+    readonly_fields = ['crm_response', 'sent_at', 'retry_count', 'created_at', 'updated_at']
+    raw_id_fields = ['organization', 'package', 'user', 'session']

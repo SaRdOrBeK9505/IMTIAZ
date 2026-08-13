@@ -160,13 +160,23 @@ def t(key: str, lang: str, **kwargs) -> str:
 
 
 def build_system_prompt(lang: str, price_limit: str, autonomy_level: str) -> str:
+    from datetime import timedelta
+    from django.utils import timezone
+
     lang = normalize_language(lang)
     lang_name = LANGUAGE_NAMES[lang]
+    today = timezone.now().date()
+    tomorrow = today + timedelta(days=1)
 
     prompts = {
         'uz': """\
 Sen IMTIAZ premium lifestyle concierge AI assistantsan.
-Xizmatlar: parvoz, poyezd, restoran, tadbirlar, bronlar.
+Xizmatlar: parvoz, poyezd, restoran, tadbirlar, tur paketlar, bronlar.
+
+Sana konteksti (MUHIM — har doim shu sanalardan foydalan):
+  Bugun: {today}
+  Ertaga: {tomorrow}
+  Sanalarni search_flights ga YYYY-MM-DD formatida yubor. O'tmish sanani HECH QACHON ishlatma.
 
 Qoidalar:
 1. Faqat IMTIAZ mavzularida yordam ber
@@ -183,10 +193,24 @@ Brend va o'ziga xos joy nomlarini saqlab qol.
    - "Tizimda kechikish bor" deb yumshoq ayt
    - Alternativa taklif qil (boshqa sana, restoran, menejer orqali qo'lda yordam)
 6. Tool xato xabarini mijozga moslab yetkaz, texnik so'zlarni olib tashla
+7. Parvoz qidiruv:
+   - Mijoz parvoz so'rasa DARHOL search_flights chaqir
+   - get_user_preferences parvoz qidiruv uchun ISHLATMA (faqat afzallik/tarix so'ralsa)
+   - origin/destination IATA kod (TAS, DXB, IST) yoki shahar nomi
+   - "ertaga" = {tomorrow}, "bugun" = {today}
+8. Tur paketlari:
+   - Avval search_tour_packages bilan qidir
+   - Mijoz qiziqsa, telefon raqamini (+998XXXXXXXXX) so'ra — bu majburiy
+   - Telefon olgach submit_tour_lead chaqir; telefon bo'lmasa lead yaratma
 """,
         'ru': """\
 Ты — AI-ассистент премиального lifestyle-сервиса IMTIAZ.
-Услуги: авиабилеты, поезда, рестораны, мероприятия, бронирования.
+Услуги: авиабилеты, поезда, рестораны, мероприятия, турпакеты, бронирования.
+
+Контекст даты (ВАЖНО — всегда используй эти даты):
+  Сегодня: {today}
+  Завтра: {tomorrow}
+  В search_flights передавай даты в формате YYYY-MM-DD. НИКОГДА не используй прошедшие даты.
 
 Правила:
 1. Помогай только по темам IMTIAZ
@@ -202,10 +226,24 @@ Brend va o'ziga xos joy nomlarini saqlab qol.
    - Мягко скажи «в системе временная задержка»
    - Предложи альтернативу (другая дата, ресторан, помощь менеджера)
 6. Передавай ошибки tool понятным языком, без технических терминов
+7. Поиск рейсов:
+   - При запросе рейса СРАЗУ вызывай search_flights
+   - get_user_preferences НЕ используй для поиска рейсов (только для истории/предпочтений)
+   - origin/destination — IATA (TAS, DXB, IST) или название города
+   - «завтра» = {tomorrow}, «сегодня» = {today}
+8. Турпакеты:
+   - Сначала search_tour_packages
+   - Если клиент заинтересован — запроси телефон (+998XXXXXXXXX), это обязательно
+   - После получения телефона вызови submit_tour_lead; без телефона lead не создавай
 """,
         'en': """\
 You are the IMTIAZ premium lifestyle concierge AI assistant.
-Services: flights, trains, restaurants, events, bookings.
+Services: flights, trains, restaurants, events, tour packages, bookings.
+
+Date context (IMPORTANT — always use these dates):
+  Today: {today}
+  Tomorrow: {tomorrow}
+  Pass dates to search_flights as YYYY-MM-DD. NEVER use past dates.
 
 Rules:
 1. Help only with IMTIAZ-related topics
@@ -221,6 +259,15 @@ present it clearly in {lang_name}. Keep brand names and unique venue names as-is
    - Softly say "there is a temporary system delay"
    - Offer alternatives (different date, restaurant, manager assistance)
 6. Relay tool errors in plain language, no technical jargon
+7. Flight search:
+   - When user asks for flights, IMMEDIATELY call search_flights
+   - Do NOT use get_user_preferences for flight search (only for history/preferences)
+   - origin/destination as IATA (TAS, DXB, IST) or city name
+   - "tomorrow" = {tomorrow}, "today" = {today}
+8. Tour packages:
+   - Use search_tour_packages first
+   - If the user is interested, ask for phone (+998XXXXXXXXX) — required
+   - After phone is provided, call submit_tour_lead; never create a lead without phone
 """,
     }
 
@@ -228,6 +275,8 @@ present it clearly in {lang_name}. Keep brand names and unique venue names as-is
         price_limit=price_limit,
         autonomy_level=autonomy_level,
         lang_name=lang_name,
+        today=today.isoformat(),
+        tomorrow=tomorrow.isoformat(),
     )
 
 
@@ -536,6 +585,50 @@ _MESSAGES: dict[str, dict[str, str]] = {
         'ru': '🎭 {count} мероприятий:',
         'en': '🎭 {count} event(s):',
     },
+    'tours_not_found': {
+        'uz': 'Mos tur paket topilmadi.',
+        'ru': 'Подходящие турпакеты не найдены.',
+        'en': 'No matching tour packages found.',
+    },
+    'tours_header': {
+        'uz': '🌍 {count} ta tur paket:',
+        'ru': '🌍 {count} турпакетов:',
+        'en': '🌍 {count} tour package(s):',
+    },
+    'tour_item': {
+        'uz': '{i}. {title} ({destination}) — {price:,.0f} {currency}, jo\'nash: {departure}',
+        'ru': '{i}. {title} ({destination}) — {price:,.0f} {currency}, вылет: {departure}',
+        'en': '{i}. {title} ({destination}) — {price:,.0f} {currency}, departure: {departure}',
+    },
+    'tour_lead_invalid_phone': {
+        'uz': 'Telefon raqami noto\'g\'ri. Iltimos, +998XXXXXXXXX formatida yuboring.',
+        'ru': 'Неверный номер телефона. Укажите в формате +998XXXXXXXXX.',
+        'en': 'Invalid phone number. Please use +998XXXXXXXXX format.',
+    },
+    'tour_lead_package_not_found': {
+        'uz': 'Tur paketi topilmadi yoki hozir faol emas.',
+        'ru': 'Турпакет не найден или сейчас неактивен.',
+        'en': 'Tour package not found or currently inactive.',
+    },
+    'tour_lead_invalid_date': {
+        'uz': 'Sana noto\'g\'ri. YYYY-MM-DD formatida yuboring.',
+        'ru': 'Неверная дата. Используйте формат YYYY-MM-DD.',
+        'en': 'Invalid date. Use YYYY-MM-DD format.',
+    },
+    'tour_lead_submitted': {
+        'uz': (
+            '✅ «{title}» bo\'yicha so\'rovingiz qabul qilindi. '
+            'Tur kompaniyasi tez orada siz bilan bog\'lanadi.'
+        ),
+        'ru': (
+            '✅ Ваш запрос по «{title}» принят. '
+            'Туркомпания скоро с вами свяжется.'
+        ),
+        'en': (
+            '✅ Your request for «{title}» has been received. '
+            'The tour company will contact you soon.'
+        ),
+    },
     'bookings_empty': {
         'uz': "Sizda hozircha bronlar yo'q.",
         'ru': 'У вас пока нет бронирований.',
@@ -587,6 +680,28 @@ _MESSAGES: dict[str, dict[str, str]] = {
         'en': 'departure station',
     },
     # integrations/errors
+    'flight_past_date': {
+        'uz': (
+            "Ko'rsatilgan sana ({date}) allaqachon o'tib ketgan. "
+            "Iltimos, kelgusi sana kiriting — masalan ertaga ({tomorrow_hint}). "
+            "Qaysi sanada jo'nashni xohlaysiz?"
+        ),
+        'ru': (
+            'Указанная дата ({date}) уже прошла. '
+            'Укажите будущую дату — например завтра ({tomorrow_hint}). '
+            'На какую дату планируете вылет?'
+        ),
+        'en': (
+            'The date ({date}) is in the past. '
+            'Please provide a future date — e.g. tomorrow ({tomorrow_hint}). '
+            'When would you like to depart?'
+        ),
+    },
+    'flight_invalid_date': {
+        'uz': "Sana noto'g'ri. Iltimos, YYYY-MM-DD formatida kiriting (masalan: 2026-08-14).",
+        'ru': 'Неверная дата. Укажите в формате YYYY-MM-DD (например: 2026-08-14).',
+        'en': 'Invalid date. Please use YYYY-MM-DD format (e.g. 2026-08-14).',
+    },
     'flight_unavailable': {
         'uz': (
             "Hozir {origin} → {destination}{date_line} bo'yicha onlayn parvoz "

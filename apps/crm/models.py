@@ -54,6 +54,20 @@ class Organization(BaseModel):
     contact_email = models.EmailField(blank=True, null=True)
     contact_phone = models.CharField(max_length=20, blank=True, null=True)
     is_active = models.BooleanField(default=True)
+    crm_webhook_url = models.URLField(
+        blank=True, null=True,
+        help_text=(
+            "Hamkorning tashqi CRM tizimi lead qabul qiluvchi endpointi. "
+            "Bo'sh bo'lsa — lead faqat IMTIAZ ichida (TourLead jadvalida) saqlanadi."
+        ),
+    )
+    crm_webhook_secret = models.CharField(
+        max_length=128, blank=True, null=True,
+        help_text=(
+            "Webhook so'roviga X-Signature sifatida qo'shiladigan maxfiy kalit "
+            "(HMAC-SHA256). Hamkor CRM tomonidan so'rov haqiqiyligini tekshirish uchun."
+        ),
+    )
 
     class Meta:
         verbose_name = 'Tashkilot'
@@ -306,3 +320,68 @@ class StaffPerformanceSummary(BaseModel):
 
     def __str__(self):
         return f'{self.staff} | {self.period_type} | {self.period_start}'
+
+
+# ─── TourLead (AI orqali kelgan qiziqish) ────────────────────────────────────
+
+class TourLeadStatus(models.TextChoices):
+    NEW        = 'new',        'Yangi'
+    SENT       = 'sent',       'CRM ga yuborildi'
+    FAILED     = 'failed',     'Yuborishda xato'
+    CONTACTED  = 'contacted',  'Mijoz bilan bog\'lanildi'
+    CONVERTED  = 'converted',  'Bronga aylandi'
+    DECLINED   = 'declined',   'Rad etildi'
+
+
+class TourLead(BaseModel):
+    """
+    AI orqali kelgan tur bo'yicha qiziqish (lead).
+
+    Oqim:
+        1. Mijoz AI bilan suhbatda biror tur paketiga qiziqish bildiradi
+        2. AI mijozdan telefon raqamini so'raydi (majburiy)
+        3. submit_tour_lead tool chaqiriladi -> TourLead yaratiladi (status=NEW)
+        4. Celery task hamkor tashkilotning crm_webhook_url'iga yuboradi
+        5. Muvaffaqiyatli bo'lsa -> status=SENT, aks holda -> FAILED (3 marta qayta urinadi)
+    """
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name='tour_leads',
+        limit_choices_to={'org_type': 'tour_company'},
+    )
+    package = models.ForeignKey(
+        'tours.TourPackage', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='leads',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tour_leads',
+    )
+    session = models.ForeignKey(
+        'ai_assistant.ConversationSession', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='tour_leads',
+    )
+
+    full_name = models.CharField(max_length=200, blank=True)
+    phone = models.CharField(max_length=20)
+    preferred_departure_date = models.DateField(null=True, blank=True)
+    passengers = models.PositiveSmallIntegerField(default=1)
+    note = models.TextField(blank=True, help_text="Mijoz bildirgan qo'shimcha talablar")
+
+    status = models.CharField(
+        max_length=12, choices=TourLeadStatus.choices, default=TourLeadStatus.NEW,
+    )
+    crm_response = models.JSONField(default=dict, blank=True, help_text='Hamkor CRM javobi (debug uchun)')
+    sent_at = models.DateTimeField(null=True, blank=True)
+    retry_count = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        verbose_name = 'Tur lead'
+        verbose_name_plural = 'Tur leadlar'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['organization', 'status']),
+            models.Index(fields=['phone']),
+        ]
+
+    def __str__(self):
+        return f'{self.full_name or self.phone} → {self.package or self.organization} [{self.status}]'

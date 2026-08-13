@@ -168,12 +168,83 @@ USER_PREFERENCES_TOOL = {
     'name': 'get_user_preferences',
     'description': (
         'Foydalanuvchining bron tarixi va afzalliklarini tahlil qiladi. '
-        'Yaxshi takliflar berish uchun ishlatiladi.'
+        'FAQAT mijoz o\'z tarixi/afzalliklari haqida so\'raganda ishlat. '
+        'Parvoz qidiruv uchun ISHLATMA — buning o\'rniga search_flights.'
     ),
     'input_schema': {
         'type': 'object',
         'properties': {},
         'required': [],
+    },
+}
+
+TOUR_SEARCH_TOOL = {
+    'name': 'search_tour_packages',
+    'description': (
+        'Tur paketlarini qidiradi — yo\'nalish, sana yoki kalit so\'z bo\'yicha. '
+        'Mijozga tur taklif qilishdan oldin ishlatiladi.'
+    ),
+    'input_schema': {
+        'type': 'object',
+        'properties': {
+            'destination': {
+                'type': 'string',
+                'description': 'Yo\'nalish nomi yoki shahar (masalan: Dubai, Samarqand)',
+            },
+            'departure_date_from': {
+                'type': 'string',
+                'description': 'Jo\'nash sanasi dan (YYYY-MM-DD, ixtiyoriy)',
+            },
+            'passengers': {
+                'type': 'integer',
+                'description': 'Sayohatchilar soni',
+                'default': 1,
+            },
+            'query': {
+                'type': 'string',
+                'description': 'Paket nomi yoki kalit so\'z (ixtiyoriy)',
+            },
+        },
+        'required': [],
+    },
+}
+
+TOUR_LEAD_TOOL = {
+    'name': 'submit_tour_lead',
+    'description': (
+        'Mijoz tur paketiga qiziqish bildirganda va telefon raqamini bergandan keyin lead yaratadi. '
+        'MUHIM: telefon raqamisiz chaqirma — avval mijozdan +998XXXXXXXXX formatida so\'ra.'
+    ),
+    'input_schema': {
+        'type': 'object',
+        'properties': {
+            'package_id': {
+                'type': 'string',
+                'description': 'search_tour_packages natijasidagi paket UUID',
+            },
+            'phone': {
+                'type': 'string',
+                'description': 'Mijoz telefon raqami (+998XXXXXXXXX)',
+            },
+            'full_name': {
+                'type': 'string',
+                'description': 'Mijoz ismi (ixtiyoriy)',
+            },
+            'preferred_departure_date': {
+                'type': 'string',
+                'description': 'Afzal jo\'nash sanasi YYYY-MM-DD (ixtiyoriy)',
+            },
+            'passengers': {
+                'type': 'integer',
+                'description': 'Sayohatchilar soni',
+                'default': 1,
+            },
+            'note': {
+                'type': 'string',
+                'description': 'Qo\'shimcha talablar yoki savollar (ixtiyoriy)',
+            },
+        },
+        'required': ['package_id', 'phone'],
     },
 }
 
@@ -191,4 +262,6 @@ def get_all_tools() -> list[dict]:
         USER_BOOKINGS_TOOL,
         NEARBY_PLACES_TOOL,
         USER_PREFERENCES_TOOL,
+        TOUR_SEARCH_TOOL,
+        TOUR_LEAD_TOOL,
     ]

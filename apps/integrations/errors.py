@@ -60,6 +60,17 @@ def customer_message(service: str, error_code: str, lang: str = 'uz', **ctx) -> 
         destination = ctx.get('destination') or t('destination_default', lang)
         date = ctx.get('departure_date') or ''
         date_line = f" ({date})" if date else ''
+        if error_code == 'past_date':
+            from datetime import timedelta
+            from django.utils import timezone
+            tomorrow_hint = (timezone.now().date() + timedelta(days=1)).isoformat()
+            return t(
+                'flight_past_date', lang,
+                date=date,
+                tomorrow_hint=tomorrow_hint,
+            )
+        if error_code == 'invalid_date':
+            return t('flight_invalid_date', lang)
         return t(
             'flight_unavailable', lang,
             origin=origin,

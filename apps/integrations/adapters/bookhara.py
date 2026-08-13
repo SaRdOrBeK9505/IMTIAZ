@@ -82,6 +82,28 @@ BOOKHARA_STATUS_MAP = {
     'cancelled': 'cancelled',
 }
 
+# Bookhara API service_class: E=economy, B=business, A=any
+BOOKHARA_SEAT_CLASS_MAP = {
+    'economy': 'E',
+    'business': 'B',
+    'first': 'B',
+    'e': 'E',
+    'b': 'B',
+    'a': 'A',
+}
+
+
+def normalize_bookhara_seat_class(seat_class: str) -> str:
+    """AI/tool 'economy' → Bookhara 'E'."""
+    if not seat_class:
+        return 'E'
+    key = seat_class.strip().lower()
+    if key in BOOKHARA_SEAT_CLASS_MAP:
+        return BOOKHARA_SEAT_CLASS_MAP[key]
+    if len(key) == 1 and key.upper() in ('E', 'B', 'A'):
+        return key.upper()
+    return 'E'
+
 
 class BookharaAdapter(FlightProviderAdapter):
     """Bookhara avia-provayderi uchun yuqori darajali adapter."""
@@ -138,6 +160,8 @@ class BookharaAdapter(FlightProviderAdapter):
         directory.md ga qarang. adults/children/infants/infants_with_seat
         HAMMASI majburiy (0 bo'lsa ham yuborilishi kerak).
         """
+        seat_class = normalize_bookhara_seat_class(seat_class)
+
         params: dict = {
             'directions[0][departure_airport]': origin,
             'directions[0][arrival_airport]': destination,

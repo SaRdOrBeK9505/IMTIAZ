@@ -5,9 +5,52 @@ AI Tool handler'lari — function-calling natijalarini real biznes logikaga bog'
 from __future__ import annotations
 
 import logging
+import re
 from decimal import Decimal
+from datetime import datetime
+
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+_PHONE_RE = re.compile(r'^\+998\d{9}$')
+
+# Shahar nomlari → IATA (AI ba'zan shahar yuboradi)
+_AIRPORT_ALIASES = {
+    'toshkent': 'TAS', 'tashkent': 'TAS', 'ташкент': 'TAS',
+    'dubay': 'DXB', 'dubai': 'DXB', 'дубай': 'DXB',
+    'sharjah': 'SHJ', 'sharja': 'SHJ', 'шарджа': 'SHJ',
+    'istanbul': 'IST', 'стамбул': 'IST', 'istanbul': 'IST',
+    'moskva': 'SVO', 'moscow': 'SVO', 'москва': 'SVO',
+    'antalya': 'AYT', 'антalya': 'AYT',
+    'baku': 'GYD', 'bakı': 'GYD', 'баку': 'GYD',
+    'almaty': 'ALA', 'алматы': 'ALA',
+    'seoul': 'ICN', 'seul': 'ICN',
+    'delhi': 'DEL', 'dehli': 'DEL',
+    'parij': 'CDG', 'paris': 'CDG', 'париж': 'CDG',
+    'london': 'LHR', 'londra': 'LHR', 'лондон': 'LHR',
+}
+
+
+def _normalize_airport(code: str) -> str:
+    cleaned = (code or '').strip()
+    if len(cleaned) == 3 and cleaned.isalpha():
+        return cleaned.upper()
+    return _AIRPORT_ALIASES.get(cleaned.lower(), cleaned.upper())
+
+
+def _parse_departure_date(departure_date: str):
+    try:
+        return datetime.strptime(departure_date, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _normalize_phone(value: str) -> str:
+    phone = value.strip().replace(' ', '').replace('-', '')
+    if not phone.startswith('+'):
+        phone = '+' + phone
+    return phone
 
 
 def handle_search_flights(
@@ -24,6 +67,30 @@ def handle_search_flights(
         integration_error_dict,
         is_bookhara_configured,
     )
+
+    origin = _normalize_airport(origin)
+    destination = _normalize_airport(destination)
+
+    dep = _parse_departure_date(departure_date)
+    today = timezone.now().date()
+    if dep is None:
+        return flight_search_error(
+            'invalid_date',
+            origin=origin,
+            destination=destination,
+            departure_date=departure_date,
+            detail='invalid_date_format',
+            lang=lang,
+        )
+    if dep < today:
+        return flight_search_error(
+            'past_date',
+            origin=origin,
+            destination=destination,
+            departure_date=departure_date,
+            detail=f'date_in_past:{departure_date}',
+            lang=lang,
+        )
 
     logger.info('Parvoz qidiruv: %s→%s %s (user=%s)', origin, destination, departure_date, user.id)
 
@@ -332,15 +399,169 @@ def handle_get_user_preferences(user, **kwargs) -> dict:
     }
 
 
+def handle_search_tour_packages(
+    user,
+    destination: str = None,
+    departure_date_from: str = None,
+    passengers: int = 1,
+    query: str = None,
+    lang: str = 'uz',
+    **kwargs,
+) -> dict:
+    from django.db.models import Q
+    from django.utils import timezone
+
+    from apps.tours.models import AvailabilityStatus, TourAvailability, TourPackage
+    from .i18n import localized_field, t
+
+    qs = TourPackage.objects.filter(
+        is_active=True,
+        organization__org_type='tour_company',
+        organization__is_active=True,
+    ).select_related('organization', 'destination')
+
+    if destination:
+        qs = qs.filter(
+            Q(destination__name__icontains=destination)
+            | Q(destination__city__icontains=destination)
+            | Q(destination__country__icontains=destination)
+        )
+    if query:
+        qs = qs.filter(
+            Q(title__icontains=query)
+            | Q(short_description__icontains=query)
+            | Q(tags__icontains=query)
+        )
+
+    today = timezone.now().date()
+    packages = list(qs.order_by('-is_featured', '-created_at')[:10])
+    if not packages:
+        return {'status': 'ok', 'results': [], 'message': t('tours_not_found', lang)}
+
+    results = []
+    for pkg in packages:
+        avail_qs = TourAvailability.objects.filter(
+            package=pkg,
+            status=AvailabilityStatus.OPEN,
+            departure_date__gte=today,
+        ).order_by('departure_date')
+
+        if departure_date_from:
+            try:
+                date_from = datetime.strptime(departure_date_from, '%Y-%m-%d').date()
+                avail_qs = avail_qs.filter(departure_date__gte=date_from)
+            except ValueError:
+                pass
+
+        next_departures = []
+        for av in avail_qs[:3]:
+            seats = av.available_seats
+            if seats >= passengers:
+                next_departures.append({
+                    'departure_date': av.departure_date.isoformat(),
+                    'return_date': av.return_date.isoformat() if av.return_date else None,
+                    'available_seats': seats,
+                    'price': float(av.effective_price),
+                    'currency': pkg.currency,
+                })
+
+        results.append({
+            'package_id': str(pkg.id),
+            'title': localized_field(pkg, 'title', lang),
+            'destination': localized_field(pkg.destination, 'name', lang),
+            'country': pkg.destination.country,
+            'duration_days': pkg.duration_days,
+            'base_price': float(pkg.base_price),
+            'currency': pkg.currency,
+            'organization': localized_field(pkg.organization, 'name', lang),
+            'avg_rating': float(pkg.avg_rating),
+            'next_departures': next_departures,
+        })
+
+    return {'status': 'ok', 'results': results, 'passengers': passengers}
+
+
+def handle_submit_tour_lead(
+    user,
+    package_id: str,
+    phone: str,
+    full_name: str = '',
+    preferred_departure_date: str = None,
+    passengers: int = 1,
+    note: str = '',
+    session=None,
+    lang: str = 'uz',
+    **kwargs,
+) -> dict:
+    from apps.crm.models import TourLead, TourLeadStatus
+    from apps.crm.tasks import send_tour_lead_to_crm
+    from apps.tours.models import TourPackage
+    from .i18n import t
+
+    normalized_phone = _normalize_phone(phone)
+    if not _PHONE_RE.match(normalized_phone):
+        return {
+            'status': 'error',
+            'message': t('tour_lead_invalid_phone', lang),
+        }
+
+    try:
+        package = TourPackage.objects.select_related('organization').get(
+            id=package_id,
+            is_active=True,
+            organization__org_type='tour_company',
+            organization__is_active=True,
+        )
+    except TourPackage.DoesNotExist:
+        return {'status': 'error', 'message': t('tour_lead_package_not_found', lang)}
+
+    dep_date = None
+    if preferred_departure_date:
+        try:
+            dep_date = datetime.strptime(preferred_departure_date, '%Y-%m-%d').date()
+        except ValueError:
+            return {'status': 'error', 'message': t('tour_lead_invalid_date', lang)}
+
+    if not full_name.strip():
+        full_name = user.full_name or ''
+
+    lead = TourLead.objects.create(
+        organization=package.organization,
+        package=package,
+        user=user,
+        session=session,
+        full_name=full_name.strip(),
+        phone=normalized_phone,
+        preferred_departure_date=dep_date,
+        passengers=max(passengers, 1),
+        note=note.strip(),
+        status=TourLeadStatus.NEW,
+    )
+
+    send_tour_lead_to_crm.delay(str(lead.id))
+    logger.info(
+        'AI tur lead yaratildi: lead=%s, package=%s, user=%s',
+        lead.id, package.id, user.id,
+    )
+
+    return {
+        'status': 'ok',
+        'lead_id': str(lead.id),
+        'message': t('tour_lead_submitted', lang, title=package.title),
+    }
+
+
 TOOL_DISPATCH: dict = {
-    'search_flights':       handle_search_flights,
-    'search_trains':        handle_search_trains,
-    'search_restaurants':   handle_search_restaurants,
-    'book_restaurant':      handle_book_restaurant,
-    'book_flight':          handle_book_flight,
-    'search_events':        handle_search_events,
-    'cancel_booking':       handle_cancel_booking,
-    'get_user_bookings':    handle_get_user_bookings,
-    'get_nearby_places':    handle_get_nearby_places,
-    'get_user_preferences': handle_get_user_preferences,
+    'search_flights':         handle_search_flights,
+    'search_trains':          handle_search_trains,
+    'search_restaurants':     handle_search_restaurants,
+    'book_restaurant':        handle_book_restaurant,
+    'book_flight':            handle_book_flight,
+    'search_events':          handle_search_events,
+    'cancel_booking':         handle_cancel_booking,
+    'get_user_bookings':      handle_get_user_bookings,
+    'get_nearby_places':      handle_get_nearby_places,
+    'get_user_preferences':   handle_get_user_preferences,
+    'search_tour_packages':   handle_search_tour_packages,
+    'submit_tour_lead':       handle_submit_tour_lead,
 }

@@ -62,6 +62,10 @@ def build_reply_from_tools(tool_results: list[dict], lang: str = 'uz') -> str:
             parts.append(_format_nearby(result, lang))
         elif name == 'get_user_preferences':
             parts.append(_format_preferences(result, lang))
+        elif name == 'search_tour_packages':
+            parts.append(_format_tours(result, lang))
+        elif name == 'submit_tour_lead':
+            parts.append(result.get('message', t('action_done', lang)))
         elif name == 'cancel_booking':
             parts.append(result.get('message', t('action_done', lang)))
         else:
@@ -179,3 +183,23 @@ def _format_preferences(result: dict, lang: str) -> str:
         spent=spent,
         preferred=preferred,
     )
+
+
+def _format_tours(result: dict, lang: str) -> str:
+    items = result.get('results') or []
+    if not items:
+        return result.get('message') or t('tours_not_found', lang)
+    lines = [t('tours_header', lang, count=len(items))]
+    for i, pkg in enumerate(items[:5], 1):
+        dep = pkg.get('next_departures') or []
+        dep_str = dep[0]['departure_date'] if dep else '—'
+        lines.append(t(
+            'tour_item', lang,
+            i=i,
+            title=pkg.get('title', '?'),
+            destination=pkg.get('destination', '?'),
+            price=pkg.get('base_price', 0),
+            currency=pkg.get('currency', 'UZS'),
+            departure=dep_str,
+        ))
+    return '\n'.join(lines)

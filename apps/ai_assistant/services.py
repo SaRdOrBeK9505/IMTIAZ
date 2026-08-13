@@ -259,7 +259,9 @@ class AIAssistantService:
                 payload=tool_input,
             )
             try:
-                result         = self._dispatch_tool(user, tool_name, tool_input, lang=lang)
+                result         = self._dispatch_tool(
+                    user, tool_name, tool_input, lang=lang, session=session,
+                )
                 log_entry.result = result
                 log_entry.status = AIActionLog.ActionStatus.SUCCESS
                 logger.info('Tool [%s] OK: user=%s', tool_name, user.id)
@@ -284,12 +286,12 @@ class AIAssistantService:
         return results, None, ''
 
     @staticmethod
-    def _dispatch_tool(user, tool_name: str, tool_input: dict, lang: str = 'uz') -> dict:
+    def _dispatch_tool(user, tool_name: str, tool_input: dict, lang: str = 'uz', session=None) -> dict:
         from .tool_handlers import TOOL_DISPATCH
         handler = TOOL_DISPATCH.get(tool_name)
         if not handler:
             raise ValueError(f"Noma'lum tool: {tool_name!r}")
-        return handler(user=user, lang=lang, **tool_input)
+        return handler(user=user, lang=lang, session=session, **tool_input)
 
     @staticmethod
     def _extract_amount(tool_input: dict) -> Decimal | None:
@@ -310,9 +312,11 @@ class AIAssistantService:
             'search_trains':        AIActionLog.ActionType.SEARCH,
             'search_restaurants':   AIActionLog.ActionType.SEARCH,
             'search_events':        AIActionLog.ActionType.SEARCH,
+            'search_tour_packages': AIActionLog.ActionType.SEARCH,
             'get_nearby_places':    AIActionLog.ActionType.SEARCH,
             'get_user_bookings':    AIActionLog.ActionType.INFO_REQUEST,
             'get_user_preferences': AIActionLog.ActionType.INFO_REQUEST,
+            'submit_tour_lead':     AIActionLog.ActionType.BOOK,
             'book_flight':          AIActionLog.ActionType.BOOK,
             'book_restaurant':      AIActionLog.ActionType.BOOK,
             'cancel_booking':       AIActionLog.ActionType.CANCEL,
@@ -327,4 +331,6 @@ class AIAssistantService:
             'search_restaurants':'restaurant',
             'book_restaurant':   'restaurant',
             'search_events':     'event',
+            'search_tour_packages': 'tour',
+            'submit_tour_lead':  'tour',
         }.get(name, '')

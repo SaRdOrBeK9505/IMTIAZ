@@ -6,6 +6,7 @@ from .models import (
     Organization, Branch, BranchStaff,
     RestaurantTable, TableTimeSlot,
     StaffActivityLog, StaffPerformanceSummary,
+    TourLead, TourLeadStatus,
 )
 from apps.booking.models import Booking, BookingStatus
 
@@ -178,4 +179,26 @@ class StaffLeaderboardSerializer(serializers.ModelSerializer):
             'id', 'name', 'phone', 'role',
             'branch_name', 'permissions', 'is_active', 'created_at',
         ]
+
+
+# ─── TourLead (AI) ────────────────────────────────────────────────────────────
+
+class TourLeadSerializer(serializers.ModelSerializer):
+    package_title = serializers.CharField(source='package.title', read_only=True, allow_null=True)
+
+    class Meta:
+        model = TourLead
+        fields = [
+            'id', 'full_name', 'phone', 'passengers', 'preferred_departure_date',
+            'note', 'status', 'package_title', 'package_id',
+            'crm_response', 'sent_at', 'retry_count', 'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'crm_response', 'sent_at', 'retry_count', 'created_at', 'updated_at',
+        ]
+
+
+class TourLeadUpdateSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=TourLeadStatus.choices)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=2000)
 
