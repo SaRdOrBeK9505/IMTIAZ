@@ -25,7 +25,7 @@ from .models import ConversationSession, ConversationMessage, AIActionLog
 from .providers.base import BaseAIProvider, AIMessage
 from .response_builder import (
     build_reply_from_tools,
-    can_reply_without_ai,
+    should_use_local_reply,
     trim_tool_result_for_ai,
 )
 from .tools import get_all_tools
@@ -121,11 +121,9 @@ class AIAssistantService:
             if pending_action_id:
                 # Tasdiqlash kerak — foydalanuvchiga savol
                 final_content = pending_summary
-            elif can_reply_without_ai(tool_results) and getattr(
-                settings, 'AI_SKIP_SECOND_CALL', True
-            ) and lang == 'uz':
-                # Token tejash: o'zbek tilida tool natijasidan javob yig'amiz.
-                # ru/en uchun LLM DB ma'lumotlarini tarjima qiladi.
+            elif should_use_local_reply(tool_results, message, lang):
+                # Token tejash: oddiy holatda tool natijasidan javob yig'amiz.
+                # Vaqt/batafsil savollar va bo'sh tur natijalari uchun LLM ishlatiladi.
                 final_content = build_reply_from_tools(tool_results, lang=lang)
             else:
                 # Murakkab holat — AI ga qisqartirilgan natija yuboriladi

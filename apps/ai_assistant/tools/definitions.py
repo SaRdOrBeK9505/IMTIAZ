@@ -181,8 +181,10 @@ USER_PREFERENCES_TOOL = {
 TOUR_SEARCH_TOOL = {
     'name': 'search_tour_packages',
     'description': (
-        'Tur paketlarini qidiradi — yo\'nalish, sana yoki kalit so\'z bo\'yicha. '
-        'Mijozga tur taklif qilishdan oldin ishlatiladi.'
+        'Tur paketlari va hamkor tur kompaniyalarini qidiradi. '
+        'Mijoz tur, kompaniya yoki yo\'nalish haqida so\'rasa — chaqir. '
+        'Filtrsiz chaqirish mumkin (barcha mavjud paketlar va hamkorlar). '
+        'Paket topilmasa ham partners ro\'yxati qaytadi.'
     ),
     'input_schema': {
         'type': 'object',

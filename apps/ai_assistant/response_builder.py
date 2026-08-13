@@ -35,6 +35,49 @@ def can_reply_without_ai(tool_results: list[dict]) -> bool:
     return True
 
 
+def should_use_local_reply(tool_results: list[dict], user_message: str, lang: str) -> bool:
+    """
+    Ikkinchi AI chaqiruvsiz javob berish mumkinmi?
+    Batafsil/vaqt so'rovlari va murakkab turlar uchun LLM kerak.
+    """
+    from django.conf import settings
+
+    if not can_reply_without_ai(tool_results):
+        return False
+    if not getattr(settings, 'AI_SKIP_SECOND_CALL', True):
+        return False
+    if normalize_language(lang) != 'uz':
+        return False
+
+    msg = (user_message or '').lower()
+    detail_keywords = (
+        'vaqt', 'soat', 'nechchida', 'qachon', 'to\'liq', 'batafsil',
+        'kelish', 'ketish', 'qancha vaqt', 'kechqurun', 'ertalab',
+        'подробн', 'время', 'когда', 'detail', 'time', 'when',
+    )
+    if any(kw in msg for kw in detail_keywords):
+        return False
+
+    for item in tool_results:
+        name = item.get('tool_name', '')
+        result = item.get('result') or {}
+        if name == 'search_tour_packages' and not result.get('results'):
+            return False
+
+    return True
+
+
+def _format_time_short(dt_str: str) -> str:
+    """ISO datetime → HH:MM (mahalliy vaqt sifatida)."""
+    if not dt_str:
+        return '—'
+    if 'T' in dt_str:
+        return dt_str.split('T')[1][:5]
+    if ' ' in dt_str:
+        return dt_str.split(' ')[1][:5]
+    return dt_str[:5] if len(dt_str) >= 5 else dt_str
+
+
 def build_reply_from_tools(tool_results: list[dict], lang: str = 'uz') -> str:
     """Tool natijalaridan foydalanuvchiga javob — tilga mos."""
     lang = normalize_language(lang)
@@ -93,19 +136,35 @@ def _format_flights(result: dict, lang: str) -> str:
             count=len(offers),
         )
     ]
-    for i, o in enumerate(offers[:5], 1):
-        price = o.get('price', 0)
-        currency = o.get('currency', 'UZS')
+    seen: set[str] = set()
+    shown = 0
+    for o in offers:
+        dep_t = _format_time_short(o.get('departure_at', ''))
+        arr_t = _format_time_short(o.get('arrival_at', ''))
+        key = f"{o.get('airline')}|{o.get('flight_number')}|{dep_t}|{o.get('price')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        shown += 1
+        if shown > 5:
+            break
+        baggage = o.get('baggage')
+        baggage_str = t('flight_baggage_yes', lang) if baggage else ''
         lines.append(t(
             'flight_item', lang,
-            i=i,
+            i=shown,
             airline=o.get('airline', '?'),
             number=o.get('flight_number', ''),
-            price=price,
-            currency=currency,
+            departure_time=dep_t,
+            arrival_time=arr_t,
+            price=o.get('price', 0),
+            currency=o.get('currency', 'UZS'),
+            baggage=baggage_str,
         ))
-    if len(offers) > 5:
-        lines.append(t('flights_more', lang, count=len(offers) - 5))
+    remaining = max(len(offers) - shown, 0)
+    if remaining > 0:
+        lines.append(t('flights_more', lang, count=remaining))
+    lines.append(t('flights_book_hint', lang))
     return '\n'.join(lines)
 
 
@@ -187,19 +246,50 @@ def _format_preferences(result: dict, lang: str) -> str:
 
 def _format_tours(result: dict, lang: str) -> str:
     items = result.get('results') or []
-    if not items:
-        return result.get('message') or t('tours_not_found', lang)
-    lines = [t('tours_header', lang, count=len(items))]
-    for i, pkg in enumerate(items[:5], 1):
-        dep = pkg.get('next_departures') or []
-        dep_str = dep[0]['departure_date'] if dep else '—'
-        lines.append(t(
-            'tour_item', lang,
-            i=i,
-            title=pkg.get('title', '?'),
-            destination=pkg.get('destination', '?'),
-            price=pkg.get('base_price', 0),
-            currency=pkg.get('currency', 'UZS'),
-            departure=dep_str,
-        ))
+    if items:
+        lines = [t('tours_header', lang, count=len(items))]
+        for i, pkg in enumerate(items[:5], 1):
+            dep = pkg.get('next_departures') or []
+            dep_str = dep[0]['departure_date'] if dep else t('tour_date_flexible', lang)
+            org = pkg.get('organization', '')
+            org_part = f" ({org})" if org else ''
+            lines.append(t(
+                'tour_item', lang,
+                i=i,
+                title=pkg.get('title', '?'),
+                destination=pkg.get('destination', '?'),
+                price=pkg.get('base_price', 0),
+                currency=pkg.get('currency', 'UZS'),
+                departure=dep_str,
+                organization=org_part,
+            ))
+        if len(items) > 5:
+            lines.append(t('tours_more', lang, count=len(items) - 5))
+        lines.append(t('tours_interest_hint', lang))
+        return '\n'.join(lines)
+
+    lines = [t('tours_no_packages_intro', lang)]
+    partners = result.get('partners') or []
+    if partners:
+        lines.append(t('tours_partners_header', lang))
+        for i, p in enumerate(partners[:5], 1):
+            pkg_count = p.get('package_count', 0)
+            if pkg_count:
+                lines.append(t(
+                    'tour_partner_item', lang,
+                    i=i, name=p.get('name', '?'), package_count=pkg_count,
+                ))
+            else:
+                lines.append(t(
+                    'tour_partner_item_new', lang,
+                    i=i, name=p.get('name', '?'),
+                ))
+    destinations = result.get('popular_destinations') or []
+    if destinations:
+        dest_names = ', '.join(
+            f"{d.get('name', '?')} ({d.get('country', '')})" for d in destinations[:6]
+        )
+        lines.append(t('tours_destinations_hint', lang, destinations=dest_names))
+
+    lines.append(t('tours_empty_suggest', lang))
     return '\n'.join(lines)

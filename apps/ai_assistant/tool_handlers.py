@@ -408,18 +408,20 @@ def handle_search_tour_packages(
     lang: str = 'uz',
     **kwargs,
 ) -> dict:
-    from django.db.models import Q
+    from django.db.models import Count, Q
     from django.utils import timezone
 
-    from apps.tours.models import AvailabilityStatus, TourAvailability, TourPackage
+    from apps.crm.models import Organization
+    from apps.tours.models import AvailabilityStatus, TourAvailability, TourDestination, TourPackage
     from .i18n import localized_field, t
 
-    qs = TourPackage.objects.filter(
+    base_qs = TourPackage.objects.filter(
         is_active=True,
         organization__org_type='tour_company',
         organization__is_active=True,
     ).select_related('organization', 'destination')
 
+    qs = base_qs
     if destination:
         qs = qs.filter(
             Q(destination__name__icontains=destination)
@@ -430,13 +432,53 @@ def handle_search_tour_packages(
         qs = qs.filter(
             Q(title__icontains=query)
             | Q(short_description__icontains=query)
+            | Q(organization__name__icontains=query)
             | Q(tags__icontains=query)
         )
 
     today = timezone.now().date()
     packages = list(qs.order_by('-is_featured', '-created_at')[:10])
+
+    # Filtr juda tor — filtrsiz qayta urinib ko'ramiz
+    if not packages and (destination or query):
+        packages = list(base_qs.order_by('-is_featured', '-created_at')[:10])
+
+    partners_qs = (
+        Organization.objects.filter(
+            org_type=Organization.OrgType.TOUR_COMPANY,
+            is_active=True,
+        )
+        .annotate(package_count=Count('tour_packages', filter=Q(tour_packages__is_active=True)))
+        .order_by('-package_count', 'name')[:8]
+    )
+    partners = [
+        {
+            'id': str(org.id),
+            'name': localized_field(org, 'name', lang),
+            'package_count': org.package_count,
+            'phone': org.contact_phone or '',
+        }
+        for org in partners_qs
+    ]
+
+    popular_destinations = [
+        {
+            'name': localized_field(d, 'name', lang),
+            'country': d.country,
+        }
+        for d in TourDestination.objects.filter(is_active=True).order_by(
+            '-is_popular', 'name',
+        )[:8]
+    ]
+
     if not packages:
-        return {'status': 'ok', 'results': [], 'message': t('tours_not_found', lang)}
+        return {
+            'status': 'ok',
+            'results': [],
+            'partners': partners,
+            'popular_destinations': popular_destinations,
+            'passengers': passengers,
+        }
 
     results = []
     for pkg in packages:
@@ -478,7 +520,13 @@ def handle_search_tour_packages(
             'next_departures': next_departures,
         })
 
-    return {'status': 'ok', 'results': results, 'passengers': passengers}
+    return {
+        'status': 'ok',
+        'results': results,
+        'partners': partners,
+        'popular_destinations': popular_destinations,
+        'passengers': passengers,
+    }
 
 
 def handle_submit_tour_lead(

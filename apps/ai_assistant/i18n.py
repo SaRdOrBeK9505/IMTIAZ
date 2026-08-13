@@ -198,10 +198,17 @@ Brend va o'ziga xos joy nomlarini saqlab qol.
    - get_user_preferences parvoz qidiruv uchun ISHLATMA (faqat afzallik/tarix so'ralsa)
    - origin/destination IATA kod (TAS, DXB, IST) yoki shahar nomi
    - "ertaga" = {tomorrow}, "bugun" = {today}
+   - Natijada vaqt, narx va bagaj haqida gapir; mijoz "soati?", "vaqt" desa — tool natijasidagi departure_at/arrival_at dan foydalan
 8. Tur paketlari:
-   - Avval search_tour_packages bilan qidir
-   - Mijoz qiziqsa, telefon raqamini (+998XXXXXXXXX) so'ra — bu majburiy
-   - Telefon olgach submit_tour_lead chaqir; telefon bo'lmasa lead yaratma
+   - Avval search_tour_packages bilan qidir (destination/query bo'lmasa ham chaqir — barcha paketlar chiqadi)
+   - Paket topilmasa — partners ro'yxatini va yo'nalishlarni ayt, "yo'q" dema
+   - Mijoz kompaniyalar haqida so'rasa — search_tour_packages ni filtersiz chaqir
+   - Mijoz qiziqsa, telefon raqamini (+998XXXXXXXXX) so'ra
+   - Telefon olgach submit_tour_lead chaqir
+9. Umumiy uslub:
+   - HECH QACHON quruq "topilmadi" dema — doimo alternativa taklif qil
+   - Mijozni cho'chitma; iliq, professional va yo'naltiruvchi bo'l
+   - Oldingi xabarlarni eslab qol — bir xil javobni takrorlama
 """,
         'ru': """\
 Ты — AI-ассистент премиального lifestyle-сервиса IMTIAZ.
@@ -531,9 +538,30 @@ _MESSAGES: dict[str, dict[str, str]] = {
     },
     # response_builder
     'flights_not_found': {
-        'uz': '{route} yo\'nalishida {date} sanasida parvoz topilmadi.',
-        'ru': 'Рейсы по маршруту {route} на {date} не найдены.',
-        'en': 'No flights found for {route} on {date}.',
+        'uz': (
+            '{route} yo\'nalishida {date} sanasida to\'g\'ridan-to\'g\'ri parvoz topilmadi.\n\n'
+            'Sinab ko\'rish mumkin:\n'
+            '• Boshqa sana (masalan 1-2 kun keyin)\n'
+            '• Yaqin aeroport (Dubai o\'rniga Sharjah SHJ)\n'
+            '• Menejer orqali qo\'lda qidiruv — eng yaxshi variantni topamiz\n\n'
+            'Qaysi variantni sinab ko\'ramiz?'
+        ),
+        'ru': (
+            'Прямые рейсы {route} на {date} не найдены.\n\n'
+            'Можно попробовать:\n'
+            '• Другую дату (через 1–2 дня)\n'
+            '• Ближайший аэропорт (вместо Dubai — Sharjah SHJ)\n'
+            '• Ручной поиск через менеджера\n\n'
+            'Какой вариант попробуем?'
+        ),
+        'en': (
+            'No direct flights for {route} on {date}.\n\n'
+            'We can try:\n'
+            '• A different date (1–2 days later)\n'
+            '• A nearby airport (Sharjah SHJ instead of Dubai)\n'
+            '• Manual search via our manager\n\n'
+            'Which option shall we try?'
+        ),
     },
     'flights_header': {
         'uz': '✈️ {origin} → {destination} ({date}) — {count} ta variant:',
@@ -561,9 +589,19 @@ _MESSAGES: dict[str, dict[str, str]] = {
         'en': '{i}. Train {number} — {price:,.0f} UZS',
     },
     'flight_item': {
-        'uz': '{i}. {airline} {number} — {price:,.0f} {currency}',
-        'ru': '{i}. {airline} {number} — {price:,.0f} {currency}',
-        'en': '{i}. {airline} {number} — {price:,.0f} {currency}',
+        'uz': '{i}. {airline} {number} | 🕐 {departure_time} → {arrival_time} | {price:,.0f} {currency}{baggage}',
+        'ru': '{i}. {airline} {number} | 🕐 {departure_time} → {arrival_time} | {price:,.0f} {currency}{baggage}',
+        'en': '{i}. {airline} {number} | 🕐 {departure_time} → {arrival_time} | {price:,.0f} {currency}{baggage}',
+    },
+    'flight_baggage_yes': {
+        'uz': ' | 🧳 bagaj bor',
+        'ru': ' | 🧳 багаж',
+        'en': ' | 🧳 baggage',
+    },
+    'flights_book_hint': {
+        'uz': '\n💡 Yoqqan variant raqamini yozing — bron qilishda yordam beraman.',
+        'ru': '\n💡 Напишите номер варианта — помогу с бронированием.',
+        'en': '\n💡 Tell me the option number — I\'ll help you book.',
     },
     'restaurants_not_found': {
         'uz': 'Restoran topilmadi.',
@@ -586,9 +624,66 @@ _MESSAGES: dict[str, dict[str, str]] = {
         'en': '🎭 {count} event(s):',
     },
     'tours_not_found': {
-        'uz': 'Mos tur paket topilmadi.',
-        'ru': 'Подходящие турпакеты не найдены.',
-        'en': 'No matching tour packages found.',
+        'uz': 'Hozircha mos tur paket topilmadi.',
+        'ru': 'Подходящие турпакеты пока не найдены.',
+        'en': 'No matching tour packages at the moment.',
+    },
+    'tours_no_packages_intro': {
+        'uz': 'Hozircha aniq paket topilmadi, lekin IMTIAZ hamkor tur kompaniyalari mavjud:',
+        'ru': 'Конкретный пакет пока не найден, но у IMTIAZ есть партнёрские туркомпании:',
+        'en': 'No exact package yet, but IMTIAZ partner tour companies are available:',
+    },
+    'tours_partners_header': {
+        'uz': '\n🏢 Hamkor tur kompaniyalar:',
+        'ru': '\n🏢 Партнёрские туркомпании:',
+        'en': '\n🏢 Partner tour companies:',
+    },
+    'tour_partner_item': {
+        'uz': '{i}. {name} — {package_count} ta faol paket',
+        'ru': '{i}. {name} — {package_count} активных пакетов',
+        'en': '{i}. {name} — {package_count} active package(s)',
+    },
+    'tour_partner_item_new': {
+        'uz': '{i}. {name} — yangi hamkor (paketlar tez orada)',
+        'ru': '{i}. {name} — новый партнёр (пакеты скоро)',
+        'en': '{i}. {name} — new partner (packages coming soon)',
+    },
+    'tours_destinations_hint': {
+        'uz': '\n🌍 Mavjud yo\'nalishlar: {destinations}',
+        'ru': '\n🌍 Доступные направления: {destinations}',
+        'en': '\n🌍 Available destinations: {destinations}',
+    },
+    'tours_empty_suggest': {
+        'uz': (
+            '\nQaysi yo\'nalish yoki kompaniya qiziq? '
+            'Masalan: «Samarqand turlari» yoki «Dubai paketlari». '
+            'Yoki telefon raqamingizni qoldiring — menejer qo\'ng\'iroq qiladi.'
+        ),
+        'ru': (
+            '\nКакое направление или компания интересует? '
+            'Например: «туры в Самарканд» или «пакеты в Dubai». '
+            'Или оставьте телефон — менеджер перезвонит.'
+        ),
+        'en': (
+            '\nWhich destination or company interests you? '
+            'e.g. "Samarkand tours" or "Dubai packages". '
+            'Or leave your phone — a manager will call back.'
+        ),
+    },
+    'tours_more': {
+        'uz': '... va yana {count} ta paket.',
+        'ru': '... и ещё {count} пакет(ов).',
+        'en': '... and {count} more package(s).',
+    },
+    'tour_date_flexible': {
+        'uz': 'mavjud sanalar bo\'yicha',
+        'ru': 'по доступным датам',
+        'en': 'flexible dates',
+    },
+    'tours_interest_hint': {
+        'uz': '\n💡 Qaysi tur qiziq? Telefon raqamingizni qoldirsangiz, menejer bog\'lanadi.',
+        'ru': '\n💡 Какой тур интересен? Оставьте телефон — менеджер свяжется.',
+        'en': '\n💡 Which tour interests you? Leave your phone and a manager will contact you.',
     },
     'tours_header': {
         'uz': '🌍 {count} ta tur paket:',
@@ -596,9 +691,9 @@ _MESSAGES: dict[str, dict[str, str]] = {
         'en': '🌍 {count} tour package(s):',
     },
     'tour_item': {
-        'uz': '{i}. {title} ({destination}) — {price:,.0f} {currency}, jo\'nash: {departure}',
-        'ru': '{i}. {title} ({destination}) — {price:,.0f} {currency}, вылет: {departure}',
-        'en': '{i}. {title} ({destination}) — {price:,.0f} {currency}, departure: {departure}',
+        'uz': '{i}. {title}{organization} ({destination}) — {price:,.0f} {currency}, jo\'nash: {departure}',
+        'ru': '{i}. {title}{organization} ({destination}) — {price:,.0f} {currency}, вылет: {departure}',
+        'en': '{i}. {title}{organization} ({destination}) — {price:,.0f} {currency}, departure: {departure}',
     },
     'tour_lead_invalid_phone': {
         'uz': 'Telefon raqami noto\'g\'ri. Iltimos, +998XXXXXXXXX formatida yuboring.',
