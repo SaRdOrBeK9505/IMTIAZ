@@ -275,13 +275,16 @@ class BookharaAdapter(FlightProviderAdapter):
                 raw=self._safe_json(exc),
             )
         self._log('create_booking', body, data, 200, True, self._elapsed_ms(start))
+        payload = self._unwrap_bookhara_data(data)
+        if not isinstance(payload, dict):
+            payload = {}
         return BookingResult(
             success=True,
-            external_booking_id=data.get('id') or data.get('booking_id'),
-            confirmation_code=self._extract_pnr(data),
+            external_booking_id=payload.get('id') or payload.get('booking_id'),
+            confirmation_code=self._extract_pnr(payload),
             error_message='',
             error_code=None,
-            raw=data,
+            raw=data if isinstance(data, dict) else {'raw': data},
         )
 
     @staticmethod
@@ -352,11 +355,10 @@ class BookharaAdapter(FlightProviderAdapter):
             'check_price', {'booking_id': booking_id}, data, 200, True,
             self._elapsed_ms(start), booking_id=booking_id,
         )
-        # DIQQAT: Bookhara javobida faqat is_price_changed keladi,
-        # yangi narx (new_price) qaytarilmaydi. Narx o'zgargan bo'lsa,
-        # yangilangan narxni olish uchun get_booking() chaqiring
-        # (update-avia-booking.md).
-        is_changed = bool(data.get('is_price_changed'))
+        payload = self._unwrap_bookhara_data(data)
+        if not isinstance(payload, dict):
+            payload = {}
+        is_changed = bool(payload.get('is_price_changed'))
         return {
             'is_price_changed': is_changed,
             'new_price': None,

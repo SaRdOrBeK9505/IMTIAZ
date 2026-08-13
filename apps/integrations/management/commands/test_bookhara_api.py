@@ -453,6 +453,12 @@ class BookharaApiTestSuite:
                 raise AssertionError(
                     f'[{result.error_code}] {result.error_message}'
                 )
+            if not result.external_booking_id:
+                raise AssertionError(
+                    'Bron HTTP 200 qaytardi, lekin booking_id topilmadi — '
+                    f'adapter javob parse xatosi yoki noto\'g\'ri payload. '
+                    f'raw_keys={list((result.raw or {}).keys())}'
+                )
             self.booking_id = result.external_booking_id
             return f'booking_id={self.booking_id}, pnr={result.confirmation_code}'
 
