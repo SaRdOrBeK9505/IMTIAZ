@@ -55,7 +55,6 @@ from __future__ import annotations
 
 import json
 import time
-import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -199,6 +198,13 @@ class BookharaApiTestSuite:
         if error:
             self._line(f"         {RED}{error}{RESET}")
 
+    @staticmethod
+    def _format_error(exc: Exception) -> str:
+        """Test chiqishida texnik detail ko'rsatish (mijoz xabari emas)."""
+        if isinstance(exc, IntegrationError) and exc.detail:
+            return f'{type(exc).__name__}: {exc.detail}'
+        return f'{type(exc).__name__}: {exc}'
+
     def _run(self, spec: EndpointSpec, func: Callable[[], str], details: dict | None = None) -> TestResult:
         start = time.monotonic()
         try:
@@ -213,7 +219,7 @@ class BookharaApiTestSuite:
             self._record(spec, TestStatus.WARN, str(exc), duration_ms=duration)
         except Exception as exc:
             duration = int((time.monotonic() - start) * 1000)
-            err = f'{type(exc).__name__}: {exc}'
+            err = self._format_error(exc)
             self._record(spec, TestStatus.FAIL, '', error=err, duration_ms=duration)
         return self.results[-1]
 
@@ -271,14 +277,21 @@ class BookharaApiTestSuite:
             raise SkipTest(skip)
 
         def _exec() -> str:
-            cache.delete(TOKEN_CACHE_KEY)
-            token1 = self.client._fetch_token()
+            cached = cache.get(TOKEN_CACHE_KEY)
+            refreshed = False
+            if self.opts.get('refresh_token') or not cached:
+                cache.delete(TOKEN_CACHE_KEY)
+                token1 = self.client._fetch_token()
+                refreshed = True
+            else:
+                token1 = self.client._get_token()
             if not token1:
                 raise AssertionError('Token bo\'sh qaytdi')
             token2 = self.client._get_token()
             if token2 != token1:
                 raise AssertionError('Keshlangan token mos kelmadi')
-            return f'token uzunligi={len(token1)}, kesh ishlayapti'
+            mode = 'yangilandi' if refreshed else 'keshdan olindi'
+            return f'token uzunligi={len(token1)}, {mode}'
 
         self._run(spec, _exec)
 
@@ -683,13 +696,21 @@ class BookharaApiTestSuite:
                 self._record(spec, TestStatus.SKIP, str(exc))
             except WarnTest as exc:
                 self._record(spec, TestStatus.WARN, str(exc))
-            except Exception:
-                self._record(
-                    spec, TestStatus.FAIL, error=traceback.format_exc().splitlines()[-1],
-                )
+            except Exception as exc:
+                self._record(spec, TestStatus.FAIL, error=self._format_error(exc))
 
             # Kritik xato — keyingi bosqichlar ma'nosi yo'qolishi mumkin
             last = self.results[-1]
+            if (
+                last.status == TestStatus.FAIL
+                and last.spec.code == '01'
+                and '429' in (last.error or '')
+            ):
+                self._line(
+                    f"\n{YELLOW}Bookhara rate limit (HTTP 429): juda ko'p token "
+                    f"so'rovi yuborilgan. 5–15 daqiqa kutib, qayta urinib ko'ring.{RESET}"
+                )
+                break
             if last.status == TestStatus.FAIL and last.spec.required:
                 if spec.code == '03':
                     self._line(f"\n{RED}Qidiruv muvaffaqiyatsiz — offer/booking testlari o\'tkaziladi.{RESET}")
@@ -817,6 +838,10 @@ class Command(BaseCommand):
         parser.add_argument(
             '--skip-destructive', action='store_true',
             help='void/auto-cancel/manual-refund kabi xavfli endpointlarni o\'tkazib yuborish',
+        )
+        parser.add_argument(
+            '--refresh-token', action='store_true',
+            help='Token keshini tozalab yangi token olishni majburiy sinash (429 xavfi)',
         )
         parser.add_argument(
             '--report-json', default=None,
