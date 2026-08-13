@@ -3,30 +3,14 @@
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from apps.core.openapi import build_openapi_servers, build_spectacular_settings
+from apps.core.openapi import build_spectacular_settings
 
 
-class OpenAPIServersTests(TestCase):
-    def test_production_servers_use_api_base_url(self):
-        servers = build_openapi_servers(
-            api_base_url='https://api.medhomee.uz',
-            debug=False,
-        )
-        self.assertEqual(servers[0]['url'], 'https://api.medhomee.uz/api')
-        self.assertEqual(servers[1]['url'], '/api')
-
-    def test_debug_adds_localhost_servers(self):
-        servers = build_openapi_servers(
-            api_base_url='https://api.medhomee.uz',
-            debug=True,
-        )
-        self.assertEqual(servers[0]['url'], 'https://api.medhomee.uz/api')
-        self.assertIn({'url': '/api', 'description': 'Joriy host (api prefix)'}, servers)
-        self.assertEqual(servers[-2]['url'], 'http://127.0.0.1:8000/api')
-
-    def test_production_without_base_url_has_relative_api_server(self):
-        settings = build_spectacular_settings(api_base_url='', debug=False)
-        self.assertEqual(settings['SERVERS'][0]['url'], '/api')
+class OpenAPISettingsTests(TestCase):
+    def test_paths_are_not_trimmed(self):
+        settings = build_spectacular_settings()
+        self.assertFalse(settings['SCHEMA_PATH_PREFIX_TRIM'])
+        self.assertNotIn('SERVERS', settings)
 
 
 @override_settings(DEBUG=False, ENABLE_API_DOCS=False)
@@ -35,16 +19,17 @@ class APIDocsDisabledTests(TestCase):
         self.client = APIClient()
 
     def test_schema_not_exposed(self):
-        resp = self.client.get('/api/schema/')
-        self.assertEqual(resp.status_code, 404)
-
-    def test_swagger_not_exposed(self):
-        resp = self.client.get('/api/docs/')
+        resp = self.client.get('/schema/')
         self.assertEqual(resp.status_code, 404)
 
     def test_root_not_exposed_when_docs_disabled(self):
         resp = self.client.get('/')
         self.assertEqual(resp.status_code, 404)
+
+    def test_legacy_docs_url_redirects_but_root_still_blocked(self):
+        resp = self.client.get('/api/docs/', follow=False)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp['Location'], '/')
 
 
 @override_settings(DEBUG=True, ENABLE_API_DOCS=True)
@@ -53,17 +38,18 @@ class APIDocsEnabledTests(TestCase):
         self.client = APIClient()
 
     def test_schema_available(self):
-        resp = self.client.get('/api/schema/')
+        resp = self.client.get('/schema/')
         self.assertEqual(resp.status_code, 200)
 
-    def test_swagger_ui_available(self):
-        resp = self.client.get('/api/docs/')
-        self.assertEqual(resp.status_code, 200)
-
-    def test_root_is_swagger_when_docs_enabled(self):
+    def test_root_is_swagger(self):
         resp = self.client.get('/')
         self.assertEqual(resp.status_code, 200)
         self.assertIn(b'swagger', resp.content.lower())
+
+    def test_legacy_docs_redirects_to_root(self):
+        resp = self.client.get('/api/docs/', follow=False)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp['Location'], '/')
 
     def test_root_is_swagger_when_debug_even_if_docs_flag_false(self):
         with self.settings(DEBUG=True, ENABLE_API_DOCS=False):
@@ -76,10 +62,10 @@ class APIDocsEnabledTests(TestCase):
         schema = SchemaGenerator().get_schema(request=None, public=True)
         paths = schema.get('paths', {})
         disabled = [
-            '/crm/auth/register/request-otp/',
-            '/crm/auth/register/verify-otp/',
-            '/crm/auth/register/complete/',
-            '/crm/auth/',
+            '/api/crm/auth/register/request-otp/',
+            '/api/crm/auth/register/verify-otp/',
+            '/api/crm/auth/register/complete/',
+            '/api/crm/auth/',
         ]
         disabled_tag = 'Auth — CRM (O\'chirilgan)'
         for path in disabled:
@@ -95,4 +81,4 @@ class APIDocsEnabledTests(TestCase):
 
         schema = SchemaGenerator().get_schema(request=None, public=True)
         paths = schema.get('paths', {})
-        self.assertIn('/auth/token/refresh/', paths)
+        self.assertIn('/api/auth/token/refresh/', paths)

@@ -23,6 +23,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.crm.models import BusinessType, Organization
 from apps.users.models import OTPCode, User, UserRole
 
 _signer = TimestampSigner()
@@ -319,6 +320,34 @@ class CRMLoginViewTests(TestCase):
         staff_user = _make_user(phone='+998901234568', role=UserRole.RESTAURANT_STAFF)
         BranchStaff.objects.create(user=staff_user, branch=branch)
         resp = self.client.post(self.url, {'phone': '+998901234568', 'password': 'Test1234!'})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_legacy_owner_can_login(self):
+        owner = _make_user(phone='+998901234581', role=UserRole.OWNER)
+        Organization.objects.create(
+            name='Legacy Org',
+            org_type=Organization.OrgType.RESTAURANT,
+            business_type=BusinessType.RESTAURANT,
+            owner=owner,
+        )
+        resp = self.client.post(self.url, {'phone': '+998901234581', 'password': 'Test1234!'})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        token = RefreshToken(resp.data['refresh'])
+        self.assertEqual(token['aud'], 'crm')
+
+    def test_legacy_branch_staff_can_login(self):
+        from apps.crm.models import Branch, BranchStaff
+        owner = _make_user(phone='+998901234582', role=UserRole.OWNER_RESTAURANT)
+        org = Organization.objects.create(
+            name='Legacy Staff Org',
+            org_type=Organization.OrgType.RESTAURANT,
+            business_type=BusinessType.RESTAURANT,
+            owner=owner,
+        )
+        branch = Branch.objects.create(organization=org, name='Legacy Branch')
+        staff_user = _make_user(phone='+998901234583', role=UserRole.BRANCH_STAFF)
+        BranchStaff.objects.create(user=staff_user, branch=branch)
+        resp = self.client.post(self.url, {'phone': '+998901234583', 'password': 'Test1234!'})
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
     def test_customer_blocked(self):

@@ -34,6 +34,9 @@ CRM_ROLES = RESTAURANT_CRM_ROLES | TOUR_CRM_ROLES
 LEGACY_OWNER_ROLES = frozenset({UserRole.OWNER})
 LEGACY_STAFF_ROLES = frozenset({UserRole.BRANCH_STAFF})
 
+# Login va JWT audience uchun — yangi + eski CRM rollar
+CRM_ALL_ROLES = CRM_ROLES | LEGACY_OWNER_ROLES | LEGACY_STAFF_ROLES
+
 
 def is_restaurant_owner(role: str) -> bool:
     return role in RESTAURANT_OWNER_ROLES
@@ -52,7 +55,7 @@ def is_tour_staff(role: str) -> bool:
 
 
 def is_crm_role(role: str) -> bool:
-    return role in CRM_ROLES
+    return role in CRM_ALL_ROLES
 
 
 def staff_role_for_owner(owner_role: str) -> str:

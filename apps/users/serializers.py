@@ -38,6 +38,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from apps.crm.models import Organization
 
 from .models import AIAutonomyLevel, OTPCode, User, UserRole
+from .crm_roles import CRM_ALL_ROLES
 
 # ─── Yordamchi ────────────────────────────────────────────────────────────────
 
@@ -346,15 +347,11 @@ class CRMLoginSerializer(LoginSerializer):
     """
     POST /api/crm/auth/login/ — CRM rollari (restoran yoki tur).
 
-    Ruxsat etilgan rollar: owner_restaurant, restaurant_staff, owner_tour, tour_staff.
+    Ruxsat etilgan rollar: owner_restaurant, restaurant_staff, owner_tour, tour_staff
+    va migratsiya uchun eski owner / branch_staff.
     Frontend `user.role` asosida qaysi panelga yo'naltirishni hal qiladi.
     """
-    allowed_roles = [
-        UserRole.OWNER_RESTAURANT,
-        UserRole.RESTAURANT_STAFF,
-        UserRole.OWNER_TOUR,
-        UserRole.TOUR_STAFF,
-    ]
+    allowed_roles = list(CRM_ALL_ROLES)
 
     phone = serializers.CharField(help_text='Telefon: +998XXXXXXXXX')
     password = serializers.CharField(write_only=True, help_text='Parol')

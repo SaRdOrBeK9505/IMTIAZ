@@ -10,7 +10,6 @@ from django.conf.urls.static import static
 from apps.core.views import HealthCheckView
 from apps.core.doc_views import (
     GuardedSpectacularAPIView,
-    GuardedSpectacularRedocView,
     GuardedSpectacularSwaggerView,
 )
 
@@ -71,11 +70,11 @@ urlpatterns = [
         path('integrations/', include('apps.integrations.urls')),
     ])),
 
-    # API Docs — ENABLE_API_DOCS=False bo'lsa 404 (runtime guard)
-    path('api/schema/', GuardedSpectacularAPIView.as_view(), name='schema'),
-    path('api/docs/', GuardedSpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
-    path('api/docs', RedirectView.as_view(url='/api/docs/', permanent=False)),
-    path('api/redoc/', GuardedSpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+    # Swagger UI — subdomain root (https://api.medhomee.uz/)
+    # schema faqat UI ichida ishlatiladi (/schema/)
+    path('schema/', GuardedSpectacularAPIView.as_view(), name='schema'),
+    path('api/docs/', RedirectView.as_view(url='/', permanent=False)),
+    path('api/docs', RedirectView.as_view(url='/', permanent=False)),
     path('', GuardedSpectacularSwaggerView.as_view(url_name='schema'), name='root'),
 ]
 

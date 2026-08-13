@@ -251,12 +251,12 @@ JAZZMIN_SETTINGS = {
     # ── Navigatsiya ───────────────────────────────────────────────────────────
     'topmenu_links': [
         {'name': 'Bosh sahifa', 'url': 'admin:index', 'permissions': ['auth.view_user']},
-        {'name': 'API Docs', 'url': '/api/docs/', 'new_window': True},
+        {'name': 'API Docs', 'url': '/', 'new_window': True},
         {'name': 'Health', 'url': '/health/', 'new_window': True},
     ],
 
     'usermenu_links': [
-        {'name': 'API Docs', 'url': '/api/docs/', 'new_window': True},
+        {'name': 'API Docs', 'url': '/', 'new_window': True},
         {'model': 'users.user'},
     ],
 
@@ -385,11 +385,7 @@ JAZZMIN_UI_TWEAKS = {
 # ─── SPECTACULAR ──────────────────────────────────────────────────────────────
 from apps.core.openapi import build_spectacular_settings
 
-API_BASE_URL = env('API_BASE_URL', default='')
-SPECTACULAR_SETTINGS = build_spectacular_settings(
-    api_base_url=API_BASE_URL,
-    debug=DEBUG,
-)
+SPECTACULAR_SETTINGS = build_spectacular_settings()
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[

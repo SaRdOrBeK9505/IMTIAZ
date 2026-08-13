@@ -249,7 +249,7 @@ def spectacular_postprocess_fix_legacy_operation_ids(result, generator, request,
     """Legacy va yangi URL da bir xil view — operationId collision oldini olish."""
     paths = result.get('paths', {})
     for path, methods in paths.items():
-        if not path.startswith('/crm/qr/') or path.startswith('/crm/restaurant/'):
+        if not path.startswith('/api/crm/qr/') or path.startswith('/api/crm/restaurant/'):
             continue
         for operation in methods.values():
             if not isinstance(operation, dict):
@@ -260,38 +260,13 @@ def spectacular_postprocess_fix_legacy_operation_ids(result, generator, request,
     return result
 
 
-def _openapi_server_url(base_url: str) -> str:
-    """SCHEMA_PATH_PREFIX_TRIM=True bo'lganda server URL oxirida /api bo'lishi kerak."""
-    return f'{base_url.rstrip("/")}/api'
+def build_spectacular_settings() -> dict:
+    """OpenAPI/Swagger sozlamalari.
 
-
-def build_openapi_servers(*, api_base_url: str = '', debug: bool = True) -> list[dict]:
-    """Swagger UI uchun server ro'yxati.
-
-    SCHEMA_PATH_PREFIX_TRIM=True → path lar /auth/login/ ko'rinishida.
-    Shuning uchun server URL da /api prefiksi bo'lishi shart.
-
-    Birinchi server — nisbiy `/api` (joriy host bilan ishlaydi, .env shart emas).
-    API_BASE_URL berilsa — to'liq production URL ham qo'shiladi.
+    Path lar to'liq ko'rinadi (/api/auth/login/) — Swagger joriy host bilan
+    birlashtiradi. Alohida SERVERS ro'yxati kerak emas.
     """
-    servers: list[dict] = [
-        {'url': '/api', 'description': 'Joriy host (api prefix)'},
-    ]
-    if api_base_url:
-        servers.insert(0, {
-            'url': _openapi_server_url(api_base_url),
-            'description': 'Production',
-        })
-    if debug:
-        servers.extend([
-            {'url': _openapi_server_url('http://127.0.0.1:8000'), 'description': 'Local development'},
-            {'url': _openapi_server_url('http://localhost:8000'), 'description': 'Local development (alt)'},
-        ])
-    return servers
-
-
-def build_spectacular_settings(*, api_base_url: str = '', debug: bool = True) -> dict:
-    settings = {
+    return {
         'TITLE': 'IMTIAZ API',
         'DESCRIPTION': API_DESCRIPTION,
         'VERSION': '1.1.0',
@@ -305,7 +280,7 @@ def build_spectacular_settings(*, api_base_url: str = '', debug: bool = True) ->
         'SERVE_INCLUDE_SCHEMA': False,
         'COMPONENT_SPLIT_REQUEST': True,
         'SCHEMA_PATH_PREFIX': r'/api/',
-        'SCHEMA_PATH_PREFIX_TRIM': True,
+        'SCHEMA_PATH_PREFIX_TRIM': False,
         'SORT_OPERATIONS': False,
         'TAGS': OPENAPI_TAGS,
         'PREPROCESSING_HOOKS': [
@@ -349,6 +324,3 @@ def build_spectacular_settings(*, api_base_url: str = '', debug: bool = True) ->
             'pathInMiddlePanel': True,
         },
     }
-    servers = build_openapi_servers(api_base_url=api_base_url, debug=debug)
-    settings['SERVERS'] = servers
-    return settings

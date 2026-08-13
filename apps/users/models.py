@@ -172,9 +172,17 @@ class User(AbstractBaseUser, PermissionsMixin, BaseModel):
     @property
     def organization(self):
         """Foydalanuvchi roliga qarab tegishli Organization'ni qaytaradi."""
-        from apps.users.crm_roles import is_restaurant_owner, is_tour_owner
+        from apps.users.crm_roles import (
+            LEGACY_OWNER_ROLES,
+            is_restaurant_owner,
+            is_tour_owner,
+        )
 
-        if is_restaurant_owner(self.role) or is_tour_owner(self.role):
+        if (
+            is_restaurant_owner(self.role)
+            or is_tour_owner(self.role)
+            or self.role in LEGACY_OWNER_ROLES
+        ):
             return getattr(self, 'owned_organization', None)
         if self.role in (UserRole.RESTAURANT_STAFF, UserRole.TOUR_STAFF, UserRole.BRANCH_STAFF):
             profile = getattr(self, 'branch_staff_profile', None)
