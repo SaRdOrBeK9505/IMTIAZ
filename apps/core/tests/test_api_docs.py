@@ -12,8 +12,8 @@ class OpenAPIServersTests(TestCase):
             api_base_url='https://api.medhomee.uz',
             debug=False,
         )
-        self.assertEqual(len(servers), 1)
         self.assertEqual(servers[0]['url'], 'https://api.medhomee.uz/api')
+        self.assertEqual(servers[1]['url'], '/api')
 
     def test_debug_adds_localhost_servers(self):
         servers = build_openapi_servers(
@@ -21,11 +21,12 @@ class OpenAPIServersTests(TestCase):
             debug=True,
         )
         self.assertEqual(servers[0]['url'], 'https://api.medhomee.uz/api')
-        self.assertEqual(servers[1]['url'], 'http://127.0.0.1:8000/api')
+        self.assertIn({'url': '/api', 'description': 'Joriy host (api prefix)'}, servers)
+        self.assertEqual(servers[-2]['url'], 'http://127.0.0.1:8000/api')
 
-    def test_production_without_base_url_omits_servers_key(self):
+    def test_production_without_base_url_has_relative_api_server(self):
         settings = build_spectacular_settings(api_base_url='', debug=False)
-        self.assertNotIn('SERVERS', settings)
+        self.assertEqual(settings['SERVERS'][0]['url'], '/api')
 
 
 @override_settings(DEBUG=False, ENABLE_API_DOCS=False)

@@ -268,14 +268,17 @@ def _openapi_server_url(base_url: str) -> str:
 def build_openapi_servers(*, api_base_url: str = '', debug: bool = True) -> list[dict]:
     """Swagger UI uchun server ro'yxati.
 
-    Production: API_BASE_URL (masalan https://api.medhomee.uz) + /api suffix.
-    SCHEMA_PATH_PREFIX_TRIM tufayli path lar /crm/... ko'rinishida — server /api bilan
-    birga to'liq URL hosil qiladi: .../api/crm/auth/login/
-    DEBUG=True: localhost serverlar ham qo'shiladi.
+    SCHEMA_PATH_PREFIX_TRIM=True → path lar /auth/login/ ko'rinishida.
+    Shuning uchun server URL da /api prefiksi bo'lishi shart.
+
+    Birinchi server — nisbiy `/api` (joriy host bilan ishlaydi, .env shart emas).
+    API_BASE_URL berilsa — to'liq production URL ham qo'shiladi.
     """
-    servers: list[dict] = []
+    servers: list[dict] = [
+        {'url': '/api', 'description': 'Joriy host (api prefix)'},
+    ]
     if api_base_url:
-        servers.append({
+        servers.insert(0, {
             'url': _openapi_server_url(api_base_url),
             'description': 'Production',
         })
@@ -347,6 +350,5 @@ def build_spectacular_settings(*, api_base_url: str = '', debug: bool = True) ->
         },
     }
     servers = build_openapi_servers(api_base_url=api_base_url, debug=debug)
-    if servers:
-        settings['SERVERS'] = servers
+    settings['SERVERS'] = servers
     return settings
