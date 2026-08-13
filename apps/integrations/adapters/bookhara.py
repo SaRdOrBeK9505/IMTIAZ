@@ -91,13 +91,23 @@ class BookharaAdapter(FlightProviderAdapter):
     def __init__(self, client: BookharaClient | None = None):
         self.client = client or BookharaClient()
 
+    @staticmethod
+    def _unwrap_bookhara_data(payload: dict | list) -> dict | list:
+        """Bookhara API javobidagi `data` blokini ajratib oladi (API v1.2.0)."""
+        if isinstance(payload, dict) and payload.get('data') is not None:
+            return payload['data']
+        return payload
+
     # -------------------------------------------------------------------
     # 1. Balansni tekshirish
     # -------------------------------------------------------------------
 
     def check_balance(self) -> dict:
         """GET /api/v1/accounts/check-balance"""
-        data = self._call('check_balance', lambda: self.client.get('/api/v1/accounts/check-balance'))
+        raw = self._call('check_balance', lambda: self.client.get('/api/v1/accounts/check-balance'))
+        data = self._unwrap_bookhara_data(raw)
+        if not isinstance(data, dict):
+            data = {}
         return {
             'deposit': data.get('deposit'),
             'credit': data.get('credit'),
@@ -174,7 +184,10 @@ class BookharaAdapter(FlightProviderAdapter):
 
         Javobda `price` — obyekt ({amount, currency}), scalar emas.
         """
-        data = self._call('get_price', lambda: self.client.get(f'/api/v1/offers/{offer_id}'))
+        raw = self._call('get_price', lambda: self.client.get(f'/api/v1/offers/{offer_id}'))
+        data = self._unwrap_bookhara_data(raw)
+        if not isinstance(data, dict):
+            raise ValueError(f'Bookhara get_price: kutilmagan javob. Body: {raw}')
         price_block = data.get('price') or {}
         amount = price_block.get('amount') if isinstance(price_block, dict) else price_block
         if amount is None:
@@ -287,10 +300,12 @@ class BookharaAdapter(FlightProviderAdapter):
 
     def get_booking(self, booking_id: str) -> dict:
         """GET /api/v1/booking/{id}"""
-        return self._call(
+        raw = self._call(
             'get_booking',
             lambda: self.client.get(f'/api/v1/booking/{booking_id}'),
         )
+        data = self._unwrap_bookhara_data(raw)
+        return data if isinstance(data, dict) else {'raw': raw}
 
     # -------------------------------------------------------------------
     # 8. Bron qoidalari
@@ -353,11 +368,14 @@ class BookharaAdapter(FlightProviderAdapter):
 
     def check_payment_permission(self, booking_id: str) -> bool:
         """GET /api/v1/booking/{id}/payment-permission"""
-        data = self._call(
+        raw = self._call(
             'check_payment_permission',
             lambda: self.client.get(f'/api/v1/booking/{booking_id}/payment-permission'),
             booking_id=booking_id,
         )
+        data = self._unwrap_bookhara_data(raw)
+        if not isinstance(data, dict):
+            return False
         return bool(data.get('payment_allowed') or data.get('allowed'))
 
     # -------------------------------------------------------------------
@@ -383,11 +401,14 @@ class BookharaAdapter(FlightProviderAdapter):
                 "Bookhara: tolovdan oldin narx ozgargan",
                 new_price=price_check['new_price'],
             )
-        data = self._call(
+        raw = self._call(
             'pay_booking',
             lambda: self.client.post(f'/api/v1/booking/{booking_id}/payment', {}),
             booking_id=booking_id,
         )
+        data = self._unwrap_bookhara_data(raw)
+        if not isinstance(data, dict):
+            data = {}
         return {
             'status': data.get('status'),
             'fiscalization_v2': data.get('fiscalization_v2', {}),
@@ -402,11 +423,12 @@ class BookharaAdapter(FlightProviderAdapter):
 
         Faqat bron paid/ticketed holatida chaqirilishi kerak.
         """
-        return self._call(
+        raw = self._call(
             'get_fiscalization',
             lambda: self.client.get(f'/api/v1/booking/{booking_id}/fiscalization'),
             booking_id=booking_id,
         )
+        return self._unwrap_bookhara_data(raw)
 
     # -------------------------------------------------------------------
     # 13. Bronni bekor qilish (void)
