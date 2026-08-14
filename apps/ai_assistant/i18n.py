@@ -159,7 +159,12 @@ def t(key: str, lang: str, **kwargs) -> str:
     return template
 
 
-def build_system_prompt(lang: str, price_limit: str, autonomy_level: str) -> str:
+def build_system_prompt(
+    lang: str,
+    price_limit: str,
+    autonomy_level: str,
+    session_summary: str | None = None,
+) -> str:
     from datetime import timedelta
     from django.utils import timezone
 
@@ -171,7 +176,8 @@ def build_system_prompt(lang: str, price_limit: str, autonomy_level: str) -> str
     prompts = {
         'uz': """\
 Sen IMTIAZ premium lifestyle concierge AI assistantsan.
-Xizmatlar: parvoz, poyezd, restoran, tadbirlar, tur paketlar, bronlar.
+Xizmatlar: parvoz, restoran, tadbirlar, tur paketlar, bronlar.
+Poyezd xizmati hozir mavjud emas — agar so'rasa, hozircha yo'qligini ayt va boshqa xizmatlarni taklif qil.
 
 Sana konteksti (MUHIM — har doim shu sanalardan foydalan):
   Bugun: {today}
@@ -212,7 +218,8 @@ Brend va o'ziga xos joy nomlarini saqlab qol.
 """,
         'ru': """\
 Ты — AI-ассистент премиального lifestyle-сервиса IMTIAZ.
-Услуги: авиабилеты, поезда, рестораны, мероприятия, турпакеты, бронирования.
+Услуги: авиабилеты, рестораны, мероприятия, турпакеты, бронирования.
+Железнодорожные билеты сейчас недоступны — если спросят, сообщи об этом и предложи другие услуги.
 
 Контекст даты (ВАЖНО — всегда используй эти даты):
   Сегодня: {today}
@@ -245,7 +252,8 @@ Brend va o'ziga xos joy nomlarini saqlab qol.
 """,
         'en': """\
 You are the IMTIAZ premium lifestyle concierge AI assistant.
-Services: flights, trains, restaurants, events, tour packages, bookings.
+Services: flights, restaurants, events, tour packages, bookings.
+Train service is not available — if asked, say so and offer other services.
 
 Date context (IMPORTANT — always use these dates):
   Today: {today}
@@ -278,13 +286,16 @@ present it clearly in {lang_name}. Keep brand names and unique venue names as-is
 """,
     }
 
-    return prompts[lang].format(
+    base = prompts[lang].format(
         price_limit=price_limit,
         autonomy_level=autonomy_level,
         lang_name=lang_name,
         today=today.isoformat(),
         tomorrow=tomorrow.isoformat(),
     )
+    if session_summary:
+        base += f"\n\nSuhbat xotirasi (bajarilgan harakatlar va saqlangan obyektlar):\n{session_summary}\n"
+    return base
 
 
 def build_confirmation_summary(
@@ -348,6 +359,40 @@ _MESSAGES: dict[str, dict[str, str]] = {
         'uz': "Kechirasiz, texnik muammo. Qayta urinib ko'ring.",
         'ru': 'Извините, техническая проблема. Попробуйте ещё раз.',
         'en': 'Sorry, a technical issue occurred. Please try again.',
+    },
+    'ai_welcome': {
+        'uz': (
+            'Assalomu alaykum! 👋\n\n'
+            'Men IMTIAZ AI — sizning shaxsiy sayohat va xizmat yordamchingizman.\n'
+            'Men orqali:\n\n'
+            '✈️ Aviachipta va mehmonxona bron qilishingiz\n'
+            '🍽️ Restoranda stol band qilishingiz\n'
+            '🗺️ Tur va ekskursiya tanlashingiz mumkin\n\n'
+            'Sizga qanday yordam bera olaman?'
+        ),
+        'ru': (
+            'Здравствуйте! 👋\n\n'
+            'Я IMTIAZ AI — ваш персональный помощник по путешествиям и сервисам.\n'
+            'С моей помощью вы можете:\n\n'
+            '✈️ Забронировать авиабилет и отель\n'
+            '🍽️ Забронировать столик в ресторане\n'
+            '🗺️ Выбрать туры и экскурсии\n\n'
+            'Чем я могу вам помочь?'
+        ),
+        'en': (
+            'Hello! 👋\n\n'
+            'I am IMTIAZ AI — your personal travel and concierge assistant.\n'
+            'Through me, you can:\n\n'
+            '✈️ Book flights and hotels\n'
+            '🍽️ Reserve a restaurant table\n'
+            '🗺️ Choose tours and excursions\n\n'
+            'How can I help you today?'
+        ),
+    },
+    'quick_replies': {
+        'uz': ["✈️ Chipta izlash", "🍽️ Stol band qilish", "❓ Boshqa savol"],
+        'ru': ["✈️ Поиск билетов", "🍽️ Забронировать стол", "❓ Другой вопрос"],
+        'en': ["✈️ Search flights", "🍽️ Book a table", "❓ Other question"],
     },
     'reply_format_error': {
         'uz': "Ma'lumot olindi, lekin javobni shakllantirishda muammo bo'ldi. Qayta urinib ko'ring.",

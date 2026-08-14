@@ -1,6 +1,7 @@
 from django.urls import path
 from .views import (
     ChatView,
+    SessionBootstrapView,
     ActionConfirmView,
     ActionRejectView,
     SessionListView,
@@ -10,6 +11,7 @@ from .views import (
 
 urlpatterns = [
     path('chat/',                          ChatView.as_view(),         name='ai-chat'),
+    path('sessions/bootstrap/',            SessionBootstrapView.as_view(), name='ai-session-bootstrap'),
     path('actions/<uuid:action_id>/confirm/', ActionConfirmView.as_view(), name='ai-action-confirm'),
     path('actions/<uuid:action_id>/reject/',  ActionRejectView.as_view(),  name='ai-action-reject'),
     path('sessions/',                      SessionListView.as_view(),  name='ai-sessions'),

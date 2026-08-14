@@ -24,8 +24,10 @@ from apps.ai_assistant.models import AIActionLog
 def make_user(**kwargs):
     """Test user yaratadi."""
     from apps.users.models import User
+    cnt = User.objects.count()
     defaults = {
-        'telegram_id': 999_000_000 + User.objects.count(),
+        'phone': f'+99890{cnt:07d}',
+        'telegram_id': 999_000_000 + cnt,
         'ai_autonomy_level': 'manual',
         'ai_auto_price_limit': Decimal('500000'),
     }

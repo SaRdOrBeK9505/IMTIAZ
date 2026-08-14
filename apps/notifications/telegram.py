@@ -75,6 +75,51 @@ class TelegramBotClient:
             logger.exception('Telegram xabar yuborishda kutilmagan xato: %s', e)
             return None
 
+    def _api_post(self, method: str, payload: dict) -> dict | None:
+        if not self.token:
+            return None
+        try:
+            resp = self.client.post(f'{self.base}/{method}', json=payload)
+            data = resp.json()
+            if not data.get('ok'):
+                logger.error(
+                    'Telegram API xato [%s]: %s',
+                    method, data.get('description', ''),
+                )
+                return None
+            return data
+        except Exception as e:
+            logger.exception('Telegram API [%s] xato: %s', method, e)
+            return None
+
+    def answer_callback_query(
+        self,
+        callback_query_id: str,
+        text: str | None = None,
+    ) -> bool:
+        payload: dict = {'callback_query_id': callback_query_id}
+        if text:
+            payload['text'] = text
+        return self._api_post('answerCallbackQuery', payload) is not None
+
+    def edit_message_text(
+        self,
+        chat_id: int,
+        message_id: int,
+        text: str,
+        parse_mode: str = 'HTML',
+        reply_markup: dict | None = None,
+    ) -> bool:
+        payload: dict = {
+            'chat_id':      chat_id,
+            'message_id':   message_id,
+            'text':         text,
+            'parse_mode':   parse_mode,
+        }
+        if reply_markup:
+            payload['reply_markup'] = reply_markup
+        return self._api_post('editMessageText', payload) is not None
+
     def send_booking_confirmation(self, chat_id: int, booking) -> int | None:
         """Bron tasdiqlash xabarini yuboradi."""
         text = (

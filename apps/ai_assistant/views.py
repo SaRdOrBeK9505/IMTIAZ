@@ -15,6 +15,7 @@ from .models import ConversationSession, AIActionLog
 from .serializers import (
     ChatMessageSerializer,
     ChatResponseSerializer,
+    SessionBootstrapSerializer,
     ConversationSessionSerializer,
     SessionListSerializer,
     AIActionLogSerializer,
@@ -52,6 +53,41 @@ class ChatView(APIView):
         result = get_ai_service().chat(
             user=request.user,
             message=serializer.validated_data['message'],
+            session_id=(
+                str(serializer.validated_data['session_id'])
+                if serializer.validated_data.get('session_id') else None
+            ),
+        )
+        return Response({'success': True, **result})
+
+
+class SessionBootstrapView(APIView):
+    """
+    POST /api/ai/sessions/bootstrap/
+
+    Mini App AI chat ochilganda salom xabarini qaytaradi.
+    """
+    permission_classes = [IsAuthenticated, HasApprovedMembership]
+
+    @extend_schema(
+        request=SessionBootstrapSerializer,
+        responses={
+            200: ChatResponseSerializer,
+            403: ErrorResponseSerializer,
+        },
+        summary='AI suhbatni salom bilan boshlash',
+        description=(
+            'Telegram Mini App `/ai?welcome=1` ochilganda chaqiriladi. '
+            'Yangi sessiyada IMTIAZ AI salom beradi va qanday yordam '
+            'berishini so\'raydi.'
+        ),
+        tags=['AI Assistant'],
+    )
+    def post(self, request):
+        serializer = SessionBootstrapSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = get_ai_service().bootstrap_session(
+            user=request.user,
             session_id=(
                 str(serializer.validated_data['session_id'])
                 if serializer.validated_data.get('session_id') else None

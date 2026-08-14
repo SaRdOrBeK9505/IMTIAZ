@@ -410,12 +410,11 @@ CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=[
 FRONTEND_URL     = env('FRONTEND_URL', default='https://imtiaz-crm.vercel.app')
 QR_SCAN_BASE_URL = env('QR_SCAN_BASE_URL', default=f'{FRONTEND_URL.rstrip("/")}/qr/')
 
-# ─── AI PROVIDERS ─────────────────────────────────────────────────────────────
-# Faol provider: 'gemini' (default) yoki 'claude'
 AI_PROVIDER   = env('AI_PROVIDER', default='gemini')
+AI_TEMPERATURE = env.float('AI_TEMPERATURE', default=0.2)
 AI_MAX_TOKENS = env.int('AI_MAX_TOKENS', default=1024)
 AI_FOLLOWUP_MAX_TOKENS = env.int('AI_FOLLOWUP_MAX_TOKENS', default=512)
-AI_HISTORY_LIMIT = env.int('AI_HISTORY_LIMIT', default=12)
+AI_HISTORY_LIMIT = env.int('AI_HISTORY_LIMIT', default=4)
 AI_SKIP_SECOND_CALL = env.bool('AI_SKIP_SECOND_CALL', default=True)
 
 # Gemini (Google)
@@ -429,6 +428,8 @@ AI_MODEL          = env('AI_MODEL', default='claude-opus-4-5')
 # ─── TELEGRAM ─────────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN  = env('TELEGRAM_BOT_TOKEN',  default='')
 TELEGRAM_BOT_SECRET = env('TELEGRAM_BOT_SECRET', default='')
+# Mini App ichida AI chat ochiladigan URL (default: FRONTEND_URL/ai?welcome=1)
+TELEGRAM_MINI_APP_AI_URL = env('TELEGRAM_MINI_APP_AI_URL', default=FRONTEND_URL)
 
 # ─── SMS — DevSMS ─────────────────────────────────────────────────────────────
 # https://devsms.uz — Bearer token bilan ishlaydi, login kerak emas

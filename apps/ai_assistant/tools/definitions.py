@@ -255,7 +255,6 @@ def get_all_tools() -> list[dict]:
     """Barcha mavjud tool'lar ro'yxatini qaytaradi."""
     return [
         FLIGHT_SEARCH_TOOL,
-        TRAIN_SEARCH_TOOL,
         RESTAURANT_SEARCH_TOOL,
         RESTAURANT_BOOK_TOOL,
         FLIGHT_BOOK_TOOL,

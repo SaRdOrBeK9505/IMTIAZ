@@ -8,15 +8,21 @@ POST /api/notifications/read-all/  — barchasini o'qildi
 
 from __future__ import annotations
 
+import logging
+
+from django.conf import settings
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
+from drf_spectacular.types import OpenApiTypes
 from rest_framework import generics, status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Notification
 from .serializers import NotificationSerializer
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 class NotificationListView(generics.ListAPIView):
@@ -95,3 +101,42 @@ class NotificationReadAllView(APIView):
             read_at=timezone.now(),
         )
         return Response({'success': True, 'updated': count})
+
+
+class TelegramWebhookView(APIView):
+    """
+    POST /api/notifications/telegram/webhook/
+
+    Telegram Bot API update'larini qabul qiladi.
+    /start va inline tugmalar bot_handlers orqali ishlaydi.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    @extend_schema(
+        tags=['Notifications'],
+        summary='Telegram bot webhook',
+        description='Telegram Bot API update qabul qiladi. X-TELEGRAM-BOT-API-SECRET-TOKEN tekshiriladi.',
+        request=OpenApiTypes.OBJECT,
+        responses={200: OpenApiResponse(description='OK')},
+        exclude=True,
+    )
+    def post(self, request):
+        secret = settings.TELEGRAM_BOT_SECRET
+        if secret:
+            header = request.headers.get('X-Telegram-Bot-Api-Secret-Token', '')
+            if header != secret:
+                logger.warning('Telegram webhook: noto\'g\'ri secret token')
+                return Response(status=status.HTTP_403_FORBIDDEN)
+
+        update = request.data
+        if not isinstance(update, dict):
+            return Response({'ok': True})
+
+        try:
+            from .bot_handlers import handle_update
+            handle_update(update)
+        except Exception:
+            logger.exception('Telegram update qayta ishlashda xato')
+
+        return Response({'ok': True})

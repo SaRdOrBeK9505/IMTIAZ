@@ -235,9 +235,19 @@ class LoginView(APIView):
         serializer = self.serializer_class(
             data=request.data, context={'request': request}
         )
-        serializer.is_valid(raise_exception=True)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except Exception as e:
+            phone = request.data.get('phone', 'unknown')
+            reason = str(e)
+            if hasattr(e, 'detail'):
+                reason = str(e.detail)
+            logger.warning('Failed login attempt: phone=%s, reason=%s', phone, reason)
+            raise e
+
         data = serializer.get_jwt_response()
-        logger.info('Login: user=%s, role=%s', data['user']['id'], data['user']['role'])
+        phone = data.get('user', {}).get('phone', 'unknown')
+        logger.info('Successful login: user=%s, phone=%s, role=%s', data['user']['id'], phone, data['user']['role'])
         return Response(data)
 
 

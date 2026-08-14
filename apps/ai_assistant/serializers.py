@@ -10,6 +10,11 @@ class ChatMessageSerializer(serializers.Serializer):
     session_id = serializers.UUIDField(required=False, allow_null=True)
 
 
+class SessionBootstrapSerializer(serializers.Serializer):
+    """POST /api/ai/sessions/bootstrap/"""
+    session_id = serializers.UUIDField(required=False, allow_null=True)
+
+
 class ChatResponseSerializer(serializers.Serializer):
     """Chat API javobi sxemasi (faqat docs uchun)."""
     success                 = serializers.BooleanField()

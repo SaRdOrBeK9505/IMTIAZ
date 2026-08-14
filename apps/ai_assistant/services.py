@@ -14,10 +14,12 @@ Tasdiqlash oqimi:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 
 from django.conf import settings
+from django.core.cache import cache
 
 from .confirmation import create_pending_action, requires_confirmation
 from .i18n import build_confirmation_summary, build_system_prompt, resolve_language, t
@@ -66,6 +68,47 @@ class AIAssistantService:
                 pass
         return ConversationSession.objects.create(user=user)
 
+    def bootstrap_session(self, user, session_id: str | None = None) -> dict:
+        """
+        Yangi AI suhbatni salom xabari bilan boshlaydi.
+        Mini App /ai?welcome=1 ochilganda chaqiriladi.
+        """
+        session = self.get_or_create_session(user, session_id)
+        lang = resolve_language(user)
+
+        if session.messages.exists():
+            last = session.messages.order_by('-created_at').first()
+            return {
+                'session_id':            str(session.id),
+                'message_id':            str(last.id) if last else None,
+                'content':               last.content if last and last.role == 'assistant' else '',
+                'already_started':       True,
+                'requires_confirmation': False,
+            }
+
+        welcome = t('ai_welcome', lang)
+        quick_replies = t('quick_replies', lang)
+        if not isinstance(quick_replies, list):
+            quick_replies = ["✈️ Chipta izlash", "🍽️ Stol band qilish", "❓ Boshqa savol"]
+
+        msg = ConversationMessage.objects.create(
+            session=session,
+            role='assistant',
+            content=welcome,
+        )
+        if not session.title:
+            session.title = 'IMTIAZ AI'
+            session.save(update_fields=['title', 'updated_at'])
+
+        return {
+            'session_id':            str(session.id),
+            'message_id':            str(msg.id),
+            'content':               welcome,
+            'quick_replies':         quick_replies,
+            'already_started':       False,
+            'requires_confirmation': False,
+        }
+
     def chat(self, user, message: str, session_id: str | None = None) -> dict:
         session = self.get_or_create_session(user, session_id)
         lang    = resolve_language(user, message)
@@ -75,10 +118,12 @@ class AIAssistantService:
         )
 
         history = self._load_history(session)
+        session_summary = self._build_session_summary(session)
         system  = build_system_prompt(
             lang=lang,
             price_limit=f"{user.ai_auto_price_limit:,.0f}",
             autonomy_level=user.ai_autonomy_level,
+            session_summary=session_summary,
         )
         tools = get_all_tools()
 
@@ -248,6 +293,20 @@ class AIAssistantService:
                     # Keyingi tool'larni BAJARMAY to'xtatamiz
                     return [], str(log.id), summary
 
+            # Idempotency tekshiruvi: 120 sek ichida bir xil tool_input bo'lsa cache'dan qaytarish
+            input_hash = hashlib.md5(json.dumps(tool_input, sort_keys=True).encode('utf-8')).hexdigest()
+            idempotency_key = f"ai_tool_idempotency:{session.id}:{tool_name}:{input_hash}"
+            cached_result = cache.get(idempotency_key)
+
+            if cached_result is not None:
+                logger.info('Tool [%s] idempotency hit: session=%s', tool_name, session.id)
+                results.append({
+                    'tool_use_id': call['id'],
+                    'tool_name':   tool_name,
+                    'result':      cached_result,
+                })
+                continue
+
             # O'qish tool'lari yoki full_auto/semi_auto (tasdiqlash shart emas)
             log_entry = AIActionLog(
                 user=user,
@@ -262,13 +321,13 @@ class AIAssistantService:
                 )
                 log_entry.result = result
                 log_entry.status = AIActionLog.ActionStatus.SUCCESS
+                cache.set(idempotency_key, result, timeout=120)
+                self._update_session_entity_state(session, tool_name, tool_input, result)
                 logger.info('Tool [%s] OK: user=%s', tool_name, user.id)
             except Exception as e:
                 logger.exception('Tool [%s] XATO: user=%s — %s', tool_name, user.id, e)
                 from apps.integrations.errors import integration_error_dict
-                service = 'flight' if tool_name == 'search_flights' else (
-                    'train' if tool_name == 'search_trains' else 'generic'
-                )
+                service = 'flight' if tool_name == 'search_flights' else 'generic'
                 result = integration_error_dict(e, service=service, lang=lang)
                 log_entry.result = result
                 log_entry.status = AIActionLog.ActionStatus.FAILED
@@ -282,6 +341,61 @@ class AIAssistantService:
             })
 
         return results, None, ''
+
+    def _build_session_summary(self, session: ConversationSession) -> str:
+        parts = []
+
+        # Oxirgi 5 ta bajarilgan harakat (AIActionLog)
+        recent_logs = AIActionLog.objects.filter(session=session).order_by('-created_at')[:5]
+        if recent_logs:
+            log_lines = []
+            for l in reversed(list(recent_logs)):
+                payload_str = ", ".join(f"{k}={v}" for k, v in (l.payload or {}).items() if v)
+                status_str = "SUCCESS" if l.status == AIActionLog.ActionStatus.SUCCESS else "FAILED"
+                log_lines.append(f"- {l.action_type}({payload_str}) => {status_str}")
+            parts.append("Harakatlar tarixi:\n" + "\n".join(log_lines))
+
+        # Redis'dagi saqlangan session entity state
+        state_key = f"ai_tool_state:{session.id}"
+        state_data = cache.get(state_key)
+        if state_data and isinstance(state_data, dict):
+            state_lines = [f"- {k}: {v}" for k, v in state_data.items()]
+            parts.append("Saqlangan ob'ektlar state:\n" + "\n".join(state_lines))
+
+        return "\n\n".join(parts)
+
+    def _update_session_entity_state(
+        self, session: ConversationSession, tool_name: str, tool_input: dict, result: dict
+    ):
+        state_key = f"ai_tool_state:{session.id}"
+        state = cache.get(state_key) or {}
+
+        if tool_name == 'search_flights':
+            state['last_flight_search'] = {
+                'origin': tool_input.get('origin'),
+                'destination': tool_input.get('destination'),
+                'departure_at': tool_input.get('departure_at'),
+                'count': len(result.get('flights', [])) if isinstance(result, dict) else 0,
+            }
+        elif tool_name == 'search_restaurants':
+            state['last_restaurant_search'] = {
+                'query': tool_input.get('query'),
+                'date': tool_input.get('date'),
+                'count': len(result.get('restaurants', [])) if isinstance(result, dict) else 0,
+            }
+        elif tool_name == 'search_tour_packages':
+            state['last_tour_search'] = {
+                'destination': tool_input.get('destination'),
+                'query': tool_input.get('query'),
+                'count': len(result.get('packages', [])) if isinstance(result, dict) else 0,
+            }
+        elif tool_name in WRITE_TOOL_TO_ACTION:
+            state['last_write_action'] = {
+                'tool': tool_name,
+                'input': tool_input,
+            }
+
+        cache.set(state_key, state, timeout=3600)
 
     @staticmethod
     def _dispatch_tool(user, tool_name: str, tool_input: dict, lang: str = 'uz', session=None) -> dict:
@@ -307,7 +421,6 @@ class AIAssistantService:
     def _tool_to_action_type(name: str) -> str:
         return {
             'search_flights':       AIActionLog.ActionType.SEARCH,
-            'search_trains':        AIActionLog.ActionType.SEARCH,
             'search_restaurants':   AIActionLog.ActionType.SEARCH,
             'search_events':        AIActionLog.ActionType.SEARCH,
             'search_tour_packages': AIActionLog.ActionType.SEARCH,
@@ -325,7 +438,6 @@ class AIAssistantService:
         return {
             'search_flights':    'flight',
             'book_flight':       'flight',
-            'search_trains':     'train',
             'search_restaurants':'restaurant',
             'book_restaurant':   'restaurant',
             'search_events':     'event',

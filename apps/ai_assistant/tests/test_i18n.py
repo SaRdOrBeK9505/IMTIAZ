@@ -89,4 +89,4 @@ class TranslationTests(TestCase):
                 'offers': [],
             },
         }], lang='en')
-        self.assertIn('No flights found', reply)
+        self.assertIn('No direct flights', reply)

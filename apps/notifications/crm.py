@@ -12,6 +12,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from django.db import transaction
+from apps.notifications.tasks import send_notification
 
 if TYPE_CHECKING:
     from apps.booking.models import Booking
