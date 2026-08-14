@@ -20,12 +20,21 @@ LANGUAGE_NAMES = {
     'en': 'English',
 }
 
+# Uzbekcha kalit so'zlar
+_UZ_HINTS = frozenset({
+    'salom', 'assalomu', 'alaykum', 'qanday', 'yordam', 'chipta', 'mehmonxona',
+    'restoran', 'bron', 'izlash', 'bormi', 'kerak', 'samolyot', 'poyezd',
+    'ozbekcha', "o'zbekcha", 'uzbekcha', 'uzbek', "o'zbek", 'taniysanmi', 'yoz',
+    'ha', "yo'q", 'yoq', 'raqam', 'sana', 'narx', 'xizmat', 'rahmat', 'yaxshi',
+    'bekor', 'toshkent', 'samarqand', 'buxoro', 'xiva', 'tursiz', 'tur',
+})
+
 # Inglizcha kalit so'zlar (oddiy til aniqlash)
 _EN_HINTS = frozenset({
     'hello', 'hi', 'hey', 'please', 'thank', 'thanks', 'book', 'booking',
     'flight', 'flights', 'restaurant', 'event', 'train', 'search', 'find',
     'want', 'need', 'help', 'cancel', 'nearby', 'show', 'list', 'my',
-    'the', 'what', 'where', 'when', 'how', 'can', 'you', 'i', 'me',
+    'the', 'what', 'where', 'when', 'how', 'can', 'you', 'i', 'me', 'english',
 })
 
 # Ruscha kalit so'zlar
@@ -35,60 +44,9 @@ _RU_HINTS = frozenset({
     'хочу', 'нужно', 'отменить', 'покажи', 'мои', 'где', 'когда', 'как',
 })
 
-BOOKING_STATUS_LABELS = {
-    'uz': {
-        'pending': 'kutilmoqda',
-        'confirmed': 'tasdiqlangan',
-        'cancelled': 'bekor qilingan',
-        'completed': 'yakunlangan',
-        'in_progress': 'jarayonda',
-    },
-    'ru': {
-        'pending': 'ожидает',
-        'confirmed': 'подтверждён',
-        'cancelled': 'отменён',
-        'completed': 'завершён',
-        'in_progress': 'в процессе',
-    },
-    'en': {
-        'pending': 'pending',
-        'confirmed': 'confirmed',
-        'cancelled': 'cancelled',
-        'completed': 'completed',
-        'in_progress': 'in progress',
-    },
-}
-
-SERVICE_TYPE_LABELS = {
-    'uz': {
-        'flight': 'parvoz',
-        'restaurant': 'restoran',
-        'train': 'poyezd',
-        'event': 'tadbir',
-        'tour': 'tur',
-        'hotel': 'mehmonxona',
-    },
-    'ru': {
-        'flight': 'авиабилет',
-        'restaurant': 'ресторан',
-        'train': 'поезд',
-        'event': 'мероприятие',
-        'tour': 'тур',
-        'hotel': 'отель',
-    },
-    'en': {
-        'flight': 'flight',
-        'restaurant': 'restaurant',
-        'train': 'train',
-        'event': 'event',
-        'tour': 'tour',
-        'hotel': 'hotel',
-    },
-}
-
 
 def detect_language_from_text(text: str | None) -> str | None:
-    """Xabar matnidan tilni taxmin qilish."""
+    """Xabar matnidan tilni aniqlash (uz / ru / en)."""
     if not text or not text.strip():
         return None
 
@@ -96,14 +54,18 @@ def detect_language_from_text(text: str | None) -> str | None:
     latin = len(re.findall(r'[a-zA-Z]', text))
 
     if cyrillic >= 3 and cyrillic >= latin:
-        words = set(re.findall(r'[\u0400-\u04FF]+', text.lower()))
-        if words & _RU_HINTS:
-            return 'ru'
         return 'ru'
 
     words = set(re.findall(r"[a-zA-Z']+", text.lower()))
+    if words & _UZ_HINTS:
+        return 'uz'
+
     if words & _EN_HINTS and cyrillic == 0:
         return 'en'
+
+    # Agar matn lotin alifbosida bo'lib, inglizcha kalit so'z bo'lmasa — o'zbek tiliga ustunlik beriladi
+    if latin > 0 and cyrillic == 0:
+        return 'uz'
 
     return None
 
@@ -122,6 +84,12 @@ def resolve_language(user, message: str | None = None) -> str:
     """
     detected = detect_language_from_text(message)
     if detected:
+        if user and getattr(user, 'language_code', None) != detected:
+            try:
+                user.language_code = detected
+                user.save(update_fields=['language_code'])
+            except Exception:
+                pass
         return detected
     return normalize_language(getattr(user, 'language_code', None))
 
@@ -190,9 +158,9 @@ Qoidalar:
    - manual: har bron uchun tasdiqlash
    - semi_auto: 300,000 UZS gacha mustaqil
    - full_auto: limitgacha mustaqil
-3. MUHIM: Foydalanuvchi bilan FAQAT {lang_name} tilida gapir. Barcha javoblaring shu tilida bo'lsin.
+3. MUHIM: Asosiy muloqot tili: {lang_name}. Lekin foydalanuvchi boshqa tilda yozsa yoki tilni o'zgartirishni so'rasa (masalan: o'zbekcha, ruscha, inglizcha), albatta foydalanuvchi so'ragan tilda tabiiy javob ber.
 4. Tool natijalaridagi ma'lumotlar (restoran nomlari, tadbir sarlavhalari, manzillar) \
-boshqa tilda bo'lsa ham, ularni {lang_name} tilida tushunarli tarzda yetkaz. \
+boshqa tilda bo'lsa ham, ularni foydalanuvchi tushunadigan tilda yetkaz. \
 Brend va o'ziga xos joy nomlarini saqlab qol.
 5. Tashqi xizmat ishlamasa:
    - HECH QACHON .env, API, server, Bookhara, konfiguratsiya haqida gapirma
@@ -232,9 +200,9 @@ Brend va o'ziga xos joy nomlarini saqlab qol.
    - manual: подтверждение каждого бронирования
    - semi_auto: до 300 000 UZS самостоятельно
    - full_auto: до лимита самостоятельно
-3. ВАЖНО: Общайся с пользователем ТОЛЬКО на {lang_name} языке. Все ответы — на этом языке.
+3. ВАЖНО: Основной язык общения: {lang_name}. Однако если пользователь пишет на другом языке или просит сменить язык (узбекский, русский, английский), обязательно отвечай на языке пользователя.
 4. Данные из tool results (названия ресторанов, событий, адреса) могут быть на другом языке — \
-представляй их понятно на {lang_name}. Сохраняй бренды и уникальные названия мест.
+представляй их понятно на языке пользователя. Сохраняй бренды и уникальные названия мест.
 5. Если внешний сервис недоступен:
    - НИКОГДА не упоминай .env, API, сервер, Bookhara, конфигурацию
    - Мягко скажи «в системе временная задержка»
@@ -266,7 +234,7 @@ Rules:
    - manual: confirm every booking
    - semi_auto: up to 300,000 UZS independently
    - full_auto: up to limit independently
-3. IMPORTANT: Communicate with the user ONLY in {lang_name}. All responses must be in this language.
+3. IMPORTANT: Primary language is {lang_name}. However, if the user speaks or requests another language (Uzbek, Russian, English), adapt and respond naturally in the user's language.
 4. Tool result data (restaurant names, event titles, addresses) may be in another language — \
 present it clearly in {lang_name}. Keep brand names and unique venue names as-is.
 5. If an external service is down:
