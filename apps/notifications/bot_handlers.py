@@ -104,7 +104,15 @@ def _handle_callback(callback: dict) -> None:
 
 def _get_user_info(chat_id: int, tg_user: dict) -> tuple[str, str]:
     """User profilidan yoki Telegram updatedan til va ismni aniqlaydi."""
+    username = tg_user.get('username')
     user = User.objects.filter(telegram_id=chat_id).first()
+
+    if not user and username:
+        user = User.objects.filter(telegram_username__iexact=username).first()
+        if user:
+            user.telegram_id = chat_id
+            user.save(update_fields=['telegram_id'])
+
     if user:
         lang = user.language_code or 'uz'
         first_name = user.first_name or tg_user.get('first_name', '')
@@ -116,13 +124,18 @@ def _get_user_info(chat_id: int, tg_user: dict) -> tuple[str, str]:
 
 
 def _sync_telegram_profile(chat_id: int, tg_user: dict) -> None:
-    """Foydalanuvchi allaqachon ro'yxatdan o'tgan bo'lsa, telegram username yangilaydi."""
+    """Foydalanuvchi allaqachon ro'yxatdan o'tgan bo'lsa, telegram username va id ni yangilaydi."""
     username = tg_user.get('username')
     if not username:
         return
 
-    updated = User.objects.filter(telegram_id=chat_id).update(
-        telegram_username=username,
-    )
-    if updated:
-        logger.debug('Telegram profil yangilandi: chat_id=%s', chat_id)
+    user = User.objects.filter(telegram_id=chat_id).first()
+    if user:
+        if user.telegram_username != username:
+            user.telegram_username = username
+            user.save(update_fields=['telegram_username'])
+    else:
+        User.objects.filter(telegram_username__iexact=username, telegram_id__isnull=True).update(
+            telegram_id=chat_id,
+        )
+

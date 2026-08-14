@@ -411,7 +411,7 @@ class AudienceAuthTests(TestCase):
         self.assertEqual(result[0].pk, self.owner.pk)
 
     def test_mobile_token_rejected_by_crm_auth(self):
-        """Mobile token CRM auth classidan o'tmasligi kerak."""
+        """Mobile token CRM auth classidan o'tmasligi kerak (token_invalid)."""
         from apps.core.authentication import CRMJWTAuthentication
         from rest_framework.exceptions import AuthenticationFailed
         from rest_framework.test import APIRequestFactory
@@ -419,8 +419,31 @@ class AudienceAuthTests(TestCase):
         factory = APIRequestFactory()
         req     = factory.get('/', HTTP_AUTHORIZATION=f'Bearer {token}')
         auth    = CRMJWTAuthentication()
-        with self.assertRaises(AuthenticationFailed):
+        with self.assertRaises(AuthenticationFailed) as cm:
             auth.authenticate(req)
+        self.assertEqual(str(cm.exception.detail['detail']), 'token_invalid')
+        self.assertEqual(str(cm.exception.detail['code']), 'token_invalid')
+
+    def test_expired_token_raises_token_expired(self):
+        import datetime
+        from apps.core.authentication import CRMJWTAuthentication
+        from rest_framework.exceptions import AuthenticationFailed
+        from rest_framework.test import APIRequestFactory
+
+        refresh = RefreshToken.for_user(self.owner)
+        refresh['aud'] = 'crm'
+        access = refresh.access_token
+        # Set payload exp to past timestamp
+        access.payload['exp'] = int((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)).timestamp())
+        token = str(access)
+
+        factory = APIRequestFactory()
+        req = factory.get('/', HTTP_AUTHORIZATION=f'Bearer {token}')
+        auth = CRMJWTAuthentication()
+        with self.assertRaises(AuthenticationFailed) as cm:
+            auth.authenticate(req)
+        self.assertEqual(str(cm.exception.detail['detail']), 'token_expired')
+        self.assertEqual(str(cm.exception.detail['code']), 'token_expired')
 
 
 # ─── Logout ───────────────────────────────────────────────────────────────────
@@ -443,11 +466,13 @@ class LogoutViewTests(TestCase):
         refresh = self._auth()
         resp = self.client.post(self.url, {'refresh': refresh})
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data, {'detail': 'Logged out'})
 
     def test_logout_invalid_token(self):
         self._auth()
         resp = self.client.post(self.url, {'refresh': 'invalid.token.here'})
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp.data, {'detail': 'Invalid token'})
 
     def test_logout_requires_auth(self):
         self.client.credentials()

@@ -24,10 +24,20 @@ Ishlatilish:
 
 from __future__ import annotations
 
-from rest_framework.permissions import IsAuthenticated
+import jwt
+from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
+
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, AuthenticationFailed
+from rest_framework_simplejwt.settings import api_settings
+
+
+class PublicAPIView(APIView):
+    """Auth talab qilmaydigan endpointlar uchun base class"""
+    authentication_classes = []
+    permission_classes = [AllowAny]
 
 
 class AudienceJWTAuthentication(JWTAuthentication):
@@ -38,20 +48,38 @@ class AudienceJWTAuthentication(JWTAuthentication):
     required_audience: str | None = None
 
     def authenticate(self, request):
-        result = super().authenticate(request)
-        if result is None:
+        header = self.get_header(request)
+        if header is None:
             return None
 
-        user, validated_token = result
+        raw_token = self.get_raw_token(header)
+        if raw_token is None:
+            return None
+
+        try:
+            validated_token = self.get_validated_token(raw_token)
+        except Exception:
+            try:
+                jwt.decode(
+                    raw_token,
+                    api_settings.SIGNING_KEY,
+                    algorithms=[api_settings.ALGORITHM],
+                    options={"verify_signature": True, "verify_exp": True},
+                )
+            except ExpiredSignatureError:
+                raise AuthenticationFailed("token_expired", code="token_expired")
+            except InvalidTokenError:
+                raise AuthenticationFailed("token_invalid", code="token_invalid")
+            except Exception:
+                raise AuthenticationFailed("token_invalid", code="token_invalid")
+            raise AuthenticationFailed("token_invalid", code="token_invalid")
+
+        user = self.get_user(validated_token)
 
         if self.required_audience is not None:
             token_aud = validated_token.get('aud')
             if token_aud != self.required_audience:
-                raise AuthenticationFailed(
-                    f"Bu token ushbu panel uchun yaroqsiz. "
-                    f"Kerakli audience: '{self.required_audience}', "
-                    f"token audience: '{token_aud}'."
-                )
+                raise AuthenticationFailed("token_invalid", code="token_invalid")
 
         return user, validated_token
 

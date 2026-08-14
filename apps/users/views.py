@@ -33,6 +33,7 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView as SimpleJWTTokenRefreshView
 
+from apps.core.authentication import PublicAPIView
 from .models import OTPCode
 from apps.core.openapi_schemas import (
     ErrorResponseSerializer,
@@ -58,7 +59,7 @@ logger = logging.getLogger(__name__)
 
 # ─── Register: Qadam 1 ────────────────────────────────────────────────────────
 
-class RequestOTPView(APIView):
+class RequestOTPView(PublicAPIView):
     """
     POST /api/auth/register/request-otp/
 
@@ -69,7 +70,6 @@ class RequestOTPView(APIView):
     - Rate limit: 60 soniyada 1 ta SMS
     - full_name Redis'da 15 daqiqa saqlanadi
     """
-    permission_classes = [AllowAny]
 
     @extend_schema(
         request=RequestOTPSerializer,
@@ -123,7 +123,7 @@ class RequestOTPView(APIView):
 
 # ─── Register: Qadam 2 ────────────────────────────────────────────────────────
 
-class VerifyOTPView(APIView):
+class VerifyOTPView(PublicAPIView):
     """
     POST /api/auth/register/verify-otp/
 
@@ -133,7 +133,6 @@ class VerifyOTPView(APIView):
     Token 15 daqiqa amal qiladi.
     Keyingi qadamda (CompleteRegistration) shu token ishlatiladi.
     """
-    permission_classes = [AllowAny]
 
     @extend_schema(
         request=VerifyOTPSerializer,
@@ -157,7 +156,7 @@ class VerifyOTPView(APIView):
 
 # ─── Register: Qadam 3+4 ──────────────────────────────────────────────────────
 
-class CompleteRegistrationView(APIView):
+class CompleteRegistrationView(PublicAPIView):
     """
     POST /api/auth/register/complete/
 
@@ -173,7 +172,6 @@ class CompleteRegistrationView(APIView):
     - telegram_init_data kelsa: HMAC tekshiriladi, telegram_id bog'lanadi
     - Kelmasayam ishlaydi (faqat phone+password)
     """
-    permission_classes = [AllowAny]
 
     @extend_schema(
         request=CompleteRegistrationSerializer,
@@ -195,6 +193,8 @@ class CompleteRegistrationView(APIView):
 
 class TokenRefreshView(SimpleJWTTokenRefreshView):
     """POST /api/auth/token/refresh/ — access token yangilash."""
+    authentication_classes = []
+    permission_classes     = [AllowAny]
 
     @extend_schema(
         tags=['Auth — Mobile', 'Auth — CRM', 'Auth — Admin'],
@@ -213,13 +213,12 @@ class TokenRefreshView(SimpleJWTTokenRefreshView):
 
 # ─── Login ────────────────────────────────────────────────────────────────────
 
-class LoginView(APIView):
+class LoginView(PublicAPIView):
     """
     POST /api/auth/login/
     Customer uchun — phone + password → JWT (audience: mobile)
     """
-    permission_classes = [AllowAny]
-    serializer_class   = LoginSerializer
+    serializer_class = LoginSerializer
 
     @extend_schema(
         request=LoginSerializer,
@@ -319,21 +318,13 @@ class LogoutView(APIView):
         tags=['Auth — Mobile'],
     )
     def post(self, request):
-        refresh_token = request.data.get('refresh')
-        if not refresh_token:
-            return Response(
-                {'detail': 'refresh maydoni majburiy.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         try:
-            RefreshToken(refresh_token).blacklist()
-        except TokenError:
-            return Response(
-                {'detail': "Token noto'g'ri yoki muddati o'tgan."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        logger.info('Logout: user=%s', request.user.id)
-        return Response({'success': True, 'detail': 'Muvaffaqiyatli chiqildi.'})
+            refresh_token = request.data.get("refresh")
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+            return Response({"detail": "Logged out"}, status=200)
+        except Exception:
+            return Response({"detail": "Invalid token"}, status=400)
 
 
 # ─── Profile ──────────────────────────────────────────────────────────────────
