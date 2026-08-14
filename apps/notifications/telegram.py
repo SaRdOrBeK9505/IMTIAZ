@@ -58,6 +58,16 @@ class TelegramBotClient:
                     logger.warning('Foydalanuvchi botni bloklagan: chat_id=%s', chat_id)
                     return None
 
+                # HTML parse xatosi bo'lsa, oddiy matn sifatida qayta yuborish
+                if parse_mode and "can't parse" in description.lower():
+                    logger.warning('Telegram HTML parse xato, oddiy matn sifatida qayta yuborilmoqda...')
+                    payload_plain = payload.copy()
+                    payload_plain.pop('parse_mode', None)
+                    resp_retry = self.client.post(f'{self.base}/sendMessage', json=payload_plain)
+                    retry_data = resp_retry.json()
+                    if retry_data.get('ok'):
+                        return retry_data['result']['message_id']
+
                 logger.error(
                     'Telegram API xato: code=%s, desc=%s, chat_id=%s',
                     error_code, description, chat_id,
@@ -91,6 +101,10 @@ class TelegramBotClient:
         except Exception as e:
             logger.exception('Telegram API [%s] xato: %s', method, e)
             return None
+
+    def send_chat_action(self, chat_id: int, action: str = 'typing') -> bool:
+        """Chat action yuboradi (masalan: typing)."""
+        return self._api_post('sendChatAction', {'chat_id': chat_id, 'action': action}) is not None
 
     def answer_callback_query(
         self,

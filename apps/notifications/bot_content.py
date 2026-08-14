@@ -14,7 +14,16 @@ CB_HELP     = 'bot:help'
 
 
 def mini_app_ai_url(start_param: str = 'ai_chat') -> str:
-    base = getattr(settings, 'TELEGRAM_MINI_APP_AI_URL', '') or settings.FRONTEND_URL
+    """
+    Telegram botdagi AI Chat tugmasi ochadigan URL-manzilni qaytaradi.
+    .env dagi TELEGRAM_MINI_APP_AI_URL ko'rsatilgan bo'lsa, o'sha manzil ishlatiladi.
+    Aks holda, default FRONTEND_URL/ai?welcome=1&start_param=... ishlatiladi.
+    """
+    custom_url = getattr(settings, 'TELEGRAM_MINI_APP_AI_URL', '').strip()
+    if custom_url:
+        return custom_url
+
+    base = getattr(settings, 'FRONTEND_URL', '') or 'https://imtiaz-crm.vercel.app'
     param = f'&start_param={start_param}' if start_param else ''
     return f'{base.rstrip("/")}/ai?welcome=1{param}'
 

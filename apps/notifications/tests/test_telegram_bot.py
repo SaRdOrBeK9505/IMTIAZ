@@ -41,6 +41,34 @@ class TelegramBotHandlerTests(TestCase):
         self.assertIn('IMTIAZ', args[1])
         self.assertIn('inline_keyboard', kwargs['reply_markup'])
 
+    @patch('apps.notifications.bot_handlers.AIAssistantService')
+    @patch('apps.notifications.bot_handlers.get_bot')
+    def test_text_message_triggers_ai_service(self, mock_get_bot, mock_ai_service_cls):
+        bot = MagicMock()
+        mock_get_bot.return_value = bot
+        ai_service_inst = MagicMock()
+        ai_service_inst.chat.return_value = {
+            'session_id': 'sess-123',
+            'content': 'Assalomu alaykum, qanday yordam bera olaman?',
+            'requires_confirmation': False,
+        }
+        mock_ai_service_cls.return_value = ai_service_inst
+
+        handle_update({
+            'message': {
+                'message_id': 2,
+                'chat': {'id': 99999, 'type': 'private'},
+                'from': {'id': 99999, 'username': 'aitestuser', 'first_name': 'AI User'},
+                'text': 'Salom AI',
+            },
+        })
+
+        bot.send_chat_action.assert_called_once_with(99999, 'typing')
+        bot.send_message.assert_called_once()
+        args, kwargs = bot.send_message.call_args
+        self.assertEqual(args[0], 99999)
+        self.assertIn('Assalomu alaykum', args[1])
+
     @patch('apps.notifications.bot_handlers.get_bot')
     def test_callback_about_edits_message(self, mock_get_bot):
         bot = MagicMock()
@@ -117,3 +145,19 @@ class TelegramWebhookViewTests(TestCase):
                 format='json',
             )
             self.assertEqual(resp.status_code, 200)
+
+
+class MiniAppUrlTests(TestCase):
+
+    def test_mini_app_ai_url_custom_env(self):
+        from apps.notifications.bot_content import mini_app_ai_url
+        with override_settings(TELEGRAM_MINI_APP_AI_URL='https://custom-ai-chat.com/chat'):
+            url = mini_app_ai_url()
+            self.assertEqual(url, 'https://custom-ai-chat.com/chat')
+
+    def test_mini_app_ai_url_fallback(self):
+        from apps.notifications.bot_content import mini_app_ai_url
+        with override_settings(TELEGRAM_MINI_APP_AI_URL='', FRONTEND_URL='https://frontend.com'):
+            url = mini_app_ai_url('test_param')
+            self.assertEqual(url, 'https://frontend.com/ai?welcome=1&start_param=test_param')
+

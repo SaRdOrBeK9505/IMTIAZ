@@ -428,8 +428,8 @@ AI_MODEL          = env('AI_MODEL', default='claude-opus-4-5')
 # ─── TELEGRAM ─────────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN  = env('TELEGRAM_BOT_TOKEN',  default='')
 TELEGRAM_BOT_SECRET = env('TELEGRAM_BOT_SECRET', default='')
-# Mini App ichida AI chat ochiladigan URL (default: FRONTEND_URL/ai?welcome=1)
-TELEGRAM_MINI_APP_AI_URL = env('TELEGRAM_MINI_APP_AI_URL', default=FRONTEND_URL)
+# Mini App ichida AI chat ochiladigan manzil (masalan: https://t.me/bot/app yoki https://frontend-domain.uz/ai)
+TELEGRAM_MINI_APP_AI_URL = env('TELEGRAM_MINI_APP_AI_URL', default='')
 
 # ─── SMS — DevSMS ─────────────────────────────────────────────────────────────
 # https://devsms.uz — Bearer token bilan ishlaydi, login kerak emas

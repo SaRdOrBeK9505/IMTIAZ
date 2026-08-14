@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import logging
 
-from apps.users.models import User
+from apps.ai_assistant.services import AIAssistantService
+from apps.users.models import User, UserRole
 
 from .bot_content import (
     CB_MENU,
@@ -36,15 +37,57 @@ def _handle_message(message: dict) -> None:
         _handle_start(message)
         return
 
-    tg_user = message.get('from') or {}
-    lang, first_name = _get_user_info(chat_id, tg_user)
+    if not text:
+        return
 
+    tg_user = message.get('from') or {}
     bot = get_bot()
-    bot.send_message(
-        chat_id,
-        welcome_text(first_name=first_name, lang=lang),
-        reply_markup=main_menu_keyboard(lang=lang),
-    )
+
+    # Telegram'da "typing..." statusini ko'rsatish
+    bot.send_chat_action(chat_id, 'typing')
+
+    # Foydalanuvchini olish yoki avtomatik yaratish
+    user = _get_or_create_user(chat_id, tg_user)
+    lang = user.language_code or 'uz'
+
+    try:
+        ai_service = AIAssistantService()
+        result = ai_service.chat(user=user, message=text)
+        reply_content = result.get('content') or ''
+
+        if result.get('requires_confirmation'):
+            if lang == 'ru':
+                note = "\n\n📌 <i>Для подтверждения этого действия перейдите в Mini App:</i>"
+            elif lang == 'en':
+                note = "\n\n📌 <i>To confirm this action, please proceed to the Mini App:</i>"
+            else:
+                note = "\n\n📌 <i>Ushbu amallarni tasdiqlash uchun Mini App ga o'ting:</i>"
+            reply_content += note
+
+        _send_split_message(bot, chat_id, reply_content, reply_markup=main_menu_keyboard(lang=lang))
+
+    except Exception as e:
+        logger.exception('Bot AI message error: %s', e)
+        if lang == 'ru':
+            err_msg = "Извините, произошла ошибка при обработке вашего запроса. Попробуйте позже."
+        elif lang == 'en':
+            err_msg = "Sorry, an error occurred while processing your request. Please try again later."
+        else:
+            err_msg = "Kechirasiz, so'rovingizni qayta ishlashda xatolik yuz berdi. Iltimos, bir ozdan so'ng qayta urinib ko'ring."
+        bot.send_message(chat_id, err_msg, reply_markup=main_menu_keyboard(lang=lang))
+
+
+def _send_split_message(bot, chat_id: int, text: str, reply_markup: dict | None = None) -> None:
+    """Telegram 4096 belgilik cheklovini hisobga olib xabarni bo'lib yuboradi."""
+    max_len = 4000
+    if len(text) <= max_len:
+        bot.send_message(chat_id, text, reply_markup=reply_markup)
+        return
+
+    chunks = [text[i:i + max_len] for i in range(0, len(text), max_len)]
+    for i, chunk in enumerate(chunks):
+        markup = reply_markup if i == len(chunks) - 1 else None
+        bot.send_message(chat_id, chunk, reply_markup=markup)
 
 
 def _handle_start(message: dict) -> None:
@@ -138,4 +181,36 @@ def _sync_telegram_profile(chat_id: int, tg_user: dict) -> None:
         User.objects.filter(telegram_username__iexact=username, telegram_id__isnull=True).update(
             telegram_id=chat_id,
         )
+
+
+def _get_or_create_user(chat_id: int, tg_user: dict) -> User:
+    """Chat ID bo'yicha User topadi yoki yangi Telegram mijoz yaratadi."""
+    username = tg_user.get('username')
+    user = User.objects.filter(telegram_id=chat_id).first()
+
+    if not user and username:
+        user = User.objects.filter(telegram_username__iexact=username).first()
+        if user:
+            user.telegram_id = chat_id
+            user.save(update_fields=['telegram_id'])
+
+    if not user:
+        first_name = tg_user.get('first_name', '') or f'User_{chat_id}'
+        last_name = tg_user.get('last_name', '')
+        lang_code = (tg_user.get('language_code') or 'uz').split('-')[0].lower()
+        lang = lang_code if lang_code in ('uz', 'ru', 'en') else 'uz'
+        phone_placeholder = f'+tg_{chat_id}'
+
+        user = User.objects.create(
+            phone=phone_placeholder,
+            telegram_id=chat_id,
+            telegram_username=username or None,
+            first_name=first_name,
+            last_name=last_name,
+            language_code=lang,
+            role=UserRole.CUSTOMER,
+        )
+
+    return user
+
 
