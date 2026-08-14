@@ -29,7 +29,7 @@ def get_ai_service() -> AIAssistantService:
 
 class ChatView(APIView):
     """POST /api/ai/chat/"""
-    permission_classes = [IsAuthenticated, HasApprovedMembership]
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
         request=ChatMessageSerializer,
