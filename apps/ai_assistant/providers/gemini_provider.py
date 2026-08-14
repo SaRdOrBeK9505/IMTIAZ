@@ -59,11 +59,6 @@ class GeminiProvider(BaseAIProvider):
             'max_output_tokens': max_tokens,
             'temperature': getattr(settings, 'AI_TEMPERATURE', 0.2),
         }
-        if hasattr(types, 'ThinkingConfig'):
-            try:
-                config_kwargs['thinking_config'] = types.ThinkingConfig(thinking_budget=0)
-            except Exception:
-                pass
 
         if system:
             config_kwargs['system_instruction'] = system
