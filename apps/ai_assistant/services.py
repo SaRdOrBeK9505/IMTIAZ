@@ -17,6 +17,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
+import uuid
 
 from django.conf import settings
 from django.core.cache import cache
@@ -33,6 +35,69 @@ from .response_builder import (
 from .tools import get_all_tools
 
 logger = logging.getLogger(__name__)
+
+
+class StepTimer:
+    """
+    Bitta so'rov (chat() chaqiruvi) ichidagi har bir qadamni
+    ('history_load', 'provider_call', 'tool:search_flights', ...)
+    millisekundlarda o'lchab, tartib bilan saqlaydi.
+
+    Foydalanish:
+        timer = StepTimer(request_id)
+        with timer.measure('history_load'):
+            ...
+
+    Oxirida `timer.summary()` — barcha qadamlar va umumiy vaqtni
+    tartiblangan dict qilib qaytaradi, `timer.log()` esa buni bitta
+    struktura log qatori sifatida chiqaradi (request_id bilan bog'langan
+    holda, RequestLoggingMiddleware dagi request_id bilan mos qilib
+    ishlatish mumkin).
+    """
+
+    def __init__(self, request_id: str = ''):
+        self.request_id = request_id or str(uuid.uuid4())[:8]
+        self.steps: list[dict] = []
+        self._t0 = time.monotonic()
+
+    class _Ctx:
+        def __init__(self, timer: 'StepTimer', name: str):
+            self.timer = timer
+            self.name = name
+            self.start = 0.0
+
+        def __enter__(self):
+            self.start = time.monotonic()
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            duration_ms = int((time.monotonic() - self.start) * 1000)
+            self.timer.steps.append({
+                'step': self.name,
+                'duration_ms': duration_ms,
+                'ok': exc_type is None,
+            })
+            return False  # xatoni yutib qolmaymiz
+
+    def measure(self, name: str) -> '_Ctx':
+        return StepTimer._Ctx(self, name)
+
+    def add(self, name: str, duration_ms: int, ok: bool = True) -> None:
+        """Tashqarida (masalan tool loop ichida) o'lchangan vaqtni qo'shish."""
+        self.steps.append({'step': name, 'duration_ms': duration_ms, 'ok': ok})
+
+    def total_ms(self) -> int:
+        return int((time.monotonic() - self._t0) * 1000)
+
+    def summary(self) -> dict:
+        return {
+            'request_id': self.request_id,
+            'total_ms': self.total_ms(),
+            'steps': self.steps,
+        }
+
+    def log(self, logger_: logging.Logger, message: str = 'AI chat timing') -> None:
+        logger_.info(message, extra={'data': self.summary()})
 
 # Yozish tool'lari — requires_confirmation() ga yuboriladi
 WRITE_TOOL_TO_ACTION: dict[str, tuple[str, str]] = {
@@ -116,50 +181,64 @@ class AIAssistantService:
             'requires_confirmation': False,
         }
 
-    def chat(self, user, message: str, session_id: str | None = None) -> dict:
-        session = self.get_or_create_session(user, session_id)
-        lang    = resolve_language(user, message)
+    def chat(
+        self, user, message: str, session_id: str | None = None,
+        request_id: str = '',
+    ) -> dict:
+        """
+        `request_id` — HTTP request_id (RequestLoggingMiddleware dan).
+        Berilmasa, StepTimer o'zi qisqa UUID yaratadi. Bu ID orqali
+        logdagi "AI chat timing" yozuvini va Nginx/Gunicorn access
+        logdagi request_id'ni bitta so'rovga bog'lash mumkin.
+        """
+        timer = StepTimer(request_id)
+
+        with timer.measure('get_or_create_session'):
+            session = self.get_or_create_session(user, session_id)
+        lang = resolve_language(user, message)
 
         ConversationMessage.objects.create(
             session=session, role='user', content=message,
         )
 
-        history = self._load_history(session)
-        user_profile_summary = self._build_user_profile_summary(user)
-        session_summary = self._build_session_summary(session)
-        system  = build_system_prompt(
-            lang=lang,
-            price_limit=f"{user.ai_auto_price_limit:,.0f}",
-            autonomy_level=user.ai_autonomy_level,
-            session_summary=session_summary,
-            user_profile_summary=user_profile_summary,
-        )
+        with timer.measure('history_load'):
+            history = self._load_history(session)
+        with timer.measure('user_profile_summary'):
+            user_profile_summary = self._build_user_profile_summary(user)
+        with timer.measure('session_summary'):
+            session_summary = self._build_session_summary(session)
+        with timer.measure('system_prompt_build'):
+            system = build_system_prompt(
+                lang=lang,
+                price_limit=f"{user.ai_auto_price_limit:,.0f}",
+                autonomy_level=user.ai_autonomy_level,
+                session_summary=session_summary,
+                user_profile_summary=user_profile_summary,
+            )
         tools = get_all_tools()
 
-        # AI chaqiruvi (timing + optional streaming)
-        import time
         from apps.ai_assistant.providers.base import AIResponse as ProviderAIResponse
 
         try:
-            start_ts = time.time()
-            if getattr(settings, 'AI_ENABLE_STREAMING', False) and hasattr(self.provider, 'chat_stream'):
-                chunks = []
-                tool_calls = []
-                tokens_used = 0
-                raw = None
-                for part in self.provider.chat_stream(messages=history, tools=tools, system=system):
-                    if isinstance(part, dict) and part.get('__final'):
-                        tokens_used = part.get('tokens_used', 0)
-                        tool_calls = part.get('tool_calls', []) or []
-                        raw = part.get('raw')
-                    else:
-                        chunks.append(str(part))
-                content = ''.join(chunks)
-                ai_response = ProviderAIResponse(content=content, tool_calls=tool_calls, tokens_used=tokens_used, raw=raw)
-            else:
-                ai_response = self.provider.chat(messages=history, tools=tools, system=system)
-            end_ts = time.time()
-            latency_ms = int((end_ts - start_ts) * 1000)
+            with timer.measure('provider_call'):
+                if getattr(settings, 'AI_ENABLE_STREAMING', False) and hasattr(self.provider, 'chat_stream'):
+                    chunks = []
+                    tool_calls = []
+                    tokens_used = 0
+                    raw = None
+                    for part in self.provider.chat_stream(messages=history, tools=tools, system=system):
+                        if isinstance(part, dict) and part.get('__final'):
+                            tokens_used = part.get('tokens_used', 0)
+                            tool_calls = part.get('tool_calls', []) or []
+                            raw = part.get('raw')
+                        else:
+                            chunks.append(str(part))
+                    content = ''.join(chunks)
+                    ai_response = ProviderAIResponse(content=content, tool_calls=tool_calls, tokens_used=tokens_used, raw=raw)
+                else:
+                    ai_response = self.provider.chat(messages=history, tools=tools, system=system)
+            latency_ms = timer.steps[-1]['duration_ms']  # 'provider_call' — hozirgina yozildi
+
             # Audit log for AI call latency/tokens
             try:
                 AIActionLog.objects.create(
@@ -167,6 +246,8 @@ class AIAssistantService:
                     session=session,
                     action_type=AIActionLog.ActionType.INFO_REQUEST,
                     payload={'message': message, 'tokens_used': getattr(ai_response, 'tokens_used', 0), 'latency_ms': latency_ms},
+                    duration_ms=latency_ms,
+                    request_id=timer.request_id,
                 )
             except Exception:
                 logger.exception('AIActionLog yaratishda xato')
@@ -182,7 +263,10 @@ class AIAssistantService:
                 payload={'message': message},
                 status=AIActionLog.ActionStatus.FAILED,
                 error_message=str(e),
+                duration_ms=timer.total_ms(),
+                request_id=timer.request_id,
             )
+            timer.log(logger, message='AI chat timing (provider xatosi)')
             return {
                 'session_id': str(session.id),
                 'content': err,
@@ -197,9 +281,13 @@ class AIAssistantService:
         pending_summary      = ''
 
         if ai_response.tool_calls:
-            tool_results, pending_action_id, pending_summary = (
-                self._execute_tool_calls(user, session, ai_response.tool_calls, lang=lang)
-            )
+            with timer.measure('tools_total'):
+                tool_results, pending_action_id, pending_summary = (
+                    self._execute_tool_calls(
+                        user, session, ai_response.tool_calls,
+                        lang=lang, timer=timer,
+                    )
+                )
 
             if pending_action_id:
                 # Tasdiqlash kerak — foydalanuvchiga savol
@@ -207,7 +295,8 @@ class AIAssistantService:
             elif should_use_local_reply(tool_results, message, lang):
                 # Token tejash: oddiy holatda tool natijasidan javob yig'amiz.
                 # Vaqt/batafsil savollar va bo'sh tur natijalari uchun LLM ishlatiladi.
-                final_content = build_reply_from_tools(tool_results, lang=lang)
+                with timer.measure('local_reply_build'):
+                    final_content = build_reply_from_tools(tool_results, lang=lang)
             else:
                 # Murakkab holat — AI ga qisqartirilgan natija yuboriladi
                 tool_msgs = [
@@ -235,14 +324,23 @@ class AIAssistantService:
                     ),
                 ]
                 try:
-                    final_resp = self.provider.chat(
-                        messages=history + tool_msgs,
-                        tools=tools, system=system,
-                        max_tokens=getattr(settings, 'AI_FOLLOWUP_MAX_TOKENS', 512),
-                    )
+                    with timer.measure('followup_provider_call'):
+                        final_resp = self.provider.chat(
+                            messages=history + tool_msgs,
+                            tools=tools, system=system,
+                            max_tokens=getattr(settings, 'AI_FOLLOWUP_MAX_TOKENS', 512),
+                        )
                     final_content = (
                         final_resp.content
                         or build_reply_from_tools(tool_results, lang=lang)
+                    )
+                    followup_ms = timer.steps[-1]['duration_ms']
+                    AIActionLog.objects.create(
+                        user=user, session=session,
+                        action_type=AIActionLog.ActionType.INFO_REQUEST,
+                        payload={'message': '(followup)', 'tokens_used': getattr(final_resp, 'tokens_used', 0)},
+                        duration_ms=followup_ms,
+                        request_id=timer.request_id,
                     )
                 except Exception as e:
                     logger.exception('Tool result qayta chaqiruvda xato: %s', e)
@@ -250,20 +348,33 @@ class AIAssistantService:
                         'reply_format_error', lang
                     )
 
-        msg = ConversationMessage.objects.create(
-            session=session,
-            role='assistant',
-            content=final_content,
-            tool_calls=ai_response.tool_calls or None,
-            tool_results=tool_results or None,
-            tokens_used=ai_response.tokens_used,
-        )
+        with timer.measure('save_message'):
+            msg = ConversationMessage.objects.create(
+                session=session,
+                role='assistant',
+                content=final_content,
+                tool_calls=ai_response.tool_calls or None,
+                tool_results=tool_results or None,
+                tokens_used=ai_response.tokens_used,
+            )
 
         if not session.title:
             session.title = message[:80]
             session.save(update_fields=['title', 'updated_at'])
 
-        self._refresh_user_ai_profile(user, session)
+        with timer.measure('refresh_user_ai_profile'):
+            self._refresh_user_ai_profile(user, session)
+
+        # Bitta so'rov ichidagi barcha qadamlarni bitta log qatoriga yozamiz —
+        # request_id orqali logging_middleware yozuvi bilan bog'lanadi.
+        # Masalan: {"request_id": "e8b64981", "total_ms": 842, "steps": [
+        #   {"step": "history_load", "duration_ms": 3, "ok": true},
+        #   {"step": "provider_call", "duration_ms": 610, "ok": true},
+        #   {"step": "tools_total", "duration_ms": 180, "ok": true},
+        #   {"step": "tool:search_flights", "duration_ms": 175, "ok": true},
+        #   ...
+        # ]}
+        timer.log(logger)
 
         return {
             'session_id':            str(session.id),
@@ -273,6 +384,7 @@ class AIAssistantService:
             'tokens_used':           ai_response.tokens_used,
             'requires_confirmation': bool(pending_action_id),
             'pending_action_id':     str(pending_action_id) if pending_action_id else None,
+            'timing':                timer.summary(),
         }
 
     # ── Ichki metodlar ────────────────────────────────────────────────────────
@@ -355,17 +467,26 @@ class AIAssistantService:
         session: ConversationSession,
         tool_calls: list[dict],
         lang: str = 'uz',
+        timer: 'StepTimer | None' = None,
     ) -> tuple[list[dict], str | None, str]:
         """
         Returns: (results, pending_action_id | None, pending_summary)
         pending_action_id != None → biror tool tasdiqlash so'radi,
         keyingi tool'lar bajarilmaydi.
+
+        `timer` berilsa, har bir tool 'tool:<nom>' nomi bilan
+        StepTimer.steps ga qo'shiladi — cache-hit bo'lsa ham
+        (masalan 'tool:search_flights [cache_hit]'), haqiqiy tashqi
+        chaqiruv bo'lsa ham (masalan 'tool:search_flights') — shu orqali
+        "nega tez javob keldi" yoki "nega sekin" ekanligi log'da aniq
+        ko'rinadi.
         """
         results = []
 
         for call in tool_calls:
             tool_name  = call['name']
             tool_input = call['input']
+            tool_started_at = time.monotonic()
 
             # Yozish tool'imi?
             if tool_name in WRITE_TOOL_TO_ACTION:
@@ -382,6 +503,11 @@ class AIAssistantService:
                         payload=tool_input,
                         amount=amount,
                     )
+                    if timer:
+                        timer.add(
+                            f'tool:{tool_name} [needs_confirmation]',
+                            int((time.monotonic() - tool_started_at) * 1000),
+                        )
                     summary = build_confirmation_summary(
                         tool_name, tool_input, amount, lang=lang
                     )
@@ -403,7 +529,27 @@ class AIAssistantService:
                 cached_result = cache.get(idempotency_key)
 
             if cached_result is not None:
-                logger.info('Tool [%s] idempotency hit: session=%s', tool_name, session.id)
+                duration_ms = int((time.monotonic() - tool_started_at) * 1000)
+                logger.info(
+                    'Tool [%s] idempotency hit: session=%s (%dms)',
+                    tool_name, session.id, duration_ms,
+                )
+                if timer:
+                    timer.add(f'tool:{tool_name} [cache_hit]', duration_ms)
+                # Cache-hit bo'lsa ham audit uchun qisqa yozuv qoldiramiz —
+                # shu orqali "nega bir xil natija qaytdi" savoliga DB'dan ham
+                # javob topish mumkin (ai_action_logs jadvalida
+                # action_type=... payload={..., '_cache_hit': True}).
+                AIActionLog.objects.create(
+                    user=user, session=session,
+                    action_type=self._tool_to_action_type(tool_name),
+                    service_type=self._tool_to_service_type(tool_name),
+                    payload={**tool_input, '_cache_hit': True},
+                    result=cached_result,
+                    status=AIActionLog.ActionStatus.SUCCESS,
+                    duration_ms=duration_ms,
+                    request_id=timer.request_id if timer else '',
+                )
                 results.append({
                     'tool_use_id': call['id'],
                     'tool_name':   tool_name,
@@ -418,6 +564,7 @@ class AIAssistantService:
                 action_type=self._tool_to_action_type(tool_name),
                 service_type=self._tool_to_service_type(tool_name),
                 payload=tool_input,
+                request_id=timer.request_id if timer else '',
             )
             try:
                 result         = self._dispatch_tool(
@@ -428,9 +575,14 @@ class AIAssistantService:
                 if idempotency_key:
                     cache.set(idempotency_key, result, timeout=120)
                 self._update_session_entity_state(session, tool_name, tool_input, result)
-                logger.info('Tool [%s] OK: user=%s', tool_name, user.id)
+                duration_ms = int((time.monotonic() - tool_started_at) * 1000)
+                logger.info('Tool [%s] OK: user=%s (%dms)', tool_name, user.id, duration_ms)
             except Exception as e:
-                logger.exception('Tool [%s] XATO: user=%s — %s', tool_name, user.id, e)
+                duration_ms = int((time.monotonic() - tool_started_at) * 1000)
+                logger.exception(
+                    'Tool [%s] XATO: user=%s — %s (%dms)',
+                    tool_name, user.id, e, duration_ms,
+                )
                 from apps.integrations.errors import integration_error_dict
                 service = 'flight' if tool_name == 'search_flights' else 'generic'
                 result = integration_error_dict(e, service=service, lang=lang)
@@ -438,7 +590,10 @@ class AIAssistantService:
                 log_entry.status = AIActionLog.ActionStatus.FAILED
                 log_entry.error_message = str(e)
 
+            log_entry.duration_ms = duration_ms
             log_entry.save()
+            if timer:
+                timer.add(f'tool:{tool_name}', duration_ms, ok=(log_entry.status == AIActionLog.ActionStatus.SUCCESS))
             results.append({
                 'tool_use_id': call['id'],
                 'tool_name':   tool_name,
@@ -476,27 +631,72 @@ class AIAssistantService:
     def _update_session_entity_state(
         self, session: ConversationSession, tool_name: str, tool_input: dict, result: dict
     ):
+        """
+        Oxirgi qidiruv natijalarini Redis'ga saqlaydi (1 soat).
+        `_build_session_summary()` orqali bu state keyingi AI chaqiruviga
+        system prompt ichida ko'rsatiladi.
+
+        MUHIM: bu yerda saqlanadigan `offer_id` / `branch_id` / `package_id`
+        larsiz AI foydalanuvchi "2" yoki "ikkinchisini oling" deganda
+        qaysi variantni nazarda tutayotganini bila olmaydi — natijada
+        qayta search_flights chaqirib, xuddi shu ro'yxatni takror
+        qaytaradi (bir xil javob muammosi shu yerdan kelib chiqadi).
+        """
+        if not isinstance(result, dict):
+            return
         state_key = f"ai_tool_state:{session.id}"
         state = cache.get(state_key) or {}
 
         if tool_name == 'search_flights':
+            # DIQQAT: handle_search_flights natijasi 'offers' deb qaytaradi,
+            # 'flights' emas — avvalgi versiyada shu sabab count doim 0 edi.
+            offers = result.get('offers') or []
             state['last_flight_search'] = {
                 'origin': tool_input.get('origin'),
                 'destination': tool_input.get('destination'),
                 'departure_at': tool_input.get('departure_at'),
-                'count': len(result.get('flights', [])) if isinstance(result, dict) else 0,
+                'count': len(offers),
+                # Foydalanuvchi raqam bilan tanlaganda AI shu ro'yxatdan
+                # to'g'ridan-to'g'ri offer_id topib book_flight chaqiradi.
+                'offers': [
+                    {
+                        'index':    i + 1,
+                        'offer_id': o.get('offer_id'),
+                        'airline':  o.get('airline'),
+                        'flight_number': o.get('flight_number'),
+                        'price':    o.get('price'),
+                        'currency': o.get('currency'),
+                    }
+                    for i, o in enumerate(offers[:10])
+                ],
             }
         elif tool_name == 'search_restaurants':
+            # handle_search_restaurants natijasi 'results' deb qaytaradi.
+            branches = result.get('results') or []
             state['last_restaurant_search'] = {
-                'query': tool_input.get('query'),
+                'city': tool_input.get('city'),
                 'date': tool_input.get('date'),
-                'count': len(result.get('restaurants', [])) if isinstance(result, dict) else 0,
+                'count': len(branches),
+                'branches': [
+                    {
+                        'index':     i + 1,
+                        'branch_id': b.get('branch_id'),
+                        'name':      b.get('name'),
+                    }
+                    for i, b in enumerate(branches[:10])
+                ],
             }
         elif tool_name == 'search_tour_packages':
+            # handle_search_tour_packages natijasi ham 'results' deb qaytaradi.
+            packages = result.get('results') or []
             state['last_tour_search'] = {
                 'destination': tool_input.get('destination'),
                 'query': tool_input.get('query'),
-                'count': len(result.get('packages', [])) if isinstance(result, dict) else 0,
+                'count': len(packages),
+                'packages': [
+                    {'index': i + 1, 'package_id': p.get('package_id') or p.get('id')}
+                    for i, p in enumerate(packages[:10])
+                ],
             }
         elif tool_name in WRITE_TOOL_TO_ACTION:
             state['last_write_action'] = {

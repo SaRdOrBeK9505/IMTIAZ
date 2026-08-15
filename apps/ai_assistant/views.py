@@ -57,6 +57,10 @@ class ChatView(APIView):
                 str(serializer.validated_data['session_id'])
                 if serializer.validated_data.get('session_id') else None
             ),
+            # RequestLoggingMiddleware o'rnatgan request_id — shu orqali
+            # "API POST /api/ai/chat/ → 200 [842ms]" logi va "AI chat timing"
+            # logi bitta so'rov ekanini bir xil request_id orqali bilib olamiz.
+            request_id=getattr(request, 'request_id', ''),
         )
         return Response({'success': True, **result})
 

@@ -142,6 +142,19 @@ class AIActionLog(BaseModel):
         null=True, blank=True,
         help_text='needs_confirmation holati uchun muddat (5 daqiqa)'
     )
+    # Ushbu aniq harakat (tool chaqiruvi, AI so'rovi) qancha vaqt olgani (ms)
+    duration_ms = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Ushbu harakat necha millisekund davom etgani'
+    )
+    # Bitta HTTP so'rov (bitta /api/ai/chat/ chaqiruvi) ichidagi barcha
+    # qadamlarni (AI chaqiruvi + har bir tool) bir-biriga bog'lash uchun.
+    # RequestLoggingMiddleware dagi request_id bilan mos keladi — shu orqali
+    # log fayl va DB yozuvlarini bitta so'rov bo'yicha birlashtirish mumkin.
+    request_id = models.CharField(
+        max_length=36, blank=True, default='',
+        help_text='HTTP so\'rov request_id (logging_middleware bilan bogʻlash uchun)'
+    )
 
     class Meta:
         verbose_name = 'AI harakat logi'
@@ -150,6 +163,7 @@ class AIActionLog(BaseModel):
         indexes = [
             models.Index(fields=['user', 'action_type', 'created_at']),
             models.Index(fields=['status', 'created_at']),
+            models.Index(fields=['request_id']),
         ]
 
     def __str__(self):

@@ -29,6 +29,15 @@ class ChatResponseSerializer(serializers.Serializer):
             "content maydoni tasdiqlash savolini o'z ichiga oladi."
         )
     )
+    timing = serializers.DictField(
+        required=False,
+        help_text=(
+            "Debug/diagnostika uchun: bu so'rov ichidagi har bir qadam "
+            "(tarix yuklash, AI chaqiruvi, har bir tool) necha ms olganini "
+            "ko'rsatadi. Masalan: {'request_id': 'e8b6...', 'total_ms': 842, "
+            "'steps': [{'step': 'provider_call', 'duration_ms': 610, 'ok': true}, ...]}"
+        ),
+    )
 
 
 class ConversationMessageSerializer(serializers.ModelSerializer):
