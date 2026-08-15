@@ -23,7 +23,7 @@ from django.core.cache import cache
 
 from .confirmation import create_pending_action, requires_confirmation
 from .i18n import build_confirmation_summary, build_system_prompt, resolve_language, t
-from .models import ConversationSession, ConversationMessage, AIActionLog
+from .models import ConversationSession, ConversationMessage, AIActionLog, UserAIProfile
 from .providers.base import BaseAIProvider, AIMessage
 from .response_builder import (
     build_reply_from_tools,
@@ -41,105 +41,27 @@ WRITE_TOOL_TO_ACTION: dict[str, tuple[str, str]] = {
     'cancel_booking':   ('cancel', ''),
 }
 
+CACHEABLE_TOOLS = {
+    'search_flights',
+    'search_restaurants',
+    'search_events',
+    'search_tour_packages',
+}
 
-def get_ai_provider(complexity: str = 'standard') -> BaseAIProvider:
-    """
-    AI provider va model tanlash — so'rov murakkabligiga qarab routing.
 
-    complexity='standard' → gemini-flash  (tezkor: qidiruv, bron, oddiy chat)
-    complexity='deep'     → gemini-pro    (chuqur: umumiy savol, murakkab tahlil)
-
-    Claude provider tanlangan bo'lsa — complexity e'tiborga olinmaydi.
-    """
+def get_ai_provider() -> BaseAIProvider:
     name = getattr(settings, 'AI_PROVIDER', 'gemini').lower()
     if name == 'claude':
         from .providers.claude_provider import ClaudeProvider
         return ClaudeProvider()
-
     from .providers.gemini_provider import GeminiProvider
-    if complexity == 'deep':
-        model = getattr(settings, 'GEMINI_MODEL_PRO', 'gemini-2.5-pro')
-        logger.debug('Model routing: deep → %s', model)
-        return GeminiProvider(model=model)
-
-    model = getattr(settings, 'GEMINI_MODEL', 'gemini-2.5-flash')
-    logger.debug('Model routing: standard → %s', model)
-    return GeminiProvider(model=model)
-
-
-def detect_query_complexity(message: str) -> str:
-    """
-    Xabar matnidan so'rov murakkabligini aniqlash.
-
-    'deep'     → pro model kerak: mavzudan tashqari, tahlil, maslahat
-    'standard' → flash yetarli: qidiruv, bron, oddiy savol
-
-    Mantiq: agar xabar tool chaqirishga o'xshamasa (ya'ni
-    parvoz/restoran/tur so'rovi emas) — pro modelga yuborish
-    sifatni sezilarli oshiradi.
-    """
-    msg = (message or '').lower().strip()
-    if not msg:
-        return 'standard'
-
-    # Tool chaqiruvchi kalit so'zlar — flash yetarli
-    TOOL_HINTS = {
-        # Parvoz
-        'parvoz', 'chipta', 'aviachipta', 'рейс', 'авиабилет', 'flight', 'ticket',
-        'uchish', 'uchmoq', 'uchamiz', 'uchaman',
-        # Restoran
-        'restoran', 'stol', 'ресторан', 'столик', 'restaurant', 'table',
-        'bron', 'rezerv', 'band qil',
-        # Tur
-        'tur', 'sayohat', 'тур', 'турпакет', 'tour', 'travel', 'paket',
-        # Qidiruv
-        'qidir', 'izla', 'топ', 'найди', 'search', 'find',
-        # Bronlar
-        'mening bronlar', 'мои брон', 'my booking',
-    }
-    if any(hint in msg for hint in TOOL_HINTS):
-        return 'standard'
-
-    # Uzunligi qisqa salomlashish — flash
-    if len(msg) < 30:
-        greetings = {
-            'salom', 'assalom', 'привет', 'здравствуйте', 'hello', 'hi',
-            'xayr', 'rahmat', 'спасибо', 'thanks',
-        }
-        words = set(msg.split())
-        if words & greetings:
-            return 'standard'
-
-    # Murakkab/mavzudan tashqari savollar — pro kerak
-    DEEP_HINTS = {
-        # Sug'urta, yo'l yordami
-        'sug\'urta', 'страховка', 'insurance', 'эвакуатор', 'evacuator',
-        'yo\'l yordam', 'дорожная помощь', 'roadside',
-        # Maslahat, tahlil
-        'maslahat', 'совет', 'advice', 'tavsiya', 'рекомендация',
-        'nima qilay', 'что делать', 'what should',
-        # Tushuntirish
-        'nima', 'почему', 'why', 'qanday qilib', 'как', 'how',
-        'tushuntir', 'объясни', 'explain',
-        # Nisbatan uzun savol (ko'pincha murakkab)
-    }
-    if any(hint in msg for hint in DEEP_HINTS) or len(msg) > 120:
-        return 'deep'
-
-    return 'standard'
+    return GeminiProvider()
 
 
 class AIAssistantService:
 
     def __init__(self, provider: BaseAIProvider | None = None):
-        # provider tashqaridan berilmasa — har chaqiruvda routing qayta aniqlanadi
-        self._fixed_provider = provider
-
-    def _get_provider(self, complexity: str = 'standard') -> BaseAIProvider:
-        """Murakkablikka qarab to'g'ri provider qaytaradi."""
-        if self._fixed_provider is not None:
-            return self._fixed_provider
-        return get_ai_provider(complexity)
+        self.provider = provider or get_ai_provider()
 
     def get_or_create_session(
         self, user, session_id: str | None = None
@@ -203,31 +125,51 @@ class AIAssistantService:
         )
 
         history = self._load_history(session)
+        user_profile_summary = self._build_user_profile_summary(user)
         session_summary = self._build_session_summary(session)
         system  = build_system_prompt(
             lang=lang,
             price_limit=f"{user.ai_auto_price_limit:,.0f}",
             autonomy_level=user.ai_autonomy_level,
             session_summary=session_summary,
+            user_profile_summary=user_profile_summary,
         )
         tools = get_all_tools()
 
-        # Murakkablikni aniqlash — qaysi model ishlatilishini belgilaydi
-        complexity = detect_query_complexity(message)
-        provider   = self._get_provider(complexity)
-        use_thinking = (complexity == 'deep')
+        # AI chaqiruvi (timing + optional streaming)
+        import time
+        from apps.ai_assistant.providers.base import AIResponse as ProviderAIResponse
 
-        logger.info(
-            'AI routing: complexity=%s, model=%s, thinking=%s, user=%s',
-            complexity, provider.get_model_name(), use_thinking, user.id,
-        )
-
-        # Birinchi AI chaqiruvi
         try:
-            ai_response = provider.chat(
-                messages=history, tools=tools, system=system,
-                use_thinking=use_thinking,
-            )
+            start_ts = time.time()
+            if getattr(settings, 'AI_ENABLE_STREAMING', False) and hasattr(self.provider, 'chat_stream'):
+                chunks = []
+                tool_calls = []
+                tokens_used = 0
+                raw = None
+                for part in self.provider.chat_stream(messages=history, tools=tools, system=system):
+                    if isinstance(part, dict) and part.get('__final'):
+                        tokens_used = part.get('tokens_used', 0)
+                        tool_calls = part.get('tool_calls', []) or []
+                        raw = part.get('raw')
+                    else:
+                        chunks.append(str(part))
+                content = ''.join(chunks)
+                ai_response = ProviderAIResponse(content=content, tool_calls=tool_calls, tokens_used=tokens_used, raw=raw)
+            else:
+                ai_response = self.provider.chat(messages=history, tools=tools, system=system)
+            end_ts = time.time()
+            latency_ms = int((end_ts - start_ts) * 1000)
+            # Audit log for AI call latency/tokens
+            try:
+                AIActionLog.objects.create(
+                    user=user,
+                    session=session,
+                    action_type=AIActionLog.ActionType.INFO_REQUEST,
+                    payload={'message': message, 'tokens_used': getattr(ai_response, 'tokens_used', 0), 'latency_ms': latency_ms},
+                )
+            except Exception:
+                logger.exception('AIActionLog yaratishda xato')
         except Exception as e:
             logger.exception('AI provider xatosi: %s', e)
             err = t('ai_provider_error', lang)
@@ -239,7 +181,7 @@ class AIAssistantService:
                 action_type=AIActionLog.ActionType.INFO_REQUEST,
                 payload={'message': message},
                 status=AIActionLog.ActionStatus.FAILED,
-                error_message=f"{type(e).__name__}: {e}",
+                error_message=str(e),
             )
             return {
                 'session_id': str(session.id),
@@ -283,9 +225,6 @@ class AIAssistantService:
                             {
                                 'type':        'tool_result',
                                 'tool_use_id': r['tool_use_id'],
-                                # tool_name — Gemini _build_contents uchun zarur
-                                # (function_response.name sifatida ishlatiladi)
-                                'tool_name':   r.get('tool_name', 'unknown_tool'),
                                 'content':     json.dumps(
                                     trim_tool_result_for_ai(r['result']),
                                     ensure_ascii=False,
@@ -296,12 +235,10 @@ class AIAssistantService:
                     ),
                 ]
                 try:
-                    # Ikkinchi chaqiruvda doim flash (tool natijasini qayta ishlash — oddiy)
-                    followup_provider = self._get_provider('standard')
-                    final_resp = followup_provider.chat(
+                    final_resp = self.provider.chat(
                         messages=history + tool_msgs,
                         tools=tools, system=system,
-                        max_tokens=getattr(settings, 'AI_FOLLOWUP_MAX_TOKENS', 1024),
+                        max_tokens=getattr(settings, 'AI_FOLLOWUP_MAX_TOKENS', 512),
                     )
                     final_content = (
                         final_resp.content
@@ -326,6 +263,8 @@ class AIAssistantService:
             session.title = message[:80]
             session.save(update_fields=['title', 'updated_at'])
 
+        self._refresh_user_ai_profile(user, session)
+
         return {
             'session_id':            str(session.id),
             'message_id':            str(msg.id),
@@ -339,7 +278,7 @@ class AIAssistantService:
     # ── Ichki metodlar ────────────────────────────────────────────────────────
 
     def _load_history(self, session: ConversationSession) -> list[AIMessage]:
-        limit = getattr(settings, 'AI_HISTORY_LIMIT', 12)
+        limit = getattr(settings, 'AI_HISTORY_LIMIT', 8)
         rows = (
             session.messages
             .order_by('-created_at')
@@ -350,6 +289,65 @@ class AIAssistantService:
             AIMessage(role=r['role'], content=r['content'])
             for r in reversed(list(rows))
         ]
+
+    def _build_user_profile_summary(self, user) -> str:
+        profile, _ = UserAIProfile.objects.get_or_create(user=user)
+        return (profile.summary_text or '').strip()
+
+    def _refresh_user_ai_profile(self, user, session: ConversationSession) -> None:
+        profile, _ = UserAIProfile.objects.get_or_create(user=user)
+
+        recent_logs = list(
+            AIActionLog.objects.filter(user=user).order_by('-created_at')[:25]
+        )
+        list_of_destinations: list[str] = []
+        preferred_seat_class = profile.preferred_seat_class
+        preferred_cuisine = profile.preferred_cuisine
+
+        for log in recent_logs:
+            payload = log.payload or {}
+            seat_class = payload.get('seat_class') or payload.get('class')
+            if seat_class and not preferred_seat_class:
+                preferred_seat_class = str(seat_class).lower()
+
+            cuisine = payload.get('cuisine') or payload.get('meal_type')
+            if cuisine and not preferred_cuisine:
+                preferred_cuisine = str(cuisine)
+
+            for key in ('destination', 'city', 'origin', 'query'):
+                value = payload.get(key)
+                if value:
+                    cleaned = str(value).strip()
+                    if cleaned:
+                        list_of_destinations.append(cleaned)
+
+        destinations = []
+        seen = set()
+        for value in list_of_destinations:
+            normalized = value.replace('_', ' ').strip()
+            if normalized and normalized.lower() not in seen:
+                seen.add(normalized.lower())
+                destinations.append(normalized)
+
+        if profile.preferred_seat_class != preferred_seat_class:
+            profile.preferred_seat_class = preferred_seat_class or profile.preferred_seat_class
+        if profile.preferred_cuisine != preferred_cuisine:
+            profile.preferred_cuisine = preferred_cuisine or profile.preferred_cuisine
+        if profile.frequent_destinations != destinations[:5]:
+            profile.frequent_destinations = destinations[:5]
+
+        parts = []
+        if profile.preferred_seat_class:
+            parts.append(f"Foydalanuvchi odatda {profile.preferred_seat_class} klassini tanlaydi.")
+        if profile.preferred_cuisine:
+            parts.append(f"U {profile.preferred_cuisine} taomlaridan ko'proq foydalangan.")
+        if profile.frequent_destinations:
+            parts.append(
+                "Ko'pincha " + ', '.join(profile.frequent_destinations[:3]) + " yo'nalishlariga qiziqadi."
+            )
+
+        profile.summary_text = ' '.join(parts)
+        profile.save(update_fields=['preferred_seat_class', 'preferred_cuisine', 'frequent_destinations', 'summary_text', 'updated_at'])
 
     def _execute_tool_calls(
         self,
@@ -394,10 +392,15 @@ class AIAssistantService:
                     # Keyingi tool'larni BAJARMAY to'xtatamiz
                     return [], str(log.id), summary
 
-            # Idempotency tekshiruvi: 120 sek ichida bir xil tool_input bo'lsa cache'dan qaytarish
-            input_hash = hashlib.md5(json.dumps(tool_input, sort_keys=True).encode('utf-8')).hexdigest()
-            idempotency_key = f"ai_tool_idempotency:{session.id}:{tool_name}:{input_hash}"
-            cached_result = cache.get(idempotency_key)
+            # Idempotency tekshiruvi: faqat cacheable external tool'lar uchun ishlaydi.
+            cached_result = None
+            idempotency_key = None
+            if tool_name in CACHEABLE_TOOLS:
+                input_hash = hashlib.md5(
+                    json.dumps(tool_input, sort_keys=True).encode('utf-8')
+                ).hexdigest()
+                idempotency_key = f"ai_tool_idempotency:{session.id}:{tool_name}:{input_hash}"
+                cached_result = cache.get(idempotency_key)
 
             if cached_result is not None:
                 logger.info('Tool [%s] idempotency hit: session=%s', tool_name, session.id)
@@ -422,7 +425,8 @@ class AIAssistantService:
                 )
                 log_entry.result = result
                 log_entry.status = AIActionLog.ActionStatus.SUCCESS
-                cache.set(idempotency_key, result, timeout=120)
+                if idempotency_key:
+                    cache.set(idempotency_key, result, timeout=120)
                 self._update_session_entity_state(session, tool_name, tool_input, result)
                 logger.info('Tool [%s] OK: user=%s', tool_name, user.id)
             except Exception as e:
@@ -462,6 +466,10 @@ class AIAssistantService:
         if state_data and isinstance(state_data, dict):
             state_lines = [f"- {k}: {v}" for k, v in state_data.items()]
             parts.append("Saqlangan ob'ektlar state:\n" + "\n".join(state_lines))
+
+        user_profile_summary = self._build_user_profile_summary(session.user)
+        if user_profile_summary:
+            parts.append("Doimiy foydalanuvchi profili:\n" + user_profile_summary)
 
         return "\n\n".join(parts)
 
