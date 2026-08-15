@@ -42,19 +42,104 @@ WRITE_TOOL_TO_ACTION: dict[str, tuple[str, str]] = {
 }
 
 
-def get_ai_provider() -> BaseAIProvider:
+def get_ai_provider(complexity: str = 'standard') -> BaseAIProvider:
+    """
+    AI provider va model tanlash — so'rov murakkabligiga qarab routing.
+
+    complexity='standard' → gemini-flash  (tezkor: qidiruv, bron, oddiy chat)
+    complexity='deep'     → gemini-pro    (chuqur: umumiy savol, murakkab tahlil)
+
+    Claude provider tanlangan bo'lsa — complexity e'tiborga olinmaydi.
+    """
     name = getattr(settings, 'AI_PROVIDER', 'gemini').lower()
     if name == 'claude':
         from .providers.claude_provider import ClaudeProvider
         return ClaudeProvider()
+
     from .providers.gemini_provider import GeminiProvider
-    return GeminiProvider()
+    if complexity == 'deep':
+        model = getattr(settings, 'GEMINI_MODEL_PRO', 'gemini-2.5-pro')
+        logger.debug('Model routing: deep → %s', model)
+        return GeminiProvider(model=model)
+
+    model = getattr(settings, 'GEMINI_MODEL', 'gemini-2.5-flash')
+    logger.debug('Model routing: standard → %s', model)
+    return GeminiProvider(model=model)
+
+
+def detect_query_complexity(message: str) -> str:
+    """
+    Xabar matnidan so'rov murakkabligini aniqlash.
+
+    'deep'     → pro model kerak: mavzudan tashqari, tahlil, maslahat
+    'standard' → flash yetarli: qidiruv, bron, oddiy savol
+
+    Mantiq: agar xabar tool chaqirishga o'xshamasa (ya'ni
+    parvoz/restoran/tur so'rovi emas) — pro modelga yuborish
+    sifatni sezilarli oshiradi.
+    """
+    msg = (message or '').lower().strip()
+    if not msg:
+        return 'standard'
+
+    # Tool chaqiruvchi kalit so'zlar — flash yetarli
+    TOOL_HINTS = {
+        # Parvoz
+        'parvoz', 'chipta', 'aviachipta', 'рейс', 'авиабилет', 'flight', 'ticket',
+        'uchish', 'uchmoq', 'uchamiz', 'uchaman',
+        # Restoran
+        'restoran', 'stol', 'ресторан', 'столик', 'restaurant', 'table',
+        'bron', 'rezerv', 'band qil',
+        # Tur
+        'tur', 'sayohat', 'тур', 'турпакет', 'tour', 'travel', 'paket',
+        # Qidiruv
+        'qidir', 'izla', 'топ', 'найди', 'search', 'find',
+        # Bronlar
+        'mening bronlar', 'мои брон', 'my booking',
+    }
+    if any(hint in msg for hint in TOOL_HINTS):
+        return 'standard'
+
+    # Uzunligi qisqa salomlashish — flash
+    if len(msg) < 30:
+        greetings = {
+            'salom', 'assalom', 'привет', 'здравствуйте', 'hello', 'hi',
+            'xayr', 'rahmat', 'спасибо', 'thanks',
+        }
+        words = set(msg.split())
+        if words & greetings:
+            return 'standard'
+
+    # Murakkab/mavzudan tashqari savollar — pro kerak
+    DEEP_HINTS = {
+        # Sug'urta, yo'l yordami
+        'sug\'urta', 'страховка', 'insurance', 'эвакуатор', 'evacuator',
+        'yo\'l yordam', 'дорожная помощь', 'roadside',
+        # Maslahat, tahlil
+        'maslahat', 'совет', 'advice', 'tavsiya', 'рекомендация',
+        'nima qilay', 'что делать', 'what should',
+        # Tushuntirish
+        'nima', 'почему', 'why', 'qanday qilib', 'как', 'how',
+        'tushuntir', 'объясни', 'explain',
+        # Nisbatan uzun savol (ko'pincha murakkab)
+    }
+    if any(hint in msg for hint in DEEP_HINTS) or len(msg) > 120:
+        return 'deep'
+
+    return 'standard'
 
 
 class AIAssistantService:
 
     def __init__(self, provider: BaseAIProvider | None = None):
-        self.provider = provider or get_ai_provider()
+        # provider tashqaridan berilmasa — har chaqiruvda routing qayta aniqlanadi
+        self._fixed_provider = provider
+
+    def _get_provider(self, complexity: str = 'standard') -> BaseAIProvider:
+        """Murakkablikka qarab to'g'ri provider qaytaradi."""
+        if self._fixed_provider is not None:
+            return self._fixed_provider
+        return get_ai_provider(complexity)
 
     def get_or_create_session(
         self, user, session_id: str | None = None
@@ -127,10 +212,21 @@ class AIAssistantService:
         )
         tools = get_all_tools()
 
-        # AI chaqiruvi
+        # Murakkablikni aniqlash — qaysi model ishlatilishini belgilaydi
+        complexity = detect_query_complexity(message)
+        provider   = self._get_provider(complexity)
+        use_thinking = (complexity == 'deep')
+
+        logger.info(
+            'AI routing: complexity=%s, model=%s, thinking=%s, user=%s',
+            complexity, provider.get_model_name(), use_thinking, user.id,
+        )
+
+        # Birinchi AI chaqiruvi
         try:
-            ai_response = self.provider.chat(
+            ai_response = provider.chat(
                 messages=history, tools=tools, system=system,
+                use_thinking=use_thinking,
             )
         except Exception as e:
             logger.exception('AI provider xatosi: %s', e)
@@ -200,10 +296,12 @@ class AIAssistantService:
                     ),
                 ]
                 try:
-                    final_resp = self.provider.chat(
+                    # Ikkinchi chaqiruvda doim flash (tool natijasini qayta ishlash — oddiy)
+                    followup_provider = self._get_provider('standard')
+                    final_resp = followup_provider.chat(
                         messages=history + tool_msgs,
                         tools=tools, system=system,
-                        max_tokens=getattr(settings, 'AI_FOLLOWUP_MAX_TOKENS', 512),
+                        max_tokens=getattr(settings, 'AI_FOLLOWUP_MAX_TOKENS', 1024),
                     )
                     final_content = (
                         final_resp.content

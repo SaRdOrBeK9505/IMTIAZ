@@ -37,12 +37,16 @@ def can_reply_without_ai(tool_results: list[dict]) -> bool:
 
 def should_use_local_reply(tool_results: list[dict], user_message: str, lang: str) -> bool:
     """
-    Ikkinchi AI chaqiruvsiz javob berish mumkinmi?
-    Batafsil/vaqt so'rovlari va murakkab turlar uchun LLM kerak.
+    Ikkinchi AI chaqiruvsiz local-shablon bilan javob berish mumkinmi?
 
-    get_user_preferences — har doim Gemini'ga yakuniy javob yozdiriladi,
-    chunki bu tool kontekstga bog'liq savollarda ("meni taniysanmi",
-    "nima deganding bu") ham chaqiriladi va shablon javob noto'g'ri bo'ladi.
+    Strategiya — faqat eng oddiy, ro'yxat-tipidagi natijalar uchun shablon.
+    Qolgan barcha holatlar (shaxsiy ma'lumot, bronlar, afzalliklar,
+    bo'sh natija, murakkab kontekst) uchun Gemini o'zi jonli javob yozadi.
+
+    Nima uchun muhim:
+      - get_user_preferences, get_user_bookings — shaxsiy, kontekstga bog'liq
+      - search_tour_packages — bo'sh natijada partner/yo'nalish taklif kerak
+      - Umumiy qoida: AI javob berishi > shablon, faqat token/tezlik sabab cheklanadi
     """
     from django.conf import settings
 
@@ -53,11 +57,12 @@ def should_use_local_reply(tool_results: list[dict], user_message: str, lang: st
     if normalize_language(lang) != 'uz':
         return False
 
-    # get_user_preferences bo'lsa — har doim LLM o'zi tabiiy javob yozsin.
-    # Shablon "Sizda X ta bron..." kabi javob noto'g'ri kontekstda ko'rinishi mumkin.
-    for item in tool_results:
-        if item.get('tool_name') == 'get_user_preferences':
-            return False
+    # Faqat ro'yxat-tipidagi oddiy tool'lar uchun shablon ruxsat etiladi.
+    # Shaxsiy/kontekstga bog'liq tool'lar (preferences, bookings) — har doim AI orqali.
+    SIMPLE_LIST_TOOLS = {'search_flights', 'search_restaurants', 'search_events', 'search_trains'}
+    tool_names = {item.get('tool_name') for item in tool_results}
+    if not tool_names.issubset(SIMPLE_LIST_TOOLS):
+        return False
 
     msg = (user_message or '').lower()
     detail_keywords = (
@@ -68,10 +73,13 @@ def should_use_local_reply(tool_results: list[dict], user_message: str, lang: st
     if any(kw in msg for kw in detail_keywords):
         return False
 
+    # Ro'yxat bo'sh bo'lsa — AI alternativa taklif qilsin
     for item in tool_results:
-        name = item.get('tool_name', '')
         result = item.get('result') or {}
-        if name == 'search_tour_packages' and not result.get('results'):
+        has_results = (
+            result.get('offers') or result.get('results') or result.get('flights')
+        )
+        if not has_results:
             return False
 
     return True

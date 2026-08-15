@@ -54,7 +54,15 @@ class GeminiProvider(BaseAIProvider):
         tools: list[dict] | None = None,
         system: str | None = None,
         max_tokens: int | None = None,
+        use_thinking: bool = False,
     ) -> AIResponse:
+        """
+        Gemini bilan suhbat.
+
+        use_thinking=True: pro model uchun thinking_config yoqiladi.
+        MUHIM: Gemini API'da thinking va tool-calling birgalikda
+        ishlamaydi — thinking faqat tool=None holatida qo'llanadi.
+        """
         from google.genai import types
 
         if max_tokens is None:
@@ -62,9 +70,14 @@ class GeminiProvider(BaseAIProvider):
 
         gemini_contents = self._build_contents(messages, types)
 
+        # Pro model uchun yuqori temperature — ijodiyroq, tabiiyroq javob
+        temperature = getattr(settings, 'AI_TEMPERATURE', 0.3)
+        if use_thinking:
+            temperature = max(temperature, 0.5)
+
         config_kwargs: dict = {
             'max_output_tokens': max_tokens,
-            'temperature': getattr(settings, 'AI_TEMPERATURE', 0.2),
+            'temperature': temperature,
             # Concierge-bot uchun me'yoriy xavfsizlik darajasi —
             # "avariya", "shifoxona", "og'riq", "страховка", "эвакуатор" kabi so'zlar
             # noto'g'ri bloklanmasin. BLOCK_ONLY_HIGH — faqat aniq zararli kontent bloklanadi.
@@ -87,6 +100,18 @@ class GeminiProvider(BaseAIProvider):
 
         if tools:
             config_kwargs['tools'] = [self._convert_tools(tools, types)]
+        elif use_thinking:
+            # Thinking faqat tool yo'q holatlarda qo'llanadi (Gemini API cheklovi)
+            thinking_budget = getattr(settings, 'AI_THINKING_BUDGET', 1024)
+            if thinking_budget > 0:
+                try:
+                    config_kwargs['thinking_config'] = types.ThinkingConfig(
+                        thinking_budget=thinking_budget,
+                    )
+                    logger.debug('Gemini thinking yoqildi: budget=%s', thinking_budget)
+                except Exception:
+                    # ThinkingConfig ushbu model versiyasida qo'llab-quvvatlanmasligi mumkin
+                    logger.debug('Gemini ThinkingConfig mavjud emas, o\'tkazib yuborildi')
 
         config = types.GenerateContentConfig(**config_kwargs)
 

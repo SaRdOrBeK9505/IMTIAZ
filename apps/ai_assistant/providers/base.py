@@ -33,10 +33,12 @@ class BaseAIProvider(ABC):
         tools: list[dict] | None = None,
         system: str | None = None,
         max_tokens: int = 4096,
+        use_thinking: bool = False,
     ) -> AIResponse:
         """
         Xabarlar ro'yxatini yuboradi va AI javobini qaytaradi.
         tools — Claude function-calling uchun tool ta'riflari ro'yxati.
+        use_thinking — murakkab savollarda extended reasoning (Gemini Pro).
         """
         ...
 
