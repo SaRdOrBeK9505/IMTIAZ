@@ -75,8 +75,10 @@ class GeminiProvider(BaseAIProvider):
         if use_thinking:
             temperature = max(temperature, 0.5)
 
+        # Qo'shimcha: maksimal chiqish tokenlarini sozlash (global cap)
+        max_output_cap = getattr(settings, 'AI_MAX_OUTPUT_TOKENS', 400)
         config_kwargs: dict = {
-            'max_output_tokens': max_tokens,
+            'max_output_tokens': min(max_tokens, max_output_cap),
             'temperature': temperature,
             # Concierge-bot uchun me'yoriy xavfsizlik darajasi —
             # "avariya", "shifoxona", "og'riq", "страховка", "эвакуатор" kabi so'zlar
@@ -324,3 +326,30 @@ def _map_type(json_type: str, types):
         'object':  types.Type.OBJECT,
     }
     return mapping.get(json_type, types.Type.STRING)
+
+
+# Streaming fallback utilities
+def _chunked_text_generator(text: str, chunk_size: int):
+    for i in range(0, len(text), chunk_size):
+        yield text[i:i+chunk_size]
+
+
+def provider_chat_stream(provider, messages, tools=None, system=None, max_tokens=None, use_thinking=False):
+    """Unified streaming helper used by services.py.
+
+    If the provider implements chat_stream(), use it. Otherwise call chat()
+    and yield the content in chunks as a fallback (improves perceived latency).
+    """
+    # Prefer provider's native streaming if available
+    if hasattr(provider, 'chat_stream') and callable(getattr(provider, 'chat_stream')):
+        for chunk in provider.chat_stream(messages=messages, tools=tools, system=system, max_tokens=max_tokens, use_thinking=use_thinking):
+            yield chunk
+        return
+
+    # Fallback: single call then chunk
+    resp = provider.chat(messages=messages, tools=tools, system=system, max_tokens=max_tokens, use_thinking=use_thinking)
+    text = resp.content or ''
+    chunk_size = getattr(settings, 'AI_STREAM_CHUNK_SIZE', 120)
+    for part in _chunked_text_generator(text, chunk_size):
+        yield part
+    return

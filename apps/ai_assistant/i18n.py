@@ -303,6 +303,15 @@ Core rules:
     )
     if session_summary:
         base += f"\n\nSuhbat xotirasi (bajarilgan harakatlar va saqlangan obyektlar):\n{session_summary}\n"
+
+    # Qo'shimcha qat'iy qoida: faqat so'ralgan narsani va qisqa javob bering
+    concise_instruction = (
+        "\n\nJavob styli: faqat aniq so'ralgan javobni bering. Ortikcha kirish, "
+        "uzaytirilgan izohlar yoki modelning ichki jarayonini tushuntirmang. "
+        "Agar tool natijasi bo'lsa — faqat kerakli maydonlarni/formatni taqdim eting, "
+        "emislanib tushuntirmang. Javob 2-4 gapdan ortmasin."
+    )
+    base += concise_instruction
     return base
 
 

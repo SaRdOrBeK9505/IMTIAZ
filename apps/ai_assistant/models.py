@@ -64,6 +64,30 @@ class ConversationMessage(BaseModel):
         return f'[{self.role}] {self.content[:60]}'
 
 
+class UserAIProfile(BaseModel):
+    """Foydalanuvchiga xos doimiy AI xotira profili."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='ai_profile',
+    )
+    preferred_seat_class = models.CharField(max_length=20, blank=True)
+    preferred_cuisine = models.CharField(max_length=100, blank=True)
+    frequent_destinations = models.JSONField(default=list, blank=True)
+    summary_text = models.TextField(
+        blank=True,
+        help_text="AI tomonidan yozilgan qisqa xulosa (session'larni chetlab, doimiy profil)",
+    )
+
+    class Meta:
+        verbose_name = 'AI foydalanuvchi profili'
+        verbose_name_plural = 'AI foydalanuvchi profillari'
+
+    def __str__(self):
+        return f'{self.user} — AI profile'
+
+
 class AIActionLog(BaseModel):
     """
     AI tomonidan bajarilgan har bir harakat qayd etiladi.
