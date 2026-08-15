@@ -1,17 +1,34 @@
 """
 Google Gemini AI Provider implementatsiyasi.
 SDK: google-genai (yangi, rasmiy)  pip install google-genai
-Model: gemini-3.6-flash (settings.GEMINI_MODEL orqali o'zgartiriladi)
+Model: settings.GEMINI_MODEL orqali o'zgartiriladi
+
+O'zgarishlar (v2):
+  - _parse_response: bloklangan/bo'sh javobda AttributeError bo'lmaydi (SAFETY fix)
+  - safety_settings: BLOCK_ONLY_HIGH — "avariya", "shifoxona" kabi so'zlar bloklanmaydi
+  - Retry mexanizmi: 429/500/502/503/504 uchun 2 marta qayta urinadi
+  - _build_contents: tool_result ro'yxati Gemini function_response'ga to'g'ri o'giriladi
+  - _convert_tools: enum va description to'liq yuboriladi
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import time
+
 from django.conf import settings
 
 from .base import BaseAIProvider, AIMessage, AIResponse
 
 logger = logging.getLogger(__name__)
+
+# Vaqtinchalik (transient) xatolar — qayta urinish mumkin
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
+class GeminiProviderError(Exception):
+    """Barqaror (retry qilib bo'lmaydigan) Gemini xatosi."""
 
 
 class GeminiProvider(BaseAIProvider):
@@ -43,80 +60,196 @@ class GeminiProvider(BaseAIProvider):
         if max_tokens is None:
             max_tokens = getattr(settings, 'AI_MAX_TOKENS', 4096)
 
-        # Xabarlarni Gemini Content formatiga o'girish
-        gemini_contents = []
-        for msg in messages:
-            if msg.role == 'system':
-                continue  # system_instruction orqali beriladi
-            role    = 'user' if msg.role == 'user' else 'model'
-            content = msg.content if isinstance(msg.content, str) else str(msg.content)
-            gemini_contents.append(
-                types.Content(role=role, parts=[types.Part(text=content)])
-            )
+        gemini_contents = self._build_contents(messages, types)
 
-        # Config
         config_kwargs: dict = {
             'max_output_tokens': max_tokens,
             'temperature': getattr(settings, 'AI_TEMPERATURE', 0.2),
+            # Concierge-bot uchun me'yoriy xavfsizlik darajasi —
+            # "avariya", "shifoxona", "og'riq", "страховка", "эвакуатор" kabi so'zlar
+            # noto'g'ri bloklanmasin. BLOCK_ONLY_HIGH — faqat aniq zararli kontent bloklanadi.
+            'safety_settings': [
+                types.SafetySetting(
+                    category=cat,
+                    threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                )
+                for cat in (
+                    types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                    types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                    types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                    types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                )
+            ],
         }
 
         if system:
             config_kwargs['system_instruction'] = system
 
-        # Tool-calling: Gemini FunctionDeclaration
         if tools:
-            config_kwargs['tools'] = [self._convert_tools(tools)]
+            config_kwargs['tools'] = [self._convert_tools(tools, types)]
 
         config = types.GenerateContentConfig(**config_kwargs)
 
-        try:
-            response = self._client.models.generate_content(
-                model    = self.model,
-                contents = gemini_contents,
-                config   = config,
-            )
-        except Exception as e:
-            logger.exception('Gemini API xatosi: %s', e)
-            raise
+        response = self._call_with_retry(gemini_contents, config)
+        return self._parse_response(response)
 
-        # Javobni parse qilish
+    # ── Chaqiruv + retry ──────────────────────────────────────────────────────
+
+    def _call_with_retry(self, contents, config, max_attempts: int = 3):
+        """
+        Gemini API ga chaqiruv + eksponensial backoff.
+        Transient xatolar (429, 5xx, timeout) uchun qayta urinadi.
+        """
+        last_exc = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return self._client.models.generate_content(
+                    model=self.model, contents=contents, config=config,
+                )
+            except Exception as e:
+                status = getattr(e, 'status_code', None) or getattr(e, 'code', None)
+                is_retryable = (
+                    status in _RETRYABLE_STATUS
+                    or 'timeout' in str(e).lower()
+                    or 'rate' in str(e).lower()
+                )
+                logger.warning(
+                    'Gemini chaqiruv xatosi (attempt %s/%s, retryable=%s, status=%s): %s',
+                    attempt, max_attempts, is_retryable, status, e,
+                )
+                last_exc = e
+                if not is_retryable or attempt == max_attempts:
+                    break
+                time.sleep(0.6 * attempt)  # backoff: 0.6s, 1.2s
+
+        logger.exception('Gemini API — barcha urinishlar muvaffaqiyatsiz: %s', last_exc)
+        raise GeminiProviderError(str(last_exc)) from last_exc
+
+    # ── Javobni XAVFSIZ parse qilish ──────────────────────────────────────────
+
+    def _parse_response(self, response) -> AIResponse:
+        """
+        Gemini javobini AIResponse'ga o'girish.
+
+        MUHIM: candidate.content None bo'lishi mumkin —
+        SAFETY / RECITATION / OTHER finish_reason holatida.
+        Bu eski kodda AttributeError: 'NoneType' object has no attribute 'parts'
+        xatosini berardi. Endi toza content='' qaytariladi.
+        """
         text_content = ''
-        tool_calls   = []
+        tool_calls: list[dict] = []
 
-        candidate = response.candidates[0] if response.candidates else None
-        if candidate:
-            for part in (candidate.content.parts or []):
-                if part.text:
-                    text_content += part.text
-                elif part.function_call:
-                    fc = part.function_call
-                    tool_calls.append({
-                        'id':    f'gemini-{fc.name}',
-                        'name':  fc.name,
-                        'input': dict(fc.args) if fc.args else {},
-                    })
+        # candidates None yoki bo'sh bo'lishi mumkin
+        candidates = getattr(response, 'candidates', None)
+        candidate = candidates[0] if candidates else None
 
-        # Token hisoblash
+        if candidate is None:
+            logger.warning(
+                'Gemini: candidates bo\'sh qaytdi (prompt_feedback=%s)',
+                getattr(response, 'prompt_feedback', None),
+            )
+            return AIResponse(
+                content='', tool_calls=[], stop_reason='blocked', raw=response,
+            )
+
+        finish_reason = getattr(candidate, 'finish_reason', None)
+
+        # ASOSIY FIX: content None bo'lsa (SAFETY/RECITATION) — portlamasdan qaytamiz
+        if candidate.content is None or not getattr(candidate.content, 'parts', None):
+            logger.warning(
+                'Gemini: content bloklandi yoki bo\'sh (finish_reason=%s, '
+                'safety_ratings=%s)',
+                finish_reason,
+                getattr(candidate, 'safety_ratings', None),
+            )
+            return AIResponse(
+                content='',
+                tool_calls=[],
+                stop_reason=str(finish_reason),
+                raw=response,
+            )
+
+        for part in candidate.content.parts:
+            if getattr(part, 'text', None):
+                text_content += part.text
+            elif getattr(part, 'function_call', None):
+                fc = part.function_call
+                tool_calls.append({
+                    'id':    f'gemini-{fc.name}',
+                    'name':  fc.name,
+                    'input': dict(fc.args) if fc.args else {},
+                })
+
         try:
             tokens_used = (
-                response.usage_metadata.prompt_token_count +
-                response.usage_metadata.candidates_token_count
+                response.usage_metadata.prompt_token_count
+                + response.usage_metadata.candidates_token_count
             )
         except Exception:
             tokens_used = 0
 
         return AIResponse(
-            content     = text_content,
-            tool_calls  = tool_calls,
-            tokens_used = tokens_used,
-            stop_reason = 'end_turn',
-            raw         = response,
+            content=text_content,
+            tool_calls=tool_calls,
+            tokens_used=tokens_used,
+            stop_reason=str(finish_reason or 'end_turn'),
+            raw=response,
         )
 
+    # ── Xabarlarni Gemini formatiga o'girish ─────────────────────────────────
+
+    def _build_contents(self, messages: list[AIMessage], types):
+        """
+        AIMessage ro'yxatini Gemini Content ro'yxatiga o'girish.
+
+        Claude-uslub tool_result ro'yxati endi Gemini'ning
+        native function_response formatiga to'g'ri o'giriladi.
+        Oldin bu str() bilan oddiy matnga aylantirilardi — Gemini buni tushunmasdi.
+        """
+        contents = []
+        for msg in messages:
+            if msg.role == 'system':
+                continue  # system_instruction orqali beriladi
+
+            # Claude-uslub tool_result ro'yxati — Gemini function_response'ga o'girish
+            if isinstance(msg.content, list):
+                parts = []
+                for block in msg.content:
+                    if isinstance(block, dict) and block.get('type') == 'tool_result':
+                        raw = block.get('content')
+                        try:
+                            response_data = (
+                                json.loads(raw) if isinstance(raw, str) else raw
+                            )
+                        except (TypeError, ValueError):
+                            response_data = {'result': str(raw)}
+                        parts.append(
+                            types.Part.from_function_response(
+                                name=block.get('tool_name', 'unknown_tool'),
+                                response={'result': response_data},
+                            )
+                        )
+                if parts:
+                    contents.append(types.Content(role='user', parts=parts))
+                    continue
+
+            role    = 'user' if msg.role == 'user' else 'model'
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            contents.append(
+                types.Content(role=role, parts=[types.Part(text=content)])
+            )
+        return contents
+
+    # ── Tool sxemasini to'liq o'girish ───────────────────────────────────────
+
     @staticmethod
-    def _convert_tools(tools: list[dict]):
+    def _convert_tools(tools: list[dict], types):
         """
         Claude tool format → Gemini Tool formatiga o'girish.
+
+        O'zgarish: enum va description endi to'liq yuboriladi.
+        Oldin faqat type va description yuborilardi — model
+        seat_class, wagon_type kabi to'g'ri qiymatlarni bilmasdi.
 
         Claude format:
             {'name': '...', 'description': '...', 'input_schema': {...}}
@@ -124,46 +257,45 @@ class GeminiProvider(BaseAIProvider):
         Gemini format:
             Tool(function_declarations=[FunctionDeclaration(...)])
         """
-        from google.genai import types
-
         declarations = []
         for tool in tools:
             schema = tool.get('input_schema', {})
-
             properties = {}
+
             for prop_name, prop_val in schema.get('properties', {}).items():
-                prop_type = prop_val.get('type', 'string')
-                properties[prop_name] = types.Schema(
-                    type        = _map_type(prop_type),
-                    description = prop_val.get('description', ''),
-                )
+                kwargs: dict = {
+                    'type':        _map_type(prop_val.get('type', 'string'), types),
+                    'description': prop_val.get('description', ''),
+                }
+                # enum qiymatlarini ham yuboramiz — model aniq tanlashlari uchun
+                if 'enum' in prop_val:
+                    kwargs['enum'] = prop_val['enum']
+                properties[prop_name] = types.Schema(**kwargs)
 
             parameters = types.Schema(
-                type       = types.Type.OBJECT,
-                properties = properties,
-                required   = schema.get('required', []),
+                type=types.Type.OBJECT,
+                properties=properties,
+                required=schema.get('required', []),
             )
-
             declarations.append(
                 types.FunctionDeclaration(
-                    name        = tool['name'],
-                    description = tool.get('description', ''),
-                    parameters  = parameters,
+                    name=tool['name'],
+                    description=tool.get('description', ''),
+                    parameters=parameters,
                 )
             )
 
         return types.Tool(function_declarations=declarations)
 
 
-def _map_type(json_type: str):
+def _map_type(json_type: str, types):
     """JSON Schema type → Gemini Type."""
-    from google.genai.types import Type
     mapping = {
-        'string':  Type.STRING,
-        'integer': Type.INTEGER,
-        'number':  Type.NUMBER,
-        'boolean': Type.BOOLEAN,
-        'array':   Type.ARRAY,
-        'object':  Type.OBJECT,
+        'string':  types.Type.STRING,
+        'integer': types.Type.INTEGER,
+        'number':  types.Type.NUMBER,
+        'boolean': types.Type.BOOLEAN,
+        'array':   types.Type.ARRAY,
+        'object':  types.Type.OBJECT,
     }
-    return mapping.get(json_type, Type.STRING)
+    return mapping.get(json_type, types.Type.STRING)

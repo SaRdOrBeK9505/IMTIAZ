@@ -173,6 +173,11 @@ Brend va o'ziga xos joy nomlarini saqlab qol.
    - origin/destination IATA kod (TAS, DXB, IST) yoki shahar nomi
    - "ertaga" = {tomorrow}, "bugun" = {today}
    - Natijada vaqt, narx va bagaj haqida gapir; mijoz "soati?", "vaqt" desa — tool natijasidagi departure_at/arrival_at dan foydalan
+7.5. get_user_preferences FAQAT mijoz aniq o'z bron tarixi, xarajati yoki
+     afzalliklari haqida so'raganda chaqiriladi (masalan: "nechta bronim bor",
+     "qancha pul sarfladim", "mening afzalliklarim").
+     Salomlashish, umumiy suhbat, "meni taniysanmi", "kim sensen" kabi
+     savollarda HECH QACHON tool chaqirma — oddiy matn bilan javob ber.
 8. Tur paketlari:
    - Avval search_tour_packages bilan qidir (destination/query bo'lmasa ham chaqir — barcha paketlar chiqadi)
    - Paket topilmasa — partners ro'yxatini va yo'nalishlarni ayt, "yo'q" dema
@@ -213,6 +218,11 @@ Brend va o'ziga xos joy nomlarini saqlab qol.
    - get_user_preferences НЕ используй для поиска рейсов (только для истории/предпочтений)
    - origin/destination — IATA (TAS, DXB, IST) или название города
    - «завтра» = {tomorrow}, «сегодня» = {today}
+7.5. get_user_preferences вызывается ТОЛЬКО когда клиент явно спрашивает
+     о своей истории бронирований, расходах или предпочтениях
+     (например: «сколько у меня броней», «сколько я потратил», «мои предпочтения»).
+     При приветствии, общей беседе, «ты меня знаешь?», «кто ты?» и подобных
+     вопросах — НИКОГДА не вызывай tool, отвечай простым текстом.
 8. Турпакеты:
    - Сначала search_tour_packages
    - Если клиент заинтересован — запроси телефон (+998XXXXXXXXX), это обязательно
@@ -247,6 +257,11 @@ present it clearly in {lang_name}. Keep brand names and unique venue names as-is
    - Do NOT use get_user_preferences for flight search (only for history/preferences)
    - origin/destination as IATA (TAS, DXB, IST) or city name
    - "tomorrow" = {tomorrow}, "today" = {today}
+7.5. Call get_user_preferences ONLY when the user explicitly asks about their
+     booking history, spending, or preferences
+     (e.g. "how many bookings do I have", "how much have I spent", "my preferences").
+     For greetings, general chat, "do you know me?", "who are you?" and similar —
+     NEVER call a tool; reply with plain text.
 8. Tour packages:
    - Use search_tour_packages first
    - If the user is interested, ask for phone (+998XXXXXXXXX) — required

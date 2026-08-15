@@ -39,6 +39,10 @@ def should_use_local_reply(tool_results: list[dict], user_message: str, lang: st
     """
     Ikkinchi AI chaqiruvsiz javob berish mumkinmi?
     Batafsil/vaqt so'rovlari va murakkab turlar uchun LLM kerak.
+
+    get_user_preferences — har doim Gemini'ga yakuniy javob yozdiriladi,
+    chunki bu tool kontekstga bog'liq savollarda ("meni taniysanmi",
+    "nima deganding bu") ham chaqiriladi va shablon javob noto'g'ri bo'ladi.
     """
     from django.conf import settings
 
@@ -49,9 +53,15 @@ def should_use_local_reply(tool_results: list[dict], user_message: str, lang: st
     if normalize_language(lang) != 'uz':
         return False
 
+    # get_user_preferences bo'lsa — har doim LLM o'zi tabiiy javob yozsin.
+    # Shablon "Sizda X ta bron..." kabi javob noto'g'ri kontekstda ko'rinishi mumkin.
+    for item in tool_results:
+        if item.get('tool_name') == 'get_user_preferences':
+            return False
+
     msg = (user_message or '').lower()
     detail_keywords = (
-        'vaqt', 'soat', 'nechchida', 'qachon', 'to\'liq', 'batafsil',
+        'vaqt', 'soat', 'nechchida', 'qachon', "to'liq", 'batafsil',
         'kelish', 'ketish', 'qancha vaqt', 'kechqurun', 'ertalab',
         'подробн', 'время', 'когда', 'detail', 'time', 'when',
     )

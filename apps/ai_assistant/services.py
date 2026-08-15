@@ -143,7 +143,7 @@ class AIAssistantService:
                 action_type=AIActionLog.ActionType.INFO_REQUEST,
                 payload={'message': message},
                 status=AIActionLog.ActionStatus.FAILED,
-                error_message=str(e),
+                error_message=f"{type(e).__name__}: {e}",
             )
             return {
                 'session_id': str(session.id),
@@ -187,6 +187,9 @@ class AIAssistantService:
                             {
                                 'type':        'tool_result',
                                 'tool_use_id': r['tool_use_id'],
+                                # tool_name — Gemini _build_contents uchun zarur
+                                # (function_response.name sifatida ishlatiladi)
+                                'tool_name':   r.get('tool_name', 'unknown_tool'),
                                 'content':     json.dumps(
                                     trim_tool_result_for_ai(r['result']),
                                     ensure_ascii=False,
