@@ -8,6 +8,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+import json
+from django.http import StreamingHttpResponse
+
 from apps.core.permissions import HasApprovedMembership
 from .confirmation import confirm_pending_action, reject_pending_action, ConfirmationError
 from .i18n import resolve_language, t
@@ -63,6 +66,56 @@ class ChatView(APIView):
             request_id=getattr(request, 'request_id', ''),
         )
         return Response({'success': True, **result})
+
+
+class ChatStreamView(APIView):
+    """
+    POST /api/ai/chat/stream/
+
+    Server-Sent Events (SSE) orqali AI javobini oqim sifatida uzatadi.
+    Frontend `fetch()` + `ReadableStream` yoki `EventSource` (GET bilan
+    ishlaydi, shuning uchun bu yerda fetch+stream tavsiya etiladi) orqali
+    qabul qiladi.
+
+    Event formatlari:
+        data: {"type": "chunk", "text": "..."}
+        data: {"type": "tool_processing"}
+        data: {"type": "done", "content": "...", "session_id": "...", ...}
+        data: {"type": "error", "message": "..."}
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(exclude=True)  # streaming javobni OpenAPI avtomatik hujjatlay olmaydi
+    def post(self, request):
+        serializer = ChatMessageSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        message = serializer.validated_data['message']
+        session_id = (
+            str(serializer.validated_data['session_id'])
+            if serializer.validated_data.get('session_id') else None
+        )
+        request_id = getattr(request, 'request_id', '')
+        user = request.user
+
+        def event_stream():
+            service = get_ai_service()
+            try:
+                for event in service.chat_stream(
+                    user=user, message=message,
+                    session_id=session_id, request_id=request_id,
+                ):
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                error_event = {'type': 'error', 'message': str(e)}
+                yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
+
+        response = StreamingHttpResponse(
+            event_stream(), content_type='text/event-stream',
+        )
+        response['Cache-Control'] = 'no-cache'
+        response['X-Accel-Buffering'] = 'no'  # Nginx buferlab qo'ymasligi uchun MUHIM
+        return response
 
 
 class SessionBootstrapView(APIView):

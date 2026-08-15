@@ -388,6 +388,190 @@ class AIAssistantService:
         }
 
     # ── Ichki metodlar ────────────────────────────────────────────────────────
+    def chat_stream(
+            self, user, message: str, session_id: str | None = None,
+            request_id: str = '',
+    ):
+        """
+        SSE (Server-Sent Events) uchun generator.
+        Faqat TOOL-CALL bo'lmagan (oddiy matn) javoblarda haqiqiy
+        streaming beradi — chunki tool-call oqimi baribir ikkinchi
+        AI chaqiruvini talab qiladi va uni oqim sifatida uzatish
+        foydasiz murakkablik qo'shadi.
+
+        Yield qilinadigan har bir element — dict:
+            {'type': 'chunk', 'text': '...'}           — matn bo'lagi
+            {'type': 'done', 'content': '...', ...}     — yakuniy natija
+            {'type': 'error', 'message': '...'}          — xato
+        """
+        timer = StepTimer(request_id)
+
+        with timer.measure('get_or_create_session'):
+            session = self.get_or_create_session(user, session_id)
+        lang = resolve_language(user, message)
+
+        ConversationMessage.objects.create(
+            session=session, role='user', content=message,
+        )
+
+        with timer.measure('history_load'):
+            history = self._load_history(session)
+        with timer.measure('user_profile_summary'):
+            user_profile_summary = self._build_user_profile_summary(user)
+        with timer.measure('session_summary'):
+            session_summary = self._build_session_summary(session)
+        with timer.measure('system_prompt_build'):
+            system = build_system_prompt(
+                lang=lang,
+                price_limit=f"{user.ai_auto_price_limit:,.0f}",
+                autonomy_level=user.ai_autonomy_level,
+                session_summary=session_summary,
+                user_profile_summary=user_profile_summary,
+            )
+        tools = get_all_tools()
+
+        if not hasattr(self.provider, 'chat_stream'):
+            # Provider streamni qo'llab-quvvatlamasa — oddiy chat() ga tushamiz
+            result = self.chat(user, message, session_id, request_id)
+            yield {'type': 'done', **result}
+            return
+
+        text_so_far = ''
+        tool_calls = []
+        tokens_used = 0
+
+        try:
+            with timer.measure('provider_call'):
+                for part in self.provider.chat_stream(messages=history, tools=tools, system=system):
+                    if isinstance(part, dict) and part.get('__final'):
+                        tokens_used = part.get('tokens_used', 0)
+                        tool_calls = part.get('tool_calls', []) or []
+                    else:
+                        text_so_far += str(part)
+                        yield {'type': 'chunk', 'text': str(part)}
+            latency_ms = timer.steps[-1]['duration_ms']
+
+            try:
+                AIActionLog.objects.create(
+                    user=user, session=session,
+                    action_type=AIActionLog.ActionType.INFO_REQUEST,
+                    payload={'message': message, 'tokens_used': tokens_used, 'latency_ms': latency_ms},
+                    duration_ms=latency_ms,
+                    request_id=timer.request_id,
+                )
+            except Exception:
+                logger.exception('AIActionLog yaratishda xato')
+
+        except Exception as e:
+            logger.exception('AI provider xatosi (stream): %s', e)
+            err = t('ai_provider_error', lang)
+            ConversationMessage.objects.create(
+                session=session, role='assistant', content=err,
+            )
+            AIActionLog.objects.create(
+                user=user, session=session,
+                action_type=AIActionLog.ActionType.INFO_REQUEST,
+                payload={'message': message},
+                status=AIActionLog.ActionStatus.FAILED,
+                error_message=str(e),
+                duration_ms=timer.total_ms(),
+                request_id=timer.request_id,
+            )
+            yield {'type': 'error', 'message': err}
+            return
+
+        final_content = text_so_far
+        tool_results = []
+        pending_action_id = None
+        pending_summary = ''
+
+        if tool_calls:
+            # Tool bor — bu yerda streaming to'xtaydi, qolgan qism
+            # oddiy chat() bilan bir xil ishlaydi (tool bajarish +
+            # kerak bo'lsa ikkinchi AI chaqiruvi). Frontendga alohida
+            # 'tool_processing' eventi yuboriladi, keyin yakuniy javob.
+            yield {'type': 'tool_processing'}
+
+            with timer.measure('tools_total'):
+                tool_results, pending_action_id, pending_summary = (
+                    self._execute_tool_calls(
+                        user, session, tool_calls, lang=lang, timer=timer,
+                    )
+                )
+
+            if pending_action_id:
+                final_content = pending_summary
+            elif should_use_local_reply(tool_results, message, lang):
+                with timer.measure('local_reply_build'):
+                    final_content = build_reply_from_tools(tool_results, lang=lang)
+            else:
+                tool_msgs = [
+                    AIMessage(role='assistant', content=text_so_far),
+                    AIMessage(
+                        role='user',
+                        content=[
+                            {
+                                'type': 'tool_result',
+                                'tool_use_id': r['tool_use_id'],
+                                'content': json.dumps(
+                                    trim_tool_result_for_ai(r['result']),
+                                    ensure_ascii=False,
+                                ),
+                            }
+                            for r in tool_results
+                        ],
+                    ),
+                ]
+                try:
+                    with timer.measure('followup_provider_call'):
+                        final_resp = self.provider.chat(
+                            messages=history + tool_msgs,
+                            tools=tools, system=system,
+                            max_tokens=getattr(settings, 'AI_FOLLOWUP_MAX_TOKENS', 512),
+                        )
+                    final_content = (
+                            final_resp.content
+                            or build_reply_from_tools(tool_results, lang=lang)
+                    )
+                    # Follow-up javobni ham chunk sifatida yuboramiz —
+                    # frontend buni xuddi streamdek ko'rsatadi
+                    yield {'type': 'chunk', 'text': final_content}
+                except Exception as e:
+                    logger.exception('Tool result qayta chaqiruvda xato: %s', e)
+                    final_content = build_reply_from_tools(tool_results, lang=lang) or t(
+                        'reply_format_error', lang
+                    )
+                    yield {'type': 'chunk', 'text': final_content}
+
+        with timer.measure('save_message'):
+            msg = ConversationMessage.objects.create(
+                session=session,
+                role='assistant',
+                content=final_content,
+                tool_calls=tool_calls or None,
+                tool_results=tool_results or None,
+                tokens_used=tokens_used,
+            )
+
+        if not session.title:
+            session.title = message[:80]
+            session.save(update_fields=['title', 'updated_at'])
+
+        with timer.measure('refresh_user_ai_profile'):
+            self._refresh_user_ai_profile(user, session)
+
+        timer.log(logger, message='AI chat timing (stream)')
+
+        yield {
+            'type': 'done',
+            'session_id': str(session.id),
+            'message_id': str(msg.id),
+            'content': final_content,
+            'tool_calls_count': len(tool_calls),
+            'tokens_used': tokens_used,
+            'requires_confirmation': bool(pending_action_id),
+            'pending_action_id': str(pending_action_id) if pending_action_id else None,
+        }
 
     def _load_history(self, session: ConversationSession) -> list[AIMessage]:
         limit = getattr(settings, 'AI_HISTORY_LIMIT', 8)
