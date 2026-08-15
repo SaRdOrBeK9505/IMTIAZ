@@ -115,13 +115,13 @@ class RequestOTPSerializer(serializers.Serializer):
     full_name    = serializers.CharField(max_length=128, min_length=2)
     phone_number = serializers.CharField(max_length=20)
 
-    def validate_full_name(self, value: str) -> str:
-        parts = value.strip().split()
-        if len(parts) < 2:
-            raise serializers.ValidationError(
-                "Ism va familiyani to'liq kiriting (kamida 2 so'z)."
-            )
-        return value.strip()
+    # def validate_full_name(self, value: str) -> str:
+    #     parts = value.strip().split()
+    #     if len(parts) < 2:
+    #         raise serializers.ValidationError(
+    #             "Ism va familiyani to'liq kiriting (kamida 2 so'z)."
+    #         )
+    #     return value.strip()
 
     def validate_phone_number(self, value: str) -> str:
         phone = _normalize_phone(value)
