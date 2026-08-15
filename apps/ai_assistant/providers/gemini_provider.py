@@ -7,11 +7,15 @@ Model: gemini-3.6-flash (settings.GEMINI_MODEL orqali o'zgartiriladi)
 from __future__ import annotations
 
 import logging
+import time
 from django.conf import settings
 
 from .base import BaseAIProvider, AIMessage, AIResponse
 
 logger = logging.getLogger(__name__)
+
+RETRYABLE_STATUSES = {500, 503}
+MAX_ATTEMPTS = 2
 
 
 class GeminiProvider(BaseAIProvider):
@@ -58,10 +62,6 @@ class GeminiProvider(BaseAIProvider):
                 types.Content(role=role, parts=[types.Part(text=content)])
             )
 
-        # Cap output tokens to configured maximum to bound latency
-        max_output_cap = getattr(settings, 'AI_MAX_OUTPUT_TOKENS', 400)
-        max_output_tokens = min(max_tokens, max_output_cap)
-
         # Config
         config_kwargs: dict = {
             'max_output_tokens': max_output_tokens,
@@ -77,15 +77,34 @@ class GeminiProvider(BaseAIProvider):
 
         config = types.GenerateContentConfig(**config_kwargs)
 
-        try:
-            response = self._client.models.generate_content(
-                model    = self.model,
-                contents = gemini_contents,
-                config   = config,
-            )
-        except Exception as e:
-            logger.exception('Gemini API xatosi: %s', e)
-            raise
+        # ── Vaqtinchalik xatolar (500/503) uchun tez, cheklangan retry ──
+        response = None
+        last_exc = None
+
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                response = self._client.models.generate_content(
+                    model    = self.model,
+                    contents = gemini_contents,
+                    config   = config,
+                )
+                break
+            except Exception as e:
+                last_exc = e
+                status_code = getattr(e, 'code', None) or getattr(e, 'status_code', None)
+                retryable = status_code in RETRYABLE_STATUSES
+
+                if retryable and attempt < MAX_ATTEMPTS:
+                    wait_s = 1.5 * attempt
+                    logger.warning(
+                        'Gemini chaqiruv xatosi (attempt %d/%d, status=%s): %s — %.1fs kutib qayta uriniladi',
+                        attempt, MAX_ATTEMPTS, status_code, e, wait_s,
+                    )
+                    time.sleep(wait_s)
+                    continue
+
+                logger.exception('Gemini API xatosi (attempt %d/%d): %s', attempt, MAX_ATTEMPTS, e)
+                raise
 
         # Javobni parse qilish
         text_content = ''
@@ -200,3 +219,4 @@ def _map_type(json_type: str):
         'object':  Type.OBJECT,
     }
     return mapping.get(json_type, Type.STRING)
+PYEOF
