@@ -132,6 +132,7 @@ def build_system_prompt(
     price_limit: str,
     autonomy_level: str,
     session_summary: str | None = None,
+    user_profile_summary: str | None = None,
 ) -> str:
     from datetime import timedelta
     from django.utils import timezone
@@ -263,6 +264,16 @@ present it clearly in {lang_name}. Keep brand names and unique venue names as-is
     )
     if session_summary:
         base += f"\n\nSuhbat xotirasi (bajarilgan harakatlar va saqlangan obyektlar):\n{session_summary}\n"
+    if user_profile_summary:
+        base += f"\n\nDoimiy foydalanuvchi profili (uzoq muddatli xotira):\n{user_profile_summary}\n"
+
+    # Concise response instruction — encourage the model to avoid unnecessary verbosity
+    concise_instr = {
+        'uz': "\n\nMUHIM: Faqat soʻralganiga javob ber. Ortigʻini yozma. Keraksiz kirish soʻzlari, uzr, yoki uzoq izoh qoʻshma. Agar tool natijasi berilsa, uni qayta uzun tushuntirma — faqat foydalanuvchiga kerakli qisqa javobni ber.",
+        'ru': "\n\nВАЖНО: Отвечай только на заданный вопрос. Не добавляй лишнего текста, вступлений или извинений. Если есть результат инструмента, не переписывай большой JSON — дай краткий ответ, достаточный пользователю.",
+        'en': "\n\nIMPORTANT: Answer only what was asked. Do not add extra explanations, long introductions, or apologies. If there are tool results, do not re-explain the full JSON — provide a short, clear answer the user needs.",
+    }
+    base += concise_instr.get(lang, concise_instr['en'])
     return base
 
 

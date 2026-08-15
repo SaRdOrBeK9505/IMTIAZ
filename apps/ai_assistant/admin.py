@@ -1,5 +1,11 @@
 from django.contrib import admin
-from .models import ConversationSession, ConversationMessage, AIActionLog
+from .models import ConversationSession, ConversationMessage, AIActionLog, UserAIProfile
+
+
+@admin.register(UserAIProfile)
+class UserAIProfileAdmin(admin.ModelAdmin):
+    list_display = ['user', 'preferred_seat_class', 'preferred_cuisine', 'updated_at']
+    search_fields = ['user__telegram_username', 'user__first_name', 'user__phone', 'summary_text']
 
 
 @admin.register(AIActionLog)

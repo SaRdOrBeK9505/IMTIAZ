@@ -43,6 +43,10 @@ class GeminiProvider(BaseAIProvider):
         if max_tokens is None:
             max_tokens = getattr(settings, 'AI_MAX_TOKENS', 4096)
 
+        # Cap output tokens to configured maximum to bound latency
+        max_output_cap = getattr(settings, 'AI_MAX_OUTPUT_TOKENS', 400)
+        max_output_tokens = min(max_tokens, max_output_cap)
+
         # Xabarlarni Gemini Content formatiga o'girish
         gemini_contents = []
         for msg in messages:
@@ -54,9 +58,13 @@ class GeminiProvider(BaseAIProvider):
                 types.Content(role=role, parts=[types.Part(text=content)])
             )
 
+        # Cap output tokens to configured maximum to bound latency
+        max_output_cap = getattr(settings, 'AI_MAX_OUTPUT_TOKENS', 400)
+        max_output_tokens = min(max_tokens, max_output_cap)
+
         # Config
         config_kwargs: dict = {
-            'max_output_tokens': max_tokens,
+            'max_output_tokens': max_output_tokens,
             'temperature': getattr(settings, 'AI_TEMPERATURE', 0.2),
         }
 
@@ -112,6 +120,31 @@ class GeminiProvider(BaseAIProvider):
             stop_reason = 'end_turn',
             raw         = response,
         )
+
+    def chat_stream(
+        self,
+        messages: list[AIMessage],
+        tools: list[dict] | None = None,
+        system: str | None = None,
+        max_tokens: int | None = None,
+    ):
+        """Fallback streaming: call chat() and yield text chunks, then final metadata dict.
+        Real streaming is used if the SDK supports it; this fallback provides partial UX
+        improvements by enabling the caller to consume chunks without changing the
+        sync chat API contract.
+        """
+        resp = self.chat(messages=messages, tools=tools, system=system, max_tokens=max_tokens)
+        text = resp.content or ''
+        chunk_size = getattr(settings, 'AI_STREAM_CHUNK_SIZE', 160)
+        for i in range(0, len(text), chunk_size):
+            yield text[i:i+chunk_size]
+        # Final metadata so caller can get tokens/tool_calls/raw
+        yield {
+            '__final': True,
+            'tokens_used': resp.tokens_used,
+            'tool_calls': resp.tool_calls,
+            'raw': resp.raw,
+        }
 
     @staticmethod
     def _convert_tools(tools: list[dict]):
