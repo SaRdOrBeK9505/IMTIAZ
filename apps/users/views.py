@@ -53,7 +53,7 @@ from .serializers import (
     VerifyOTPSerializer,
 )
 from .sms import send_otp_sms
-
+from .models import User
 logger = logging.getLogger(__name__)
 
 
@@ -208,7 +208,13 @@ class TokenRefreshView(SimpleJWTTokenRefreshView):
         responses={200: OpenApiResponse(description='Yangi access va refresh tokenlar')},
     )
     def post(self, request, *args, **kwargs):
-        return super().post(request, *args, **kwargs)
+        try:
+            return super().post(request, *args, **kwargs)
+        except User.DoesNotExist:
+            return Response(
+                {'detail': "Foydalanuvchi topilmadi yoki o'chirilgan. Iltimos, qaytadan tizimga kiring."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
 
 
 # ─── Login ────────────────────────────────────────────────────────────────────
