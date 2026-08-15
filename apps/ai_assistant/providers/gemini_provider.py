@@ -219,4 +219,3 @@ def _map_type(json_type: str):
         'object':  Type.OBJECT,
     }
     return mapping.get(json_type, Type.STRING)
-PYEOF
