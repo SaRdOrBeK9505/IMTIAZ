@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 import json
+import logging
 from django.http import StreamingHttpResponse
 
 from apps.core.permissions import HasApprovedMembership
@@ -39,6 +40,9 @@ def get_ai_service() -> AIAssistantService:
     return AIAssistantService()
 
 
+view_logger = logging.getLogger(__name__)
+
+
 class ChatView(APIView):
     """POST /api/ai/chat/"""
     permission_classes = [IsAuthenticated]
@@ -60,6 +64,16 @@ class ChatView(APIView):
         tags=['AI Assistant'],
     )
     def post(self, request):
+        # NON-STREAM so'rov — monitoring uchun WARNING
+        # Bu endpoint odatda faqat zaxira/debug rejimida ishlatilishi kerak.
+        # Production'da ChatStreamView ishlatilsin. Bu log orqali
+        # "15:07:06 dagi anomaliya" kabi holatlar darhol aniqlanadi.
+        view_logger.warning(
+            'NON-STREAM AI so\'rov qabul qilindi: user_id=%s request_id=%s — '
+            'ChatStreamView ishlatilishini tekshiring',
+            getattr(request.user, 'id', '?'),
+            getattr(request, 'request_id', ''),
+        )
         serializer = ChatMessageSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         result = get_ai_service().chat(
@@ -69,9 +83,6 @@ class ChatView(APIView):
                 str(serializer.validated_data['session_id'])
                 if serializer.validated_data.get('session_id') else None
             ),
-            # RequestLoggingMiddleware o'rnatgan request_id — shu orqali
-            # "API POST /api/ai/chat/ → 200 [842ms]" logi va "AI chat timing"
-            # logi bitta so'rov ekanini bir xil request_id orqali bilib olamiz.
             request_id=getattr(request, 'request_id', ''),
         )
         return Response({'success': True, **result})
@@ -121,9 +132,10 @@ class ChatStreamView(APIView):
                 yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
 
         response = StreamingHttpResponse(
-            event_stream(), content_type='text/event-stream',
+            event_stream(), content_type='text/event-stream; charset=utf-8',
         )
         response['Cache-Control'] = 'no-cache'
+        response['Connection'] = 'keep-alive'
         response['X-Accel-Buffering'] = 'no'  # Nginx buferlab qo'ymasligi uchun MUHIM
         return response
 

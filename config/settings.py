@@ -436,11 +436,23 @@ AI_MAX_OUTPUT_TOKENS = env.int('AI_MAX_OUTPUT_TOKENS', default=400)
 AI_ENABLE_STREAMING = env.bool('AI_ENABLE_STREAMING', default=False)
 AI_STREAM_CHUNK_SIZE = env.int('AI_STREAM_CHUNK_SIZE', default=160)
 
-# Gemini (Google)
-GEMINI_API_KEY = env('GEMINI_API_KEY', default='')
-GEMINI_MODEL   = env('GEMINI_MODEL',   default='gemini-2.5-flash')
+# Fallback va Retry Sozlamalari (Faza 1/2)
+AI_FALLBACK_ENABLED = env.bool('AI_FALLBACK_ENABLED', default=True)
+AI_FALLBACK_PROVIDER = env('AI_FALLBACK_PROVIDER', default='openai')
+AI_MAX_ATTEMPTS = env.int('AI_MAX_ATTEMPTS', default=2)  # Har bir provayder uchun max urinishlar soni
+AI_RETRY_DELAY = env.float('AI_RETRY_DELAY', default=0.5)  # Retry orasidagi kutish vaqti (soniya)
 
-# Claude (Anthropic) — zaxira provider
+
+# Gemini (Google)
+GEMINI_API_KEY  = env('GEMINI_API_KEY', default='')
+GEMINI_MODEL    = env('GEMINI_MODEL',     default='gemini-2.5-flash')   # tezkor: tool-calling, qidiruv
+GEMINI_MODEL_PRO = env('GEMINI_MODEL_PRO', default='')                  # chuqur: umumiy savol, followup javob (bo'sh = GEMINI_MODEL ishlatiladi)
+
+# OpenAI — ikkinchi/zaxira provider
+OPENAI_API_KEY = env('OPENAI_API_KEY', default='')
+OPENAI_MODEL   = env('OPENAI_MODEL',   default='gpt-4o-mini')
+
+# Claude (Anthropic) — uchunchi provider (ixtiyoriy)
 ANTHROPIC_API_KEY = env('ANTHROPIC_API_KEY', default='')
 AI_MODEL          = env('AI_MODEL', default='claude-opus-4-5')
 
@@ -596,6 +608,15 @@ LOGGING = {
             'formatter':   'json',
             'encoding':    'utf-8',
         },
+        # Latency / percentile tahlil uchun alohida fayl — analyze_latency command o'qiydi
+        'file_analyze': {
+            'class':       'logging.handlers.RotatingFileHandler',
+            'filename':    str(BASE_DIR / 'logs' / 'analyze.log'),
+            'maxBytes':    50 * 1024 * 1024,   # 50 MB — ko'p so'rovda ham etarli
+            'backupCount': 7,                   # 7 * 50 MB = 350 MB max
+            'formatter':   'json',
+            'encoding':    'utf-8',
+        },
     },
 
     'root': {
@@ -621,9 +642,15 @@ LOGGING = {
         },
         # AI harakatlari alohida log fayl
         'apps.ai_assistant': {
-            'handlers':  ['console', 'file_ai', 'file_errors'],
+            'handlers':  ['console', 'file_ai', 'file_errors', 'file_analyze'],
             'level':     _log_level,
             'propagate': False,
+        },
+        # Faqat latency/timing metrikasi — analyze_latency command shu fayldan o'qiydi
+        'apps.ai_assistant.analyze': {
+            'handlers':  ['file_analyze'],
+            'level':     'INFO',
+            'propagate': False,   # file_ai ga qaytmaslik uchun
         },
         # Request log
         'apps.requests': {

@@ -70,3 +70,34 @@ class TourEmptyFormatTests(TestCase):
             'result': {'status': 'ok', 'results': [], 'partners': []},
         }]
         self.assertFalse(should_use_local_reply(tool_results, 'Tur haqida', 'uz'))
+
+    def test_tour_packages_with_results_uses_local_reply(self):
+        tool_results = [{
+            'tool_name': 'search_tour_packages',
+            'result': {
+                'status': 'ok',
+                'results': [{'title': 'Dubay Turi', 'base_price': 1000}],
+            },
+        }]
+        self.assertTrue(should_use_local_reply(tool_results, 'Dubay turlari soat nechchida?', 'uz'))
+
+    def test_restaurants_skips_detail_keywords_check(self):
+        tool_results = [{
+            'tool_name': 'search_restaurants',
+            'result': {
+                'status': 'ok',
+                'results': [{'name': 'Nobu', 'address': 'Amir Temur'}],
+            },
+        }]
+        self.assertTrue(should_use_local_reply(tool_results, 'Soat 19:00 ga joy toping vaqtida', 'uz'))
+
+    def test_multilingual_local_reply_support(self):
+        tool_results = [{
+            'tool_name': 'search_restaurants',
+            'result': {
+                'status': 'ok',
+                'results': [{'name': 'Nobu', 'address': 'Amir Temur'}],
+            },
+        }]
+        self.assertTrue(should_use_local_reply(tool_results, 'Find restaurants', 'en'))
+        self.assertTrue(should_use_local_reply(tool_results, 'Найди ресторан', 'ru'))

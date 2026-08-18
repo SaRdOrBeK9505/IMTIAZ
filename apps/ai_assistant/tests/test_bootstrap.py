@@ -38,7 +38,7 @@ class SessionBootstrapTests(TestCase):
     def test_bootstrap_creates_welcome_message(self):
         result = self.service.bootstrap_session(self.user)
         self.assertFalse(result['already_started'])
-        self.assertIn('IMTIAZ AI', result['content'])
+        self.assertIn('IMTIAZ', result['content'])
         self.assertIn('qanday yordam', result['content'].lower())
 
     def test_bootstrap_idempotent_for_existing_session(self):

@@ -54,24 +54,32 @@ def should_use_local_reply(tool_results: list[dict], user_message: str, lang: st
         return False
     if not getattr(settings, 'AI_SKIP_SECOND_CALL', True):
         return False
-    if normalize_language(lang) != 'uz':
+    if normalize_language(lang) not in {'uz', 'ru', 'en'}:
         return False
 
     # Faqat ro'yxat-tipidagi oddiy tool'lar uchun shablon ruxsat etiladi.
     # Shaxsiy/kontekstga bog'liq tool'lar (preferences, bookings) — har doim AI orqali.
-    SIMPLE_LIST_TOOLS = {'search_flights', 'search_restaurants', 'search_events', 'search_trains'}
+    # search_tour_packages qo'shildi (Faza 3).
+    SIMPLE_LIST_TOOLS = {
+        'search_flights', 'search_restaurants', 'search_events',
+        'search_trains', 'search_tour_packages'
+    }
     tool_names = {item.get('tool_name') for item in tool_results}
     if not tool_names.issubset(SIMPLE_LIST_TOOLS):
         return False
 
-    msg = (user_message or '').lower()
-    detail_keywords = (
-        'vaqt', 'soat', 'nechchida', 'qachon', "to'liq", 'batafsil',
-        'kelish', 'ketish', 'qancha vaqt', 'kechqurun', 'ertalab',
-        'подробн', 'время', 'когда', 'detail', 'time', 'when',
-    )
-    if any(kw in msg for kw in detail_keywords):
-        return False
+    # Faqat jadval/soat/ketish/kelish kabi vaqt ko'rsatkichlari juda muhim bo'lgan
+    # parvoz va poyezdlar uchun detail keywords tekshiriladi.
+    # Restoranlar va turlar uchun bu tekshiruv shart emas, shablon to'liq ma'lumot beradi.
+    if tool_names.intersection({'search_flights', 'search_trains'}):
+        msg = (user_message or '').lower()
+        detail_keywords = (
+            'vaqt', 'soat', 'nechchida', 'qachon', "to'liq", 'batafsil',
+            'kelish', 'ketish', 'qancha vaqt', 'kechqurun', 'ertalab',
+            'подробн', 'время', 'когда', 'detail', 'time', 'when',
+        )
+        if any(kw in msg for kw in detail_keywords):
+            return False
 
     # Ro'yxat bo'sh bo'lsa — AI alternativa taklif qilsin
     for item in tool_results:

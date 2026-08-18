@@ -1,7 +1,12 @@
 """
 Google Gemini AI Provider implementatsiyasi.
 SDK: google-genai (yangi, rasmiy)  pip install google-genai
-Model: gemini-3.6-flash (settings.GEMINI_MODEL orqali o'zgartiriladi)
+Model: gemini-2.5-flash (settings.GEMINI_MODEL orqali o'zgartiriladi)
+
+FAZA-0 yaxshilanishlari:
+  - 503/500 xatolar uchun to'liq ERROR log: user_id, session_id, request_id
+  - chat() va chat_stream() log_context parametrini qabul qiladi
+  - Retry tugaganda aniq ERROR (exception trace bilan) yoziladi
 """
 
 from __future__ import annotations
@@ -15,7 +20,46 @@ from .base import BaseAIProvider, AIMessage, AIResponse
 logger = logging.getLogger(__name__)
 
 RETRYABLE_STATUSES = {500, 503}
-MAX_ATTEMPTS = 2
+
+def _max_attempts() -> int:
+    return getattr(settings, 'AI_MAX_ATTEMPTS', 2)
+
+def _retry_delay() -> float:
+    return getattr(settings, 'AI_RETRY_DELAY', 0.5)
+
+
+def _extract_status(exc: Exception) -> int | None:
+    """Exception dan HTTP status code olish (har xil SDK formatlar uchun)."""
+    return (
+        getattr(exc, 'code', None)
+        or getattr(exc, 'status_code', None)
+        or getattr(exc, 'status', None)
+    )
+
+
+def _log_retry_warning(method: str, attempt: int, status_code, exc: Exception, wait_s: float) -> None:
+    logger.warning(
+        'Gemini %s xatosi (attempt %d/%d, status=%s): %s — %.1fs kutib qayta uriniladi',
+        method, attempt, _max_attempts(), status_code, exc, wait_s,
+    )
+
+
+def _log_final_error(method: str, attempt: int, status_code, exc: Exception, ctx: dict) -> None:
+    """
+    Barcha retry tugaganda aniq ERROR yozuv.
+    ctx = {'user_id': ..., 'session_id': ..., 'request_id': ...}
+    """
+    logger.error(
+        'Gemini %s: barcha %d urinish MUVAFFAQIYATSIZ. '
+        'status=%s | user_id=%s | session_id=%s | request_id=%s | xato: %s',
+        method, _max_attempts(),
+        status_code,
+        ctx.get('user_id', '?'),
+        ctx.get('session_id', '?'),
+        ctx.get('request_id', '?'),
+        exc,
+        exc_info=True,
+    )
 
 
 class GeminiProvider(BaseAIProvider):
@@ -76,15 +120,22 @@ class GeminiProvider(BaseAIProvider):
         tools: list[dict] | None = None,
         system: str | None = None,
         max_tokens: int | None = None,
+        log_context: dict | None = None,
     ) -> AIResponse:
+        """
+        log_context = {'user_id': ..., 'session_id': ..., 'request_id': ...}
+        503/500 xato bo'lganda bu ma'lumotlar ERROR logga yoziladi.
+        """
+        ctx = log_context or {}
         gemini_contents = self._build_contents(messages)
         config = self._build_config(tools, system, max_tokens)
 
         # ── Vaqtinchalik xatolar (500/503) uchun tez, cheklangan retry ──
-        response = None
         last_exc = None
+        last_status = None
 
-        for attempt in range(1, MAX_ATTEMPTS + 1):
+        max_attempts = _max_attempts()
+        for attempt in range(1, max_attempts + 1):
             try:
                 response = self._client.models.generate_content(
                     model    = self.model,
@@ -94,19 +145,17 @@ class GeminiProvider(BaseAIProvider):
                 break
             except Exception as e:
                 last_exc = e
-                status_code = getattr(e, 'code', None) or getattr(e, 'status_code', None)
-                retryable = status_code in RETRYABLE_STATUSES
+                last_status = _extract_status(e)
+                retryable = last_status in RETRYABLE_STATUSES
 
-                if retryable and attempt < MAX_ATTEMPTS:
-                    wait_s = 1.5 * attempt
-                    logger.warning(
-                        'Gemini chaqiruv xatosi (attempt %d/%d, status=%s): %s — %.1fs kutib qayta uriniladi',
-                        attempt, MAX_ATTEMPTS, status_code, e, wait_s,
-                    )
+                if retryable and attempt < max_attempts:
+                    wait_s = _retry_delay() * attempt
+                    _log_retry_warning('chat', attempt, last_status, e, wait_s)
                     time.sleep(wait_s)
                     continue
 
-                logger.exception('Gemini API xatosi (attempt %d/%d): %s', attempt, MAX_ATTEMPTS, e)
+                # Oxirgi urinish yoki retry bo'lmaydigan xato — aniq ERROR
+                _log_final_error('chat', attempt, last_status, e, ctx)
                 raise
 
         # Javobni parse qilish
@@ -148,9 +197,14 @@ class GeminiProvider(BaseAIProvider):
         tools: list[dict] | None = None,
         system: str | None = None,
         max_tokens: int | None = None,
+        log_context: dict | None = None,
     ):
         """
         HAQIQIY Gemini streaming — generate_content_stream orqali.
+
+        log_context = {'user_id': ..., 'session_id': ..., 'request_id': ...}
+        503/500 xato bo'lganda bu ma'lumotlar ERROR logga yoziladi.
+
         Gemini so'z-so'z javob berayotganda, har bir chunk DARHOL yield
         qilinadi (avvalgi fallback versiyada butun javob kutib olinib,
         keyin sun'iy bo'laklarga bo'lingan edi — bu esa haqiqiy tezlashuv
@@ -162,11 +216,14 @@ class GeminiProvider(BaseAIProvider):
         to'liq ko'rinadi — chaqiruvchi (services.py) buni chat() bilan
         bir xil tarzda ishlata oladi.
         """
+        ctx = log_context or {}
         gemini_contents = self._build_contents(messages)
         config = self._build_config(tools, system, max_tokens)
 
         last_exc = None
-        for attempt in range(1, MAX_ATTEMPTS + 1):
+        last_status = None
+        max_attempts = _max_attempts()
+        for attempt in range(1, max_attempts + 1):
             try:
                 text_content = ''
                 tool_calls   = []
@@ -217,19 +274,17 @@ class GeminiProvider(BaseAIProvider):
 
             except Exception as e:
                 last_exc = e
-                status_code = getattr(e, 'code', None) or getattr(e, 'status_code', None)
-                retryable = status_code in RETRYABLE_STATUSES
+                last_status = _extract_status(e)
+                retryable = last_status in RETRYABLE_STATUSES
 
-                if retryable and attempt < MAX_ATTEMPTS:
-                    wait_s = 1.5 * attempt
-                    logger.warning(
-                        'Gemini stream xatosi (attempt %d/%d, status=%s): %s — %.1fs kutib qayta uriniladi',
-                        attempt, MAX_ATTEMPTS, status_code, e, wait_s,
-                    )
+                if retryable and attempt < max_attempts:
+                    wait_s = _retry_delay() * attempt
+                    _log_retry_warning('stream', attempt, last_status, e, wait_s)
                     time.sleep(wait_s)
                     continue
 
-                logger.exception('Gemini stream xatosi (attempt %d/%d): %s', attempt, MAX_ATTEMPTS, e)
+                # Oxirgi urinish yoki retry bo'lmaydigan xato — aniq ERROR
+                _log_final_error('stream', attempt, last_status, e, ctx)
                 raise
 
     @staticmethod

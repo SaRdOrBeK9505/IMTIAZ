@@ -35,6 +35,8 @@ from .response_builder import (
 from .tools import get_all_tools
 
 logger = logging.getLogger(__name__)
+# Faqat timing/latency metrikasi uchun — logs/analyze.log ga yoziladi
+analyze_logger = logging.getLogger('apps.ai_assistant.analyze')
 
 
 class StepTimer:
@@ -96,8 +98,21 @@ class StepTimer:
             'steps': self.steps,
         }
 
-    def log(self, logger_: logging.Logger, message: str = 'AI chat timing') -> None:
-        logger_.info(message, extra={'data': self.summary()})
+    def log(
+        self,
+        logger_: logging.Logger,
+        message: str = 'AI chat timing',
+        analyze_logger_: logging.Logger | None = None,
+    ) -> None:
+        """
+        Asosiy logga va (ixtiyoriy) analyze logga bitta structured JSON qator yozadi.
+        analyze_logger_ berilsa, logs/analyze.log ga alohida yoziladi —
+        analyze_latency management command shu fayl bilan ishlaydi.
+        """
+        summary = self.summary()
+        logger_.info(message, extra={'data': summary})
+        if analyze_logger_ is not None:
+            analyze_logger_.info(message, extra={'data': summary})
 
 # Yozish tool'lari — requires_confirmation() ga yuboriladi
 WRITE_TOOL_TO_ACTION: dict[str, tuple[str, str]] = {
@@ -114,13 +129,48 @@ CACHEABLE_TOOLS = {
 }
 
 
-def get_ai_provider() -> BaseAIProvider:
-    name = getattr(settings, 'AI_PROVIDER', 'gemini').lower()
+def _create_provider_by_name(name: str) -> BaseAIProvider:
     if name == 'claude':
         from .providers.claude_provider import ClaudeProvider
         return ClaudeProvider()
+    if name == 'openai':
+        from .providers.openai_provider import OpenAIProvider
+        return OpenAIProvider()
     from .providers.gemini_provider import GeminiProvider
     return GeminiProvider()
+
+
+def get_ai_provider() -> BaseAIProvider:
+    primary_name = getattr(settings, 'AI_PROVIDER', 'gemini').lower()
+    primary = _create_provider_by_name(primary_name)
+
+    fallback_enabled = getattr(settings, 'AI_FALLBACK_ENABLED', True)
+    if fallback_enabled:
+        fallback_name = getattr(settings, 'AI_FALLBACK_PROVIDER', 'openai').lower()
+        if fallback_name != primary_name:
+            fallback = _create_provider_by_name(fallback_name)
+            from .providers.fallback_provider import FallbackProvider
+            return FallbackProvider(primary, fallback)
+
+    return primary
+
+
+def get_pro_provider() -> BaseAIProvider:
+    """
+    Followup / umumiy savol uchun chuqur fikrlovchi model.
+    GEMINI_MODEL_PRO sozlangan bo'lsa → gemini-2.5-pro (yoki boshqa pro model).
+    Sozlanmagan bo'lsa → oddiy provider qaytariladi (fallback sifatida).
+    """
+    primary_name = getattr(settings, 'AI_PROVIDER', 'gemini').lower()
+    pro_model = getattr(settings, 'GEMINI_MODEL_PRO', '')
+
+    if primary_name == 'gemini' and pro_model:
+        from .providers.gemini_provider import GeminiProvider
+        logger.debug("Pro model ishlatilmoqda: %s", pro_model)
+        return GeminiProvider(model=pro_model)
+
+    # Pro model sozlanmagan — oddiy provayderdan foydalaniladi
+    return get_ai_provider()
 
 
 class AIAssistantService:
@@ -219,6 +269,13 @@ class AIAssistantService:
 
         from apps.ai_assistant.providers.base import AIResponse as ProviderAIResponse
 
+        # Provider xatoliklar uchun context (user/session identifikatsiya)
+        log_ctx = {
+            'user_id':    str(getattr(user, 'id', '?')),
+            'session_id': str(session.id),
+            'request_id': timer.request_id,
+        }
+
         try:
             with timer.measure('provider_call'):
                 if getattr(settings, 'AI_ENABLE_STREAMING', False) and hasattr(self.provider, 'chat_stream'):
@@ -226,7 +283,10 @@ class AIAssistantService:
                     tool_calls = []
                     tokens_used = 0
                     raw = None
-                    for part in self.provider.chat_stream(messages=history, tools=tools, system=system):
+                    for part in self.provider.chat_stream(
+                        messages=history, tools=tools, system=system,
+                        log_context=log_ctx,
+                    ):
                         if isinstance(part, dict) and part.get('__final'):
                             tokens_used = part.get('tokens_used', 0)
                             tool_calls = part.get('tool_calls', []) or []
@@ -236,7 +296,10 @@ class AIAssistantService:
                     content = ''.join(chunks)
                     ai_response = ProviderAIResponse(content=content, tool_calls=tool_calls, tokens_used=tokens_used, raw=raw)
                 else:
-                    ai_response = self.provider.chat(messages=history, tools=tools, system=system)
+                    ai_response = self.provider.chat(
+                        messages=history, tools=tools, system=system,
+                        log_context=log_ctx,
+                    )
             latency_ms = timer.steps[-1]['duration_ms']  # 'provider_call' — hozirgina yozildi
 
             # Audit log for AI call latency/tokens
@@ -266,7 +329,7 @@ class AIAssistantService:
                 duration_ms=timer.total_ms(),
                 request_id=timer.request_id,
             )
-            timer.log(logger, message='AI chat timing (provider xatosi)')
+            timer.log(logger, message='AI chat timing (provider xatosi)', analyze_logger_=analyze_logger)
             return {
                 'session_id': str(session.id),
                 'content': err,
@@ -374,7 +437,7 @@ class AIAssistantService:
         #   {"step": "tool:search_flights", "duration_ms": 175, "ok": true},
         #   ...
         # ]}
-        timer.log(logger)
+        timer.log(logger, analyze_logger_=analyze_logger)
 
         return {
             'session_id':            str(session.id),
@@ -436,13 +499,23 @@ class AIAssistantService:
             yield {'type': 'done', **result}
             return
 
+        # Provider xatoliklar uchun context (user/session identifikatsiya)
+        log_ctx = {
+            'user_id':    str(getattr(user, 'id', '?')),
+            'session_id': str(session.id),
+            'request_id': timer.request_id,
+        }
+
         text_so_far = ''
         tool_calls = []
         tokens_used = 0
 
         try:
             with timer.measure('provider_call'):
-                for part in self.provider.chat_stream(messages=history, tools=tools, system=system):
+                for part in self.provider.chat_stream(
+                    messages=history, tools=tools, system=system,
+                    log_context=log_ctx,
+                ):
                     if isinstance(part, dict) and part.get('__final'):
                         tokens_used = part.get('tokens_used', 0)
                         tool_calls = part.get('tool_calls', []) or []
@@ -490,14 +563,31 @@ class AIAssistantService:
             # oddiy chat() bilan bir xil ishlaydi (tool bajarish +
             # kerak bo'lsa ikkinchi AI chaqiruvi). Frontendga alohida
             # 'tool_processing' eventi yuboriladi, keyin yakuniy javob.
-            yield {'type': 'tool_processing'}
+            yield {
+                'type': 'tool_processing',
+                'tool_calls': [{'name': tc['name'], 'input': tc['input']} for tc in tool_calls]
+            }
 
             with timer.measure('tools_total'):
-                tool_results, pending_action_id, pending_summary = (
-                    self._execute_tool_calls(
-                        user, session, tool_calls, lang=lang, timer=timer,
-                    )
-                )
+                for event in self._execute_tool_calls_generator(
+                    user, session, tool_calls, lang=lang, timer=timer,
+                ):
+                    if event['type'] == 'tool_start':
+                        yield {
+                            'type': 'tool_start',
+                            'tool_name': event['tool_name'],
+                            'input': event['input']
+                        }
+                    elif event['type'] == 'tool_end':
+                        yield {
+                            'type': 'tool_end',
+                            'tool_name': event['tool_name'],
+                            'status': event['status']
+                        }
+                    elif event['type'] == 'final':
+                        tool_results = event['results']
+                        pending_action_id = event['pending_action_id']
+                        pending_summary = event['pending_summary']
 
             if pending_action_id:
                 final_content = pending_summary
@@ -560,7 +650,7 @@ class AIAssistantService:
         with timer.measure('refresh_user_ai_profile'):
             self._refresh_user_ai_profile(user, session)
 
-        timer.log(logger, message='AI chat timing (stream)')
+        timer.log(logger, message='AI chat timing (stream)', analyze_logger_=analyze_logger)
 
         yield {
             'type': 'done',
@@ -654,16 +744,35 @@ class AIAssistantService:
         timer: 'StepTimer | None' = None,
     ) -> tuple[list[dict], str | None, str]:
         """
-        Returns: (results, pending_action_id | None, pending_summary)
-        pending_action_id != None → biror tool tasdiqlash so'radi,
-        keyingi tool'lar bajarilmaydi.
+        Backward-compatible wrapper to run tool calls synchronously and return results.
+        Uses _execute_tool_calls_generator under the hood.
+        """
+        generator = self._execute_tool_calls_generator(
+            user=user, session=session, tool_calls=tool_calls, lang=lang, timer=timer
+        )
+        results = []
+        pending_action_id = None
+        pending_summary = ''
+        for event in generator:
+            if event['type'] == 'final':
+                results = event['results']
+                pending_action_id = event['pending_action_id']
+                pending_summary = event['pending_summary']
+        return results, pending_action_id, pending_summary
 
-        `timer` berilsa, har bir tool 'tool:<nom>' nomi bilan
-        StepTimer.steps ga qo'shiladi — cache-hit bo'lsa ham
-        (masalan 'tool:search_flights [cache_hit]'), haqiqiy tashqi
-        chaqiruv bo'lsa ham (masalan 'tool:search_flights') — shu orqali
-        "nega tez javob keldi" yoki "nega sekin" ekanligi log'da aniq
-        ko'rinadi.
+    def _execute_tool_calls_generator(
+        self,
+        user,
+        session: ConversationSession,
+        tool_calls: list[dict],
+        lang: str = 'uz',
+        timer: 'StepTimer | None' = None,
+    ):
+        """
+        Yields progress events during tool execution:
+          - {'type': 'tool_start', 'tool_name': ..., 'input': ...}
+          - {'type': 'tool_end', 'tool_name': ..., 'status': 'success' | 'failed' | 'needs_confirmation'}
+          - {'type': 'final', 'results': ..., 'pending_action_id': ..., 'pending_summary': ...}
         """
         results = []
 
@@ -671,6 +780,12 @@ class AIAssistantService:
             tool_name  = call['name']
             tool_input = call['input']
             tool_started_at = time.monotonic()
+
+            yield {
+                'type': 'tool_start',
+                'tool_name': tool_name,
+                'input': tool_input,
+            }
 
             # Yozish tool'imi?
             if tool_name in WRITE_TOOL_TO_ACTION:
@@ -699,8 +814,18 @@ class AIAssistantService:
                         'Tool [%s] tasdiqlash kerak: action_id=%s, user=%s',
                         tool_name, log.id, user.id,
                     )
-                    # Keyingi tool'larni BAJARMAY to'xtatamiz
-                    return [], str(log.id), summary
+                    yield {
+                        'type': 'tool_end',
+                        'tool_name': tool_name,
+                        'status': 'needs_confirmation',
+                    }
+                    yield {
+                        'type': 'final',
+                        'results': [],
+                        'pending_action_id': str(log.id),
+                        'pending_summary': summary,
+                    }
+                    return
 
             # Idempotency tekshiruvi: faqat cacheable external tool'lar uchun ishlaydi.
             cached_result = None
@@ -720,10 +845,6 @@ class AIAssistantService:
                 )
                 if timer:
                     timer.add(f'tool:{tool_name} [cache_hit]', duration_ms)
-                # Cache-hit bo'lsa ham audit uchun qisqa yozuv qoldiramiz —
-                # shu orqali "nega bir xil natija qaytdi" savoliga DB'dan ham
-                # javob topish mumkin (ai_action_logs jadvalida
-                # action_type=... payload={..., '_cache_hit': True}).
                 AIActionLog.objects.create(
                     user=user, session=session,
                     action_type=self._tool_to_action_type(tool_name),
@@ -739,6 +860,11 @@ class AIAssistantService:
                     'tool_name':   tool_name,
                     'result':      cached_result,
                 })
+                yield {
+                    'type': 'tool_end',
+                    'tool_name': tool_name,
+                    'status': 'success',
+                }
                 continue
 
             # O'qish tool'lari yoki full_auto/semi_auto (tasdiqlash shart emas)
@@ -761,6 +887,7 @@ class AIAssistantService:
                 self._update_session_entity_state(session, tool_name, tool_input, result)
                 duration_ms = int((time.monotonic() - tool_started_at) * 1000)
                 logger.info('Tool [%s] OK: user=%s (%dms)', tool_name, user.id, duration_ms)
+                status_str = 'success'
             except Exception as e:
                 duration_ms = int((time.monotonic() - tool_started_at) * 1000)
                 logger.exception(
@@ -773,6 +900,7 @@ class AIAssistantService:
                 log_entry.result = result
                 log_entry.status = AIActionLog.ActionStatus.FAILED
                 log_entry.error_message = str(e)
+                status_str = 'failed'
 
             log_entry.duration_ms = duration_ms
             log_entry.save()
@@ -783,8 +911,18 @@ class AIAssistantService:
                 'tool_name':   tool_name,
                 'result':      result,
             })
+            yield {
+                'type': 'tool_end',
+                'tool_name': tool_name,
+                'status': status_str,
+            }
 
-        return results, None, ''
+        yield {
+            'type': 'final',
+            'results': results,
+            'pending_action_id': None,
+            'pending_summary': '',
+        }
 
     def _build_session_summary(self, session: ConversationSession) -> str:
         parts = []

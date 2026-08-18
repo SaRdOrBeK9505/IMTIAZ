@@ -2,15 +2,16 @@
 AI Provider registry.
 
 Mavjud provayderlar:
-    claude  — Anthropic Claude (default)
-    gemini  — Google Gemini Flash
+    gemini  — Google Gemini Flash (asosiy)
+    openai  — OpenAI GPT-4o-mini (zaxira / ikkinchi provider)
+    claude  — Anthropic Claude (uchinchi provider, ixtiyoriy)
 """
 
 from .base import BaseAIProvider, AIMessage, AIResponse
 
 __all__ = [
     'BaseAIProvider', 'AIMessage', 'AIResponse',
-    'ClaudeProvider', 'GeminiProvider',
+    'ClaudeProvider', 'GeminiProvider', 'OpenAIProvider', 'FallbackProvider',
 ]
 
 
@@ -21,4 +22,10 @@ def __getattr__(name: str):
     if name == 'GeminiProvider':
         from .gemini_provider import GeminiProvider
         return GeminiProvider
+    if name == 'OpenAIProvider':
+        from .openai_provider import OpenAIProvider
+        return OpenAIProvider
+    if name == 'FallbackProvider':
+        from .fallback_provider import FallbackProvider
+        return FallbackProvider
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
