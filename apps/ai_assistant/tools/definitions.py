@@ -79,11 +79,21 @@ RESTAURANT_BOOK_TOOL = {
 
 FLIGHT_BOOK_TOOL = {
     'name': 'book_flight',
-    'description': 'Tanlangan parvozni bronlaydi va to\'lovni boshlaydi.',
+    'description': (
+        'Tanlangan parvozni bronlaydi va to\'lovni boshlaydi. '
+        'Barcha maydonlarni oldingi search_flights natijasidagi '
+        'tegishli parvoz obyektidan (origin, destination, departure_at, price) OL — '
+        'o\'ylab topma, faqat natijada ko\'rsatilgan qiymatlarni ishlat.'
+    ),
     'input_schema': {
         'type': 'object',
         'properties': {
-            'offer_id': {'type': 'string', 'description': 'search_flights natijasidan offer ID'},
+            'offer_id':     {'type': 'string', 'description': 'search_flights natijasidan offer ID'},
+            'origin':       {'type': 'string', 'description': "search_flights natijasidagi 'origin' (IATA kod)"},
+            'destination':  {'type': 'string', 'description': "search_flights natijasidagi 'destination' (IATA kod)"},
+            'departure_at': {'type': 'string', 'description': "Tanlangan parvozning 'departure_at' qiymati (ISO datetime)"},
+            'price':        {'type': 'number', 'description': "Tanlangan parvozning 'price' qiymati — tasdiqlash va limit tekshiruvi uchun MAJBURIY"},
+            'currency':     {'type': 'string', 'description': "Tanlangan parvozning 'currency' qiymati (masalan UZS)"},
             'passengers': {'type': 'integer'},
             'payment_method': {
                 'type': 'string',
@@ -92,7 +102,7 @@ FLIGHT_BOOK_TOOL = {
                 'description': 'Mijoz AlifPay checkout orqali to\'laydi',
             },
         },
-        'required': ['offer_id'],
+        'required': ['offer_id', 'origin', 'destination', 'departure_at', 'price'],
     },
 }
 

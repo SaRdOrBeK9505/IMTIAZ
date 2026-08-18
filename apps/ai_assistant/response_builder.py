@@ -164,7 +164,7 @@ def _format_flights(result: dict, lang: str) -> str:
             continue
         seen.add(key)
         shown += 1
-        if shown > 5:
+        if shown > 3:
             break
         baggage = o.get('baggage')
         baggage_str = t('flight_baggage_yes', lang) if baggage else ''

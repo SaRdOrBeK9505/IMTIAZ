@@ -5,12 +5,28 @@ Til tanlash tartibi:
     1. Joriy xabar tilidan (kirill → ru, ingliz so'zlari → en)
     2. User.language_code (profil / Telegram)
     3. Default: uz
+
+Fayl tarkibi (bo'limlar bo'yicha, yuqoridan pastga):
+    1. Konstantalar va til aniqlash yordamchilari
+    2. Tarjima kalitidan matn olish — t() va yordamchi builder funksiyalar
+    3. AI system prompt (build_system_prompt)
+    4. Tasdiqlash (confirmation) matnlari — build_confirmation_summary
+    5. _MESSAGES katalogi — mavzu bo'yicha guruhlangan:
+       a) umumiy/xato xabarlar
+       b) tasdiqlash (confirm_*)
+       c) bron natijalari (booking_*, *_booked)
+       d) Bookhara / tashqi xizmat xabarlari
+       e) parvoz qidiruv natijalari (flight_*, flights_*)
+       f) restoran / tadbir / tur paket natijalari
+       g) status va xizmat nomlari lug'atlari (pastda, alohida)
 """
 
 from __future__ import annotations
 
 import re
 from decimal import Decimal
+
+# ─── 1. Konstantalar va til aniqlash ──────────────────────────────────────────
 
 SUPPORTED_LANGUAGES = frozenset({'uz', 'ru', 'en'})
 
@@ -20,7 +36,6 @@ LANGUAGE_NAMES = {
     'en': 'English',
 }
 
-# Uzbekcha kalit so'zlar
 _UZ_HINTS = frozenset({
     'salom', 'assalomu', 'alaykum', 'qanday', 'yordam', 'chipta', 'mehmonxona',
     'restoran', 'bron', 'izlash', 'bormi', 'kerak', 'samolyot', 'poyezd',
@@ -29,7 +44,6 @@ _UZ_HINTS = frozenset({
     'bekor', 'toshkent', 'samarqand', 'buxoro', 'xiva', 'tursiz', 'tur',
 })
 
-# Inglizcha kalit so'zlar (oddiy til aniqlash)
 _EN_HINTS = frozenset({
     'hello', 'hi', 'hey', 'please', 'thank', 'thanks', 'book', 'booking',
     'flight', 'flights', 'restaurant', 'event', 'train', 'search', 'find',
@@ -37,7 +51,6 @@ _EN_HINTS = frozenset({
     'the', 'what', 'where', 'when', 'how', 'can', 'you', 'i', 'me', 'english',
 })
 
-# Ruscha kalit so'zlar
 _RU_HINTS = frozenset({
     'привет', 'здравствуйте', 'пожалуйста', 'спасибо', 'бронь', 'бронировать',
     'рейс', 'авиабилет', 'ресторан', 'поезд', 'найти', 'поиск', 'помогите',
@@ -63,7 +76,6 @@ def detect_language_from_text(text: str | None) -> str | None:
     if words & _EN_HINTS and cyrillic == 0:
         return 'en'
 
-    # Agar matn lotin alifbosida bo'lib, inglizcha kalit so'z bo'lmasa — o'zbek tiliga ustunlik beriladi
     if latin > 0 and cyrillic == 0:
         return 'uz'
 
@@ -114,6 +126,8 @@ def localized_field(obj, field: str, lang: str) -> str:
     return str(value) if value is not None else ''
 
 
+# ─── 2. Tarjima kalitidan matn olish ──────────────────────────────────────────
+
 def t(key: str, lang: str, **kwargs) -> str:
     """Tarjima kalitidan matn olish."""
     lang = normalize_language(lang)
@@ -127,24 +141,35 @@ def t(key: str, lang: str, **kwargs) -> str:
     return template
 
 
-def build_system_prompt(
-    lang: str,
-    price_limit: str,
-    autonomy_level: str,
-    session_summary: str | None = None,
-    user_profile_summary: str | None = None,
-) -> str:
-    from datetime import timedelta
-    from django.utils import timezone
+def booking_title_restaurant(lang: str, date: str, time: str, guests: int) -> str:
+    return t('booking_title_restaurant', lang, date=date, time=time, guests=guests)
 
+
+def booking_title_flight(lang: str, origin: str, destination: str) -> str:
+    return t('booking_title_flight', lang, origin=origin, destination=destination)
+
+
+def status_label(status: str, lang: str) -> str:
     lang = normalize_language(lang)
-    lang_name = LANGUAGE_NAMES[lang]
-    today = timezone.now().date()
-    tomorrow = today + timedelta(days=1)
+    return BOOKING_STATUS_LABELS.get(lang, {}).get(status, status)
 
-    prompts = {
-        'uz': """\
-Sen IMTIAZ premium lifestyle concierge AI assistantsan.
+
+def service_label(service: str | None, lang: str) -> str:
+    if not service:
+        return t('service_unknown', lang)
+    lang = normalize_language(lang)
+    return SERVICE_TYPE_LABELS.get(lang, {}).get(service, service)
+
+
+# ─── 3. AI system prompt ──────────────────────────────────────────────────────
+
+_SYSTEM_PROMPTS: dict[str, str] = {
+    'uz': """\
+Sening isming — Bika. Sen IMTIAZ platformasining premium lifestyle concierge AI yordamchisisan.
+Har doim o'zingni faqat "Bika" deb tanishtir — "IMTIAZ AI Assistant" yoki boshqa uzun/rasmiy
+nom ISHLATMA. Kerak bo'lsa IMTIAZ'ni xizmat platformasi sifatida tilga olishing mumkin
+(masalan: "Men Bika — IMTIAZ'ning shaxsiy yordamchisiman"), lekin o'z isming doim Bike.
+
 Xizmatlar: parvoz, restoran, tadbirlar, tur paketlar, bronlar.
 Poyezd xizmati hozir mavjud emas — agar so'rasa, hozircha yo'qligini ayt va boshqa xizmatlarni taklif qil.
 
@@ -195,8 +220,12 @@ Brend va o'ziga xos joy nomlarini saqlab qol.
    - Agar "Saqlangan ob'ektlar state" bo'lmasa yoki mos raqam topilmasa — mijozdan
      aniqlashtirib so'ra ("Qaysi variantni nazarda tutdingiz?"), lekin qayta qidiruv qilma
 """,
-        'ru': """\
-Ты — AI-ассистент премиального lifestyle-сервиса IMTIAZ.
+    'ru': """\
+Твоё имя — Bika. Ты AI-ассистент премиального lifestyle-сервиса IMTIAZ.
+Всегда представляйся только как «Bika» — НЕ используй «IMTIAZ AI Assistant» или другое
+длинное/официальное имя. При необходимости можешь упомянуть IMTIAZ как сервис-платформу
+(например: «Я Bika — персональный помощник IMTIAZ»), но твоё имя всегда Bike.
+
 Услуги: авиабилеты, рестораны, мероприятия, турпакеты, бронирования.
 Железнодорожные билеты сейчас недоступны — если спросят, сообщи об этом и предложи другие услуги.
 
@@ -234,8 +263,12 @@ Brend va o'ziga xos joy nomlarini saqlab qol.
    - Сразу вызови book_flight или book_restaurant с этим id
    - НЕ вызывай повторно search_flights / search_restaurants — список уже есть
 """,
-        'en': """\
-You are the IMTIAZ premium lifestyle concierge AI assistant.
+    'en': """\
+Your name is Bika. You are the AI assistant of IMTIAZ, a premium lifestyle concierge service.
+Always introduce yourself only as "Bika" — NEVER as "IMTIAZ AI Assistant" or another
+long/formal name. You may mention IMTIAZ as the platform you belong to (e.g. "I'm Bika,
+IMTIAZ's personal assistant"), but your own name is always Bike.
+
 Services: flights, restaurants, events, tour packages, bookings.
 Train service is not available — if asked, say so and offer other services.
 
@@ -273,9 +306,43 @@ present it clearly in {lang_name}. Keep brand names and unique venue names as-is
    - Immediately call book_flight or book_restaurant with that id
    - Do NOT call search_flights / search_restaurants again — the list already exists
 """,
-    }
+}
 
-    base = prompts[lang].format(
+_CONCISE_INSTRUCTIONS: dict[str, str] = {
+    'uz': (
+        "\n\nMUHIM: Faqat so'ralganiga javob ber. Ortig'ini yozma. Keraksiz kirish "
+        "so'zlari, uzr, yoki uzoq izoh qo'shma. Agar tool natijasi berilsa, uni qayta "
+        "uzun tushuntirma — faqat foydalanuvchiga kerakli qisqa javobni ber."
+    ),
+    'ru': (
+        "\n\nВАЖНО: Отвечай только на заданный вопрос. Не добавляй лишнего текста, "
+        "вступлений или извинений. Если есть результат инструмента, не переписывай "
+        "большой JSON — дай краткий ответ, достаточный пользователю."
+    ),
+    'en': (
+        "\n\nIMPORTANT: Answer only what was asked. Do not add extra explanations, "
+        "long introductions, or apologies. If there are tool results, do not "
+        "re-explain the full JSON — provide a short, clear answer the user needs."
+    ),
+}
+
+
+def build_system_prompt(
+    lang: str,
+    price_limit: str,
+    autonomy_level: str,
+    session_summary: str | None = None,
+    user_profile_summary: str | None = None,
+) -> str:
+    from datetime import timedelta
+    from django.utils import timezone
+
+    lang = normalize_language(lang)
+    lang_name = LANGUAGE_NAMES[lang]
+    today = timezone.now().date()
+    tomorrow = today + timedelta(days=1)
+
+    base = _SYSTEM_PROMPTS[lang].format(
         price_limit=price_limit,
         autonomy_level=autonomy_level,
         lang_name=lang_name,
@@ -287,15 +354,18 @@ present it clearly in {lang_name}. Keep brand names and unique venue names as-is
     if user_profile_summary:
         base += f"\n\nDoimiy foydalanuvchi profili (uzoq muddatli xotira):\n{user_profile_summary}\n"
 
-    # Concise response instruction — encourage the model to avoid unnecessary verbosity
-    concise_instr = {
-        'uz': "\n\nMUHIM: Faqat soʻralganiga javob ber. Ortigʻini yozma. Keraksiz kirish soʻzlari, uzr, yoki uzoq izoh qoʻshma. Agar tool natijasi berilsa, uni qayta uzun tushuntirma — faqat foydalanuvchiga kerakli qisqa javobni ber.",
-        'ru': "\n\nВАЖНО: Отвечай только на заданный вопрос. Не добавляй лишнего текста, вступлений или извинений. Если есть результат инструмента, не переписывай большой JSON — дай краткий ответ, достаточный пользователю.",
-        'en': "\n\nIMPORTANT: Answer only what was asked. Do not add extra explanations, long introductions, or apologies. If there are tool results, do not re-explain the full JSON — provide a short, clear answer the user needs.",
-    }
-    base += concise_instr.get(lang, concise_instr['en'])
+    base += _CONCISE_INSTRUCTIONS.get(lang, _CONCISE_INSTRUCTIONS['en'])
     return base
 
+
+# ─── 4. Tasdiqlash (confirmation) matnlari ────────────────────────────────────
+#
+# DIQQAT: quyidagi confirm_* matnlari faqat "so'rov shakllantirildi" holatini
+# tasvirlaydi. Haqiqiy tasdiqlash matn orqali emas, faqat frontend'dagi
+# tugma (POST /api/ai/actions/{action_id}/confirm) orqali amalga oshadi —
+# qarang: confirmation.py. Frontend shu action_id'ga bog'langan "Tasdiqlash /
+# Bekor qilish" tugmalarini albatta chizishi kerak, aks holda foydalanuvchi
+# bronni yakunlay olmaydi.
 
 def build_confirmation_summary(
     tool_name: str,
@@ -331,29 +401,11 @@ def build_confirmation_summary(
     return t('confirm_generic', lang, tool_name=tool_name)
 
 
-def booking_title_restaurant(lang: str, date: str, time: str, guests: int) -> str:
-    return t('booking_title_restaurant', lang, date=date, time=time, guests=guests)
-
-
-def booking_title_flight(lang: str, origin: str, destination: str) -> str:
-    return t('booking_title_flight', lang, origin=origin, destination=destination)
-
-
-def status_label(status: str, lang: str) -> str:
-    lang = normalize_language(lang)
-    return BOOKING_STATUS_LABELS.get(lang, {}).get(status, status)
-
-
-def service_label(service: str | None, lang: str) -> str:
-    if not service:
-        return t('service_unknown', lang)
-    lang = normalize_language(lang)
-    return SERVICE_TYPE_LABELS.get(lang, {}).get(service, service)
-
-
-# ─── Tarjima katalogi ─────────────────────────────────────────────────────────
+# ─── 5. Tarjima katalogi ──────────────────────────────────────────────────────
 
 _MESSAGES: dict[str, dict[str, str]] = {
+
+    # 5a) Umumiy / xato xabarlar ------------------------------------------------
     'ai_provider_error': {
         'uz': "Kechirasiz, texnik muammo. Qayta urinib ko'ring.",
         'ru': 'Извините, техническая проблема. Попробуйте ещё раз.',
@@ -362,7 +414,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
     'ai_welcome': {
         'uz': (
             'Assalomu alaykum! 👋\n\n'
-            'Men IMTIAZ AI — sizning shaxsiy sayohat va xizmat yordamchingizman.\n'
+            'Men Bike — IMTIAZ platformasining shaxsiy sayohat va xizmat yordamchisiman.\n'
             'Men orqali:\n\n'
             '✈️ Aviachipta va mehmonxona bron qilishingiz\n'
             '🍽️ Restoranda stol band qilishingiz\n'
@@ -371,7 +423,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
         ),
         'ru': (
             'Здравствуйте! 👋\n\n'
-            'Я IMTIAZ AI — ваш персональный помощник по путешествиям и сервисам.\n'
+            'Я Bike — персональный помощник IMTIAZ по путешествиям и сервисам.\n'
             'С моей помощью вы можете:\n\n'
             '✈️ Забронировать авиабилет и отель\n'
             '🍽️ Забронировать столик в ресторане\n'
@@ -380,7 +432,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
         ),
         'en': (
             'Hello! 👋\n\n'
-            'I am IMTIAZ AI — your personal travel and concierge assistant.\n'
+            'I am Bike — IMTIAZ\'s personal travel and concierge assistant.\n'
             'Through me, you can:\n\n'
             '✈️ Book flights and hotels\n'
             '🍽️ Reserve a restaurant table\n'
@@ -418,6 +470,8 @@ _MESSAGES: dict[str, dict[str, str]] = {
         'ru': 'не определено',
         'en': 'unknown',
     },
+
+    # 5b) Tasdiqlash (confirm_*) --------------------------------------------------
     'confirm_amount': {
         'uz': '\n💰 Taxminiy narx: {amount} UZS',
         'ru': '\n💰 Примерная стоимость: {amount} UZS',
@@ -429,21 +483,21 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "📍 {origin} → {destination}\n"
             "📅 {date}\n"
             "👥 {passengers} yo'lovchi{amount}\n\n"
-            "Tasdiqlash uchun ilovadagi «✅ Tasdiqlash» tugmasini bosing."
+            "Davom etish uchun pastdagi «✅ Tasdiqlash» tugmasini bosing."
         ),
         'ru': (
             '✈️ Запрос на бронирование рейса:\n'
             '📍 {origin} → {destination}\n'
             '📅 {date}\n'
             '👥 {passengers} пассажир(ов){amount}\n\n'
-            'Нажмите «✅ Подтвердить» в приложении для подтверждения.'
+            'Нажмите «✅ Подтвердить» ниже, чтобы продолжить.'
         ),
         'en': (
             '✈️ Flight booking request:\n'
             '📍 {origin} → {destination}\n'
             '📅 {date}\n'
             '👥 {passengers} passenger(s){amount}\n\n'
-            'Tap «✅ Confirm» in the app to confirm.'
+            'Tap «✅ Confirm» below to continue.'
         ),
     },
     'confirm_restaurant': {
@@ -451,43 +505,60 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "🍽 Restoran bron so'rovi:\n"
             "📅 {date} {time}\n"
             "👥 {guests} kishi{amount}\n\n"
-            "Tasdiqlash uchun ilovadagi «✅ Tasdiqlash» tugmasini bosing."
+            "Davom etish uchun pastdagi «✅ Tasdiqlash» tugmasini bosing."
         ),
         'ru': (
             '🍽 Запрос на бронирование ресторана:\n'
             '📅 {date} {time}\n'
             '👥 {guests} гост(ей){amount}\n\n'
-            'Нажмите «✅ Подтвердить» в приложении для подтверждения.'
+            'Нажмите «✅ Подтвердить» ниже, чтобы продолжить.'
         ),
         'en': (
             '🍽 Restaurant booking request:\n'
             '📅 {date} {time}\n'
             '👥 {guests} guest(s){amount}\n\n'
-            'Tap «✅ Confirm» in the app to confirm.'
+            'Tap «✅ Confirm» below to continue.'
         ),
     },
     'confirm_cancel': {
         'uz': (
             "❌ Bronni bekor qilish so'rovi:\n"
             "🆔 {booking_id}\n\n"
-            "Tasdiqlash uchun ilovadagi «✅ Tasdiqlash» tugmasini bosing."
+            "Davom etish uchun pastdagi «✅ Tasdiqlash» tugmasini bosing."
         ),
         'ru': (
             '❌ Запрос на отмену бронирования:\n'
             '🆔 {booking_id}\n\n'
-            'Нажмите «✅ Подтвердить» в приложении для подтверждения.'
+            'Нажмите «✅ Подтвердить» ниже, чтобы продолжить.'
         ),
         'en': (
             '❌ Booking cancellation request:\n'
             '🆔 {booking_id}\n\n'
-            'Tap «✅ Confirm» in the app to confirm.'
+            'Tap «✅ Confirm» below to continue.'
         ),
     },
     'confirm_generic': {
-        'uz': "Harakat: {tool_name}\n\nTasdiqlash uchun «✅ Tasdiqlash» tugmasini bosing.",
-        'ru': 'Действие: {tool_name}\n\nНажмите «✅ Подтвердить» для подтверждения.',
-        'en': 'Action: {tool_name}\n\nTap «✅ Confirm» to confirm.',
+        'uz': "Harakat: {tool_name}\n\nDavom etish uchun pastdagi «✅ Tasdiqlash» tugmasini bosing.",
+        'ru': 'Действие: {tool_name}\n\nНажмите «✅ Подтвердить» ниже, чтобы продолжить.',
+        'en': 'Action: {tool_name}\n\nTap «✅ Confirm» below to continue.',
     },
+    'action_confirmed': {
+        'uz': 'Harakat muvaffaqiyatli bajarildi.',
+        'ru': 'Действие успешно выполнено.',
+        'en': 'Action completed successfully.',
+    },
+    'action_rejected': {
+        'uz': 'Harakat bekor qilindi.',
+        'ru': 'Действие отменено.',
+        'en': 'Action cancelled.',
+    },
+    'confirm_expired': {
+        'uz': "Tasdiqlash muddati o'tib ketdi. Iltimos, qaytadan so'rang.",
+        'ru': 'Срок подтверждения истёк. Пожалуйста, запросите снова.',
+        'en': 'Confirmation expired. Please request again.',
+    },
+
+    # 5c) Bron natijalari (booking_*, *_booked) ------------------------------
     'booking_title_restaurant': {
         'uz': 'Restoran — {date} {time}, {guests} kishi',
         'ru': 'Ресторан — {date} {time}, {guests} гост(ей)',
@@ -508,6 +579,38 @@ _MESSAGES: dict[str, dict[str, str]] = {
         'ru': 'Бронирование рейса создано. ID бронирования: {booking_id}',
         'en': 'Flight booking created. Booking ID: {booking_id}',
     },
+    'booking_not_found': {
+        'uz': 'Bron topilmadi.',
+        'ru': 'Бронирование не найдено.',
+        'en': 'Booking not found.',
+    },
+    'booking_already_status': {
+        'uz': 'Bron allaqachon {status}.',
+        'ru': 'Бронирование уже {status}.',
+        'en': 'Booking is already {status}.',
+    },
+    'booking_cancelled': {
+        'uz': 'Bron bekor qilindi.',
+        'ru': 'Бронирование отменено.',
+        'en': 'Booking cancelled.',
+    },
+    'bookings_empty': {
+        'uz': "Sizda hozircha bronlar yo'q.",
+        'ru': 'У вас пока нет бронирований.',
+        'en': 'You have no bookings yet.',
+    },
+    'bookings_header': {
+        'uz': '📋 {count} ta bron:',
+        'ru': '📋 {count} бронирований:',
+        'en': '📋 {count} booking(s):',
+    },
+    'booking_item': {
+        'uz': '• {title} — {status} ({price:,.0f} UZS)',
+        'ru': '• {title} — {status} ({price:,.0f} UZS)',
+        'en': '• {title} — {status} ({price:,.0f} UZS)',
+    },
+
+    # 5d) Bookhara / tashqi xizmat xabarlari -----------------------------------
     'bookhara_no_response': {
         'uz': (
             "Aviachipta tizimi hozir javob bermadi — "
@@ -550,37 +653,101 @@ _MESSAGES: dict[str, dict[str, str]] = {
             'booking saved, a manager will contact you.'
         ),
     },
-    'booking_not_found': {
-        'uz': 'Bron topilmadi.',
-        'ru': 'Бронирование не найдено.',
-        'en': 'Booking not found.',
+    'flight_past_date': {
+        'uz': (
+            "Ko'rsatilgan sana ({date}) allaqachon o'tib ketgan. "
+            "Iltimos, kelgusi sana kiriting — masalan ertaga ({tomorrow_hint}). "
+            "Qaysi sanada jo'nashni xohlaysiz?"
+        ),
+        'ru': (
+            'Указанная дата ({date}) уже прошла. '
+            'Укажите будущую дату — например завтра ({tomorrow_hint}). '
+            'На какую дату планируете вылет?'
+        ),
+        'en': (
+            'The date ({date}) is in the past. '
+            'Please provide a future date — e.g. tomorrow ({tomorrow_hint}). '
+            'When would you like to depart?'
+        ),
     },
-    'booking_already_status': {
-        'uz': 'Bron allaqachon {status}.',
-        'ru': 'Бронирование уже {status}.',
-        'en': 'Booking is already {status}.',
+    'flight_invalid_date': {
+        'uz': "Sana noto'g'ri. Iltimos, YYYY-MM-DD formatida kiriting (masalan: 2026-08-14).",
+        'ru': 'Неверная дата. Укажите в формате YYYY-MM-DD (например: 2026-08-14).',
+        'en': 'Invalid date. Please use YYYY-MM-DD format (e.g. 2026-08-14).',
     },
-    'booking_cancelled': {
-        'uz': 'Bron bekor qilindi.',
-        'ru': 'Бронирование отменено.',
-        'en': 'Booking cancelled.',
+    'flight_unavailable': {
+        'uz': (
+            "Hozir {origin} → {destination}{date_line} bo'yicha onlayn parvoz "
+            "qidiruv vaqtincha mavjud emas — aviachiptalar tizimi bilan bog'lanishda "
+            "biroz kechikish bor.\n\n"
+            "Shu bilan birga sizga yordam bera olaman:\n"
+            "• Boshqa sana yoki yaqin aeroport bo'yicha variant ko'rib chiqish\n"
+            "• Sayohatingiz uchun restoran yoki tadbir bronlash\n"
+            "• Menejerimiz orqali chipta — biz siz uchun qo'lda tekshirib, "
+            "eng qulay variantni topamiz\n\n"
+            "Bir ozdan keyin avtomatik qidiruvni yana sinab ko'ramiz. "
+            "Hozir qaysi yo'nalish sizga qulayroq?"
+        ),
+        'ru': (
+            'Сейчас онлайн-поиск рейсов {origin} → {destination}{date_line} '
+            'временно недоступен — небольшая задержка при связи с системой авиабилетов.\n\n'
+            'При этом я могу помочь:\n'
+            '• Рассмотреть другую дату или ближайший аэропорт\n'
+            '• Забронировать ресторан или мероприятие для поездки\n'
+            '• Оформить билет через менеджера — мы вручную подберём лучший вариант\n\n'
+            'Через некоторое время попробуем поиск снова. Какое направление вам удобнее?'
+        ),
+        'en': (
+            'Online flight search for {origin} → {destination}{date_line} is temporarily '
+            'unavailable — slight delay connecting to the ticketing system.\n\n'
+            'I can still help you with:\n'
+            '• Alternative dates or nearby airports\n'
+            '• Restaurant or event bookings for your trip\n'
+            '• Ticket via our manager — we\'ll find the best option manually\n\n'
+            'We\'ll retry search shortly. Which direction works better for you?'
+        ),
     },
-    'action_confirmed': {
-        'uz': 'Harakat muvaffaqiyatli bajarildi.',
-        'ru': 'Действие успешно выполнено.',
-        'en': 'Action completed successfully.',
+    'train_unavailable': {
+        'uz': (
+            "Hozir {origin} → {destination} yo'nalishida poyezd qidiruv "
+            "vaqtincha ishlamayapti — bu xizmat tez orada ulab qo'yiladi.\n\n"
+            "Ayni paytda parvoz qidiruv, restoran bron yoki boshqa "
+            "IMTIAZ xizmatlari bilan yordam bera olaman. Nima qidiramiz?"
+        ),
+        'ru': (
+            'Поиск поездов по маршруту {origin} → {destination} временно недоступен — '
+            'сервис скоро будет подключён.\n\n'
+            'Сейчас могу помочь с авиабилетами, ресторанами или другими '
+            'услугами IMTIAZ. Что ищем?'
+        ),
+        'en': (
+            'Train search for {origin} → {destination} is temporarily unavailable — '
+            'this service will be connected soon.\n\n'
+            'I can help with flights, restaurants, or other IMTIAZ services. What shall we look for?'
+        ),
     },
-    'action_rejected': {
-        'uz': 'Harakat bekor qilindi.',
-        'ru': 'Действие отменено.',
-        'en': 'Action cancelled.',
+    'integration_generic': {
+        'uz': (
+            "So'rovingizni hozir to'liq bajara olmadim — xizmat vaqtincha band "
+            "yoki bog'lanishda kechikish bor.\n\n"
+            "Boshqa yo'nalish, sana yoki xizmat turini sinab ko'ramizmi? "
+            "Yoki menejerimiz siz bilan bog'lanishini tashkil qilay?"
+        ),
+        'ru': (
+            'Сейчас не удалось полностью выполнить запрос — сервис временно занят '
+            'или есть задержка связи.\n\n'
+            'Попробуем другой маршрут, дату или тип услуги? '
+            'Или организовать звонок менеджера?'
+        ),
+        'en': (
+            'I couldn\'t fully complete your request — the service is temporarily busy '
+            'or there\'s a connection delay.\n\n'
+            'Shall we try another route, date, or service type? '
+            'Or arrange a callback from our manager?'
+        ),
     },
-    'confirm_expired': {
-        'uz': "Tasdiqlash muddati o'tib ketdi. Iltimos, qaytadan so'rang.",
-        'ru': 'Срок подтверждения истёк. Пожалуйста, запросите снова.',
-        'en': 'Confirmation expired. Please request again.',
-    },
-    # response_builder
+
+    # 5e) Parvoz qidiruv natijalari (flight_*, flights_*) --------------------
     'flights_not_found': {
         'uz': (
             '{route} yo\'nalishida {date} sanasida to\'g\'ridan-to\'g\'ri parvoz topilmadi.\n\n'
@@ -617,21 +784,6 @@ _MESSAGES: dict[str, dict[str, str]] = {
         'ru': '... и ещё {count} вариант(ов).',
         'en': '... and {count} more option(s).',
     },
-    'trains_not_found': {
-        'uz': 'Poyezd reyslari topilmadi.',
-        'ru': 'Поезда не найдены.',
-        'en': 'No trains found.',
-    },
-    'trains_header': {
-        'uz': '🚂 {count} ta poyezd varianti:',
-        'ru': '🚂 {count} вариант(ов) поезда:',
-        'en': '🚂 {count} train option(s):',
-    },
-    'train_item': {
-        'uz': '{i}. Poyezd {number} — {price:,.0f} UZS',
-        'ru': '{i}. Поезд {number} — {price:,.0f} UZS',
-        'en': '{i}. Train {number} — {price:,.0f} UZS',
-    },
     'flight_item': {
         'uz': '{i}. {airline} {number} | 🕐 {departure_time} → {arrival_time} | {price:,.0f} {currency}{baggage}',
         'ru': '{i}. {airline} {number} | 🕐 {departure_time} → {arrival_time} | {price:,.0f} {currency}{baggage}',
@@ -647,6 +799,23 @@ _MESSAGES: dict[str, dict[str, str]] = {
         'ru': '\n💡 Напишите номер варианта — помогу с бронированием.',
         'en': '\n💡 Tell me the option number — I\'ll help you book.',
     },
+    'trains_not_found': {
+        'uz': 'Poyezd reyslari topilmadi.',
+        'ru': 'Поезда не найдены.',
+        'en': 'No trains found.',
+    },
+    'trains_header': {
+        'uz': '🚂 {count} ta poyezd varianti:',
+        'ru': '🚂 {count} вариант(ов) поезда:',
+        'en': '🚂 {count} train option(s):',
+    },
+    'train_item': {
+        'uz': '{i}. Poyezd {number} — {price:,.0f} UZS',
+        'ru': '{i}. Поезд {number} — {price:,.0f} UZS',
+        'en': '{i}. Train {number} — {price:,.0f} UZS',
+    },
+
+    # 5f) Restoran / tadbir / tur paket natijalari ----------------------------
     'restaurants_not_found': {
         'uz': 'Restoran topilmadi.',
         'ru': 'Рестораны не найдены.',
@@ -768,21 +937,6 @@ _MESSAGES: dict[str, dict[str, str]] = {
             'The tour company will contact you soon.'
         ),
     },
-    'bookings_empty': {
-        'uz': "Sizda hozircha bronlar yo'q.",
-        'ru': 'У вас пока нет бронирований.',
-        'en': 'You have no bookings yet.',
-    },
-    'bookings_header': {
-        'uz': '📋 {count} ta bron:',
-        'ru': '📋 {count} бронирований:',
-        'en': '📋 {count} booking(s):',
-    },
-    'booking_item': {
-        'uz': '• {title} — {status} ({price:,.0f} UZS)',
-        'ru': '• {title} — {status} ({price:,.0f} UZS)',
-        'en': '• {title} — {status} ({price:,.0f} UZS)',
-    },
     'nearby_not_found': {
         'uz': 'Yaqin atrofda xizmat topilmadi.',
         'ru': 'Поблизости ничего не найдено.',
@@ -818,98 +972,52 @@ _MESSAGES: dict[str, dict[str, str]] = {
         'ru': 'станция отправления',
         'en': 'departure station',
     },
-    # integrations/errors
-    'flight_past_date': {
-        'uz': (
-            "Ko'rsatilgan sana ({date}) allaqachon o'tib ketgan. "
-            "Iltimos, kelgusi sana kiriting — masalan ertaga ({tomorrow_hint}). "
-            "Qaysi sanada jo'nashni xohlaysiz?"
-        ),
-        'ru': (
-            'Указанная дата ({date}) уже прошла. '
-            'Укажите будущую дату — например завтра ({tomorrow_hint}). '
-            'На какую дату планируете вылет?'
-        ),
-        'en': (
-            'The date ({date}) is in the past. '
-            'Please provide a future date — e.g. tomorrow ({tomorrow_hint}). '
-            'When would you like to depart?'
-        ),
+}
+
+
+# ─── 5g) Status va xizmat nomlari lug'atlari ──────────────────────────────────
+
+BOOKING_STATUS_LABELS: dict[str, dict[str, str]] = {
+    'uz': {
+        'pending': 'kutilmoqda',
+        'confirmed': 'tasdiqlandi',
+        'cancelled': 'bekor qilindi',
+        'completed': 'yakunlandi',
     },
-    'flight_invalid_date': {
-        'uz': "Sana noto'g'ri. Iltimos, YYYY-MM-DD formatida kiriting (masalan: 2026-08-14).",
-        'ru': 'Неверная дата. Укажите в формате YYYY-MM-DD (например: 2026-08-14).',
-        'en': 'Invalid date. Please use YYYY-MM-DD format (e.g. 2026-08-14).',
+    'ru': {
+        'pending': 'ожидает',
+        'confirmed': 'подтверждено',
+        'cancelled': 'отменено',
+        'completed': 'завершено',
     },
-    'flight_unavailable': {
-        'uz': (
-            "Hozir {origin} → {destination}{date_line} bo'yicha onlayn parvoz "
-            "qidiruv vaqtincha mavjud emas — aviachiptalar tizimi bilan bog'lanishda "
-            "biroz kechikish bor.\n\n"
-            "Shu bilan birga sizga yordam bera olaman:\n"
-            "• Boshqa sana yoki yaqin aeroport bo'yicha variant ko'rib chiqish\n"
-            "• Sayohatingiz uchun restoran yoki tadbir bronlash\n"
-            "• Menejerimiz orqali chipta — biz siz uchun qo'lda tekshirib, "
-            "eng qulay variantni topamiz\n\n"
-            "Bir ozdan keyin avtomatik qidiruvni yana sinab ko'ramiz. "
-            "Hozir qaysi yo'nalish sizga qulayroq?"
-        ),
-        'ru': (
-            'Сейчас онлайн-поиск рейсов {origin} → {destination}{date_line} '
-            'временно недоступен — небольшая задержка при связи с системой авиабилетов.\n\n'
-            'При этом я могу помочь:\n'
-            '• Рассмотреть другую дату или ближайший аэропорт\n'
-            '• Забронировать ресторан или мероприятие для поездки\n'
-            '• Оформить билет через менеджера — мы вручную подберём лучший вариант\n\n'
-            'Через некоторое время попробуем поиск снова. Какое направление вам удобнее?'
-        ),
-        'en': (
-            'Online flight search for {origin} → {destination}{date_line} is temporarily '
-            'unavailable — slight delay connecting to the ticketing system.\n\n'
-            'I can still help you with:\n'
-            '• Alternative dates or nearby airports\n'
-            '• Restaurant or event bookings for your trip\n'
-            '• Ticket via our manager — we\'ll find the best option manually\n\n'
-            'We\'ll retry search shortly. Which direction works better for you?'
-        ),
+    'en': {
+        'pending': 'pending',
+        'confirmed': 'confirmed',
+        'cancelled': 'cancelled',
+        'completed': 'completed',
     },
-    'train_unavailable': {
-        'uz': (
-            "Hozir {origin} → {destination} yo'nalishida poyezd qidiruv "
-            "vaqtincha ishlamayapti — bu xizmat tez orada ulab qo'yiladi.\n\n"
-            "Ayni paytda parvoz qidiruv, restoran bron yoki boshqa "
-            "IMTIAZ xizmatlari bilan yordam bera olaman. Nima qidiramiz?"
-        ),
-        'ru': (
-            'Поиск поездов по маршруту {origin} → {destination} временно недоступен — '
-            'сервис скоро будет подключён.\n\n'
-            'Сейчас могу помочь с авиабилетами, ресторанами или другими '
-            'услугами IMTIAZ. Что ищем?'
-        ),
-        'en': (
-            'Train search for {origin} → {destination} is temporarily unavailable — '
-            'this service will be connected soon.\n\n'
-            'I can help with flights, restaurants, or other IMTIAZ services. What shall we look for?'
-        ),
+}
+
+SERVICE_TYPE_LABELS: dict[str, dict[str, str]] = {
+    'uz': {
+        'flight': 'parvoz',
+        'restaurant': 'restoran',
+        'event': 'tadbir',
+        'train': 'poyezd',
+        'tour': 'tur paket',
     },
-    'integration_generic': {
-        'uz': (
-            "So'rovingizni hozir to'liq bajara olmadim — xizmat vaqtincha band "
-            "yoki bog'lanishda kechikish bor.\n\n"
-            "Boshqa yo'nalish, sana yoki xizmat turini sinab ko'ramizmi? "
-            "Yoki menejerimiz siz bilan bog'lanishini tashkil qilay?"
-        ),
-        'ru': (
-            'Сейчас не удалось полностью выполнить запрос — сервис временно занят '
-            'или есть задержка связи.\n\n'
-            'Попробуем другой маршрут, дату или тип услуги? '
-            'Или организовать звонок менеджера?'
-        ),
-        'en': (
-            'I couldn\'t fully complete your request — the service is temporarily busy '
-            'or there\'s a connection delay.\n\n'
-            'Shall we try another route, date, or service type? '
-            'Or arrange a callback from our manager?'
-        ),
+    'ru': {
+        'flight': 'авиабилет',
+        'restaurant': 'ресторан',
+        'event': 'мероприятие',
+        'train': 'поезд',
+        'tour': 'турпакет',
+    },
+    'en': {
+        'flight': 'flight',
+        'restaurant': 'restaurant',
+        'event': 'event',
+        'train': 'train',
+        'tour': 'tour package',
     },
 }

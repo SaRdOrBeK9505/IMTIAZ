@@ -119,7 +119,7 @@ class RequestOTPSerializer(serializers.Serializer):
     #     parts = value.strip().split()
     #     if len(parts) < 2:
     #         raise serializers.ValidationError(
-    #             "Ism va familiyani to'liq kiriting (kamida 2 so'z)."
+    #             "Введите полное имя и фамилию (минимум 2 слова)."
     #         )
     #     return value.strip()
 
@@ -127,11 +127,11 @@ class RequestOTPSerializer(serializers.Serializer):
         phone = _normalize_phone(value)
         if not PHONE_RE.match(phone):
             raise serializers.ValidationError(
-                "Telefon raqam formati noto'g'ri. Format: +998XXXXXXXXX"
+                "Неверный формат номера телефона. Формат: +998XXXXXXXXX"
             )
         if User.objects.filter(phone=phone, is_phone_verified=True).exists():
             raise serializers.ValidationError(
-                "Bu raqam allaqachon ro'yxatdan o'tgan. Kirish sahifasiga o'ting."
+                "Этот номер уже зарегистрирован. Перейдите на страницу входа."
             )
         return phone
 
@@ -164,20 +164,20 @@ class VerifyOTPSerializer(serializers.Serializer):
 
         if not otp:
             raise serializers.ValidationError(
-                {'otp_code': "Faol OTP kod topilmadi. Qayta kod so'rang."}
+                {'otp_code': "Активный код подтверждения не найден. Запросите код заново."}
             )
         if not otp.is_valid:
             raise serializers.ValidationError(
-                {'otp_code': "OTP muddati o'tgan (5 daqiqa). Qayta kod so'rang."}
+                {'otp_code': "Срок действия кода истёк (5 минут). Запросите код заново."}
             )
         if otp.attempts >= 5:
             raise serializers.ValidationError(
-                {'otp_code': "Urinishlar soni oshib ketdi. Qayta kod so'rang."}
+                {'otp_code': "Превышено количество попыток. Запросите код заново."}
             )
         if not otp.verify(otp_code):
             remaining = max(0, 5 - otp.attempts)
             raise serializers.ValidationError(
-                {'otp_code': f"Noto'g'ri kod. {remaining} ta urinish qoldi."}
+                {'otp_code': f"Неверный код. Осталось попыток: {remaining}."}
             )
 
         attrs['phone'] = phone
@@ -224,10 +224,10 @@ class CompleteRegistrationSerializer(serializers.Serializer):
             phone = _signer.unsign(value, max_age=900)
         except SignatureExpired:
             raise serializers.ValidationError(
-                "Tasdiqlash muddati tugagan (15 daqiqa). Qaytadan OTP so'rang."
+                "Срок подтверждения истёк (15 минут). Запросите OTP заново."
             )
         except BadSignature:
-            raise serializers.ValidationError("Noto'g'ri tasdiqlash tokeni.")
+            raise serializers.ValidationError("Неверный токен подтверждения.")
         return phone   # validated_data['verification_token'] = phone raqami
 
     def validate(self, attrs: dict) -> dict:
@@ -238,7 +238,7 @@ class CompleteRegistrationSerializer(serializers.Serializer):
         register_data = cache.get(f'register_data:{phone}')
         if not register_data:
             raise serializers.ValidationError(
-                "Ro'yxatdan o'tish ma'lumotlari topilmadi. Iltimos qaytadan boshlang."
+                "Данные регистрации не найдены. Пожалуйста, начните заново."
             )
 
         attrs['phone']         = phone
@@ -251,14 +251,14 @@ class CompleteRegistrationSerializer(serializers.Serializer):
             parsed = _verify_telegram_init_data(init_data_raw)
             if parsed is None:
                 raise serializers.ValidationError(
-                    {'telegram_init_data': "Telegram ma'lumotlari tekshiruvdan o'tmadi."}
+                    {'telegram_init_data': "Данные Telegram не прошли проверку."}
                 )
             tg_user     = parsed.get('user', {})
             telegram_id = tg_user.get('id')
 
             if telegram_id and User.objects.filter(telegram_id=telegram_id).exists():
                 raise serializers.ValidationError(
-                    {'telegram_init_data': "Bu Telegram akkaunt boshqa foydalanuvchiga bog'langan."}
+                    {'telegram_init_data': "Этот аккаунт Telegram уже привязан к другому пользователю."}
                 )
 
         attrs['telegram_id'] = telegram_id
@@ -326,15 +326,15 @@ class LoginSerializer(serializers.Serializer):
         )
         if not user:
             raise serializers.ValidationError(
-                "Telefon raqam yoki parol noto'g'ri."
+                "Неверный номер телефона или пароль."
             )
         if not user.is_active:
             raise serializers.ValidationError(
-                "Akkaunt faol emas. Administrator bilan bog'laning."
+                "Аккаунт неактивен. Свяжитесь с администратором."
             )
         if user.role not in self.allowed_roles:
             raise serializers.ValidationError(
-                "Bu panelga kirish huquqi yo'q."
+                "Нет доступа к этой панели."
             )
         attrs['user'] = user
         return attrs
@@ -363,11 +363,11 @@ class CRMLoginSerializer(LoginSerializer):
 
         if not organization:
             raise serializers.ValidationError(
-                'Foydalanuvchi hech qanday tashkilotga biriktirilmagan.'
+                'Пользователь не привязан ни к одной организации.'
             )
         if not organization.is_active:
             raise serializers.ValidationError(
-                'Tashkilot vaqtincha faol emas. Administrator bilan bog\'laning.'
+                'Организация временно неактивна. Свяжитесь с администратором.'
             )
 
         attrs['organization'] = organization
@@ -452,5 +452,5 @@ class AISettingsSerializer(serializers.ModelSerializer):
 
     def validate_ai_autonomy_level(self, value: str) -> str:
         if value not in AIAutonomyLevel.values:
-            raise serializers.ValidationError("Noto'g'ri daraja.")
+            raise serializers.ValidationError("Неверный уровень.")
         return value

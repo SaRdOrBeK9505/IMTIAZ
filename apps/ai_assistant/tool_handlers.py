@@ -136,7 +136,7 @@ def handle_search_flights(
                     'available_seats': o.available_seats,
                     'baggage':         o.baggage_included,
                 }
-                for o in offers[:10]
+                for o in offers[:3]
             ],
         }
     except Exception as e:
