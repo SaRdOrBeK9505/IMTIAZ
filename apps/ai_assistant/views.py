@@ -25,6 +25,15 @@ from .serializers import (
 )
 from .services import AIAssistantService
 
+from rest_framework.renderers import BaseRenderer, JSONRenderer
+
+class EventStreamRenderer(BaseRenderer):
+    media_type = 'text/event-stream'
+    format = 'txt'
+    charset = None
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return data
 
 def get_ai_service() -> AIAssistantService:
     return AIAssistantService()
@@ -84,6 +93,7 @@ class ChatStreamView(APIView):
         data: {"type": "error", "message": "..."}
     """
     permission_classes = [IsAuthenticated]
+    renderer_classes = [EventStreamRenderer, JSONRenderer]
 
     @extend_schema(exclude=True)  # streaming javobni OpenAPI avtomatik hujjatlay olmaydi
     def post(self, request):
