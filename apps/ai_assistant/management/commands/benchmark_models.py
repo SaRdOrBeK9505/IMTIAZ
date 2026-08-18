@@ -81,7 +81,7 @@ class Command(BaseCommand):
             {
                 "name": "Gemini 2.0 Flash-Lite (Tezkor/Arzon)",
                 "provider_class": GeminiProvider,
-                "model_name": "gemini-2.0-flash-lite-preview-02-05",
+                "model_name": "gemini-2.0-flash-lite",
                 "input_cost": 0.075,
                 "output_cost": 0.30
             },
