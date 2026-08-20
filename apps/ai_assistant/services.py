@@ -187,6 +187,15 @@ class AIAssistantService:
                 )
             except ConversationSession.DoesNotExist:
                 pass
+
+        active_session = (
+            ConversationSession.objects.filter(user=user, is_active=True)
+            .order_by('-updated_at')
+            .first()
+        )
+        if active_session:
+            return active_session
+
         return ConversationSession.objects.create(user=user)
 
     def bootstrap_session(self, user, session_id: str | None = None) -> dict:

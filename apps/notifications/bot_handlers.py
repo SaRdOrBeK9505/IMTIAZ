@@ -64,7 +64,7 @@ def _handle_message(message: dict) -> None:
                 note = "\n\n📌 <i>Ushbu amallarni tasdiqlash uchun Mini App ga o'ting:</i>"
             reply_content += note
 
-        _send_split_message(bot, chat_id, reply_content, reply_markup=main_menu_keyboard(lang=lang))
+        _send_split_message(bot, chat_id, reply_content, reply_markup=None)
 
     except Exception as e:
         logger.exception('Bot AI message error: %s', e)
@@ -74,7 +74,7 @@ def _handle_message(message: dict) -> None:
             err_msg = "Sorry, an error occurred while processing your request. Please try again later."
         else:
             err_msg = "Kechirasiz, so'rovingizni qayta ishlashda xatolik yuz berdi. Iltimos, bir ozdan so'ng qayta urinib ko'ring."
-        bot.send_message(chat_id, err_msg, reply_markup=main_menu_keyboard(lang=lang))
+        bot.send_message(chat_id, err_msg, reply_markup=None)
 
 
 def _send_split_message(bot, chat_id: int, text: str, reply_markup: dict | None = None) -> None:
@@ -100,6 +100,11 @@ def _handle_start(message: dict) -> None:
     start_param = parts[1] if len(parts) > 1 else 'ai_chat'
 
     _sync_telegram_profile(chat_id, tg_user)
+    user = _get_or_create_user(chat_id, tg_user)
+    # /start chaqirilganda eski aktiv suhbat sessiyasini yangilash uchun is_active=False qilamiz
+    from apps.ai_assistant.models import ConversationSession
+    ConversationSession.objects.filter(user=user, is_active=True).update(is_active=False)
+
     lang, first_name = _get_user_info(chat_id, tg_user)
 
     bot = get_bot()
