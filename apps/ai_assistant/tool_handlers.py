@@ -220,17 +220,23 @@ def handle_search_restaurants(
 
 
 def handle_book_restaurant(
-    user, branch_id: str, date: str, time: str,
-    guests: int = 2, special_requests: str = '', **kwargs,
+    user, branch_id: str = '', date: str = None, time: str = None,
+    guests: int = 2, special_requests: str = '', phone: str = '', **kwargs,
 ) -> dict:
     """
-    Bu handler services.py dagi WRITE_TOOL_TO_ACTION orqali
-    requires_confirmation() ga yuboriladi.
-    Haqiqiy booking confirmation.py::_execute_booking() orqali yaratiladi.
+    Eski book_restaurant chaqiruvini handle_submit_restaurant_lead ga yo'naltirish.
     """
-    raise NotImplementedError(
-        "handle_book_restaurant to'g'ridan-to'g'ri chaqirilmaydi. "
-        "Tasdiqlangan holda confirmation.py::_execute_booking() ishga tushadi."
+    user_phone = phone or user.phone
+    return handle_submit_restaurant_lead(
+        user=user,
+        branch_id=branch_id,
+        phone=user_phone,
+        full_name=user.full_name,
+        preferred_date=date,
+        preferred_time=time,
+        guests=guests,
+        note=special_requests,
+        **kwargs,
     )
 
 

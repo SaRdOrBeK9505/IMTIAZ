@@ -310,7 +310,6 @@ def get_all_tools() -> list[dict]:
     return [
         FLIGHT_SEARCH_TOOL,
         RESTAURANT_SEARCH_TOOL,
-        RESTAURANT_BOOK_TOOL,
         FLIGHT_BOOK_TOOL,
         EVENT_SEARCH_TOOL,
         BOOKING_CANCEL_TOOL,
