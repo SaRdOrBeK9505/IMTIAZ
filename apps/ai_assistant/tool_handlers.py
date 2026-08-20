@@ -604,6 +604,85 @@ def handle_submit_tour_lead(
     }
 
 
+def handle_submit_restaurant_lead(
+    user,
+    branch_id: str,
+    phone: str,
+    full_name: str = '',
+    preferred_date: str = None,
+    preferred_time: str = None,
+    guests: int = 2,
+    note: str = '',
+    session=None,
+    lang: str = 'uz',
+    **kwargs,
+) -> dict:
+    from apps.crm.models import Branch, RestaurantLead, RestaurantLeadStatus
+    from apps.crm.tasks import send_tour_lead_to_crm  # webhook handler
+    from .i18n import t
+
+    normalized_phone = _normalize_phone(phone)
+    if not _PHONE_RE.match(normalized_phone):
+        return {
+            'status': 'error',
+            'message': t('tour_lead_invalid_phone', lang),
+        }
+
+    try:
+        branch = Branch.objects.select_related('organization').get(
+            id=branch_id,
+            is_active=True,
+            organization__is_active=True,
+        )
+    except Branch.DoesNotExist:
+        # Mock or general search fallback
+        branch = Branch.objects.filter(is_active=True, organization__org_type='restaurant').first()
+        if not branch:
+            return {'status': 'error', 'message': 'Restoran filiali topilmadi.'}
+
+    p_date = None
+    if preferred_date:
+        try:
+            p_date = datetime.strptime(preferred_date, '%Y-%m-%d').date()
+        except ValueError:
+            pass
+
+    p_time = None
+    if preferred_time:
+        try:
+            p_time = datetime.strptime(preferred_time, '%H:%M').time()
+        except ValueError:
+            pass
+
+    if not full_name.strip():
+        full_name = user.full_name or ''
+
+    lead = RestaurantLead.objects.create(
+        organization=branch.organization,
+        branch=branch,
+        user=user,
+        session=session,
+        full_name=full_name.strip(),
+        phone=normalized_phone,
+        preferred_date=p_date,
+        preferred_time=p_time,
+        guests=max(guests, 1),
+        note=note.strip(),
+        status=RestaurantLeadStatus.NEW,
+    )
+
+    logger.info(
+        'AI restoran lead yaratildi: lead=%s, branch=%s, user=%s',
+        lead.id, branch.id, user.id,
+    )
+
+    return {
+        'status': 'ok',
+        'lead_id': str(lead.id),
+        'message': f"✅ {branch.organization.name} bo'yicha stol bron so'rovingiz qabul qilindi. Restoran menejerlari tez fursatda siz bilan bog'lanishadi — bu uzoq vaqt olmaydi.",
+    }
+
+
 TOOL_DISPATCH: dict = {
     'search_flights':         handle_search_flights,
     'search_trains':          handle_search_trains,
@@ -617,4 +696,5 @@ TOOL_DISPATCH: dict = {
     'get_user_preferences':   handle_get_user_preferences,
     'search_tour_packages':   handle_search_tour_packages,
     'submit_tour_lead':       handle_submit_tour_lead,
+    'submit_restaurant_lead': handle_submit_restaurant_lead,
 }

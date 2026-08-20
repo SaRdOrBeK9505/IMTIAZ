@@ -392,5 +392,61 @@ class TourLead(BaseModel):
             models.Index(fields=['phone']),
         ]
 
+
+# ─── RestaurantLead (AI orqali kelgan restoran so'rovi) ──────────────────────────
+
+class RestaurantLeadStatus(models.TextChoices):
+    NEW        = 'new',        'Yangi'
+    SENT       = 'sent',       'CRM ga yuborildi'
+    FAILED     = 'failed',     'Yuborishda xato'
+    CONTACTED  = 'contacted',  'Mijoz bilan bog\'lanildi'
+    CONFIRMED  = 'confirmed',  'Stol bronlandi'
+    DECLINED   = 'declined',   'Rad etildi'
+
+
+class RestaurantLead(BaseModel):
+    """
+    AI orqali kelgan restoran bo'yicha so'rov / lead.
+    """
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name='restaurant_leads',
+    )
+    branch = models.ForeignKey(
+        Branch, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='restaurant_leads',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='restaurant_leads',
+    )
+    session = models.ForeignKey(
+        'ai_assistant.ConversationSession', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='restaurant_leads',
+    )
+
+    full_name = models.CharField(max_length=200, blank=True)
+    phone = models.CharField(max_length=20)
+    preferred_date = models.DateField(null=True, blank=True)
+    preferred_time = models.TimeField(null=True, blank=True)
+    guests = models.PositiveSmallIntegerField(default=2)
+    note = models.TextField(blank=True, help_text="Mijoz bildirgan qo'shimcha so'rovlar")
+
+    status = models.CharField(
+        max_length=12, choices=RestaurantLeadStatus.choices, default=RestaurantLeadStatus.NEW,
+    )
+    crm_response = models.JSONField(default=dict, blank=True, help_text='Hamkor CRM javobi')
+    sent_at = models.DateTimeField(null=True, blank=True)
+    retry_count = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        verbose_name = 'Restoran lead'
+        verbose_name_plural = 'Restoran leadlar'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['organization', 'status']),
+            models.Index(fields=['phone']),
+        ]
+
     def __str__(self):
-        return f'{self.full_name or self.phone} → {self.package or self.organization} [{self.status}]'
+        return f'{self.full_name or self.phone} → {self.branch or self.organization} [{self.status}]'
+

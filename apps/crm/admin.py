@@ -13,6 +13,7 @@ from .models import (
     StaffPerformanceSummary,
     TableTimeSlot,
     TourLead,
+    RestaurantLead,
 )
 
 
@@ -118,3 +119,13 @@ class TourLeadAdmin(admin.ModelAdmin):
     search_fields = ['phone', 'full_name', 'note']
     readonly_fields = ['crm_response', 'sent_at', 'retry_count', 'created_at', 'updated_at']
     raw_id_fields = ['organization', 'package', 'user', 'session']
+
+
+@admin.register(RestaurantLead)
+class RestaurantLeadAdmin(admin.ModelAdmin):
+    list_display = ['phone', 'full_name', 'organization', 'branch', 'preferred_date', 'preferred_time', 'guests', 'status', 'created_at']
+    list_filter = ['status', 'organization', 'branch']
+    search_fields = ['phone', 'full_name', 'note']
+    readonly_fields = ['crm_response', 'sent_at', 'retry_count', 'created_at', 'updated_at']
+    raw_id_fields = ['organization', 'branch', 'user', 'session']
+

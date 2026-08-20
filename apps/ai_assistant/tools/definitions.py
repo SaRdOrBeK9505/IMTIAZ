@@ -261,6 +261,50 @@ TOUR_LEAD_TOOL = {
 }
 
 
+RESTAURANT_LEAD_TOOL = {
+    'name': 'submit_restaurant_lead',
+    'description': (
+        'Mijoz restoranda stol bron qilishga qiziqish bildirganda va telefon raqamini bergandan keyin lead/so\'rov yaratadi. '
+        'MUHIM: telefon raqamisiz chaqirma — avval mijozdan +998XXXXXXXXX formatida so\'ra.'
+    ),
+    'input_schema': {
+        'type': 'object',
+        'properties': {
+            'branch_id': {
+                'type': 'string',
+                'description': 'search_restaurants yoki restoranning branch_id UUID kodi',
+            },
+            'phone': {
+                'type': 'string',
+                'description': 'Mijoz telefon raqami (+998XXXXXXXXX)',
+            },
+            'full_name': {
+                'type': 'string',
+                'description': 'Mijoz ismi (ixtiyoriy)',
+            },
+            'preferred_date': {
+                'type': 'string',
+                'description': 'Afzal kelsa sanasi YYYY-MM-DD (ixtiyoriy)',
+            },
+            'preferred_time': {
+                'type': 'string',
+                'description': 'Afzal kelish vaqti HH:MM (ixtiyoriy)',
+            },
+            'guests': {
+                'type': 'integer',
+                'description': 'Mehmonlar soni',
+                'default': 2,
+            },
+            'note': {
+                'type': 'string',
+                'description': 'Qo\'shimcha zali, stol turi yoki so\'rovlar (ixtiyoriy)',
+            },
+        },
+        'required': ['branch_id', 'phone'],
+    },
+}
+
+
 def get_all_tools() -> list[dict]:
     """Barcha mavjud tool'lar ro'yxatini qaytaradi."""
     return [
@@ -275,4 +319,5 @@ def get_all_tools() -> list[dict]:
         USER_PREFERENCES_TOOL,
         TOUR_SEARCH_TOOL,
         TOUR_LEAD_TOOL,
+        RESTAURANT_LEAD_TOOL,
     ]
