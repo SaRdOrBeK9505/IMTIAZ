@@ -117,7 +117,6 @@ class StepTimer:
 # Yozish tool'lari — requires_confirmation() ga yuboriladi
 WRITE_TOOL_TO_ACTION: dict[str, tuple[str, str]] = {
     'book_flight':      ('book',   'flight'),
-    'book_restaurant':  ('book',   'restaurant'),
     'cancel_booking':   ('cancel', ''),
 }
 
