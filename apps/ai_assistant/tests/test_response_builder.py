@@ -71,7 +71,7 @@ class TourEmptyFormatTests(TestCase):
         }]
         self.assertFalse(should_use_local_reply(tool_results, 'Tur haqida', 'uz'))
 
-    def test_tour_packages_with_results_uses_local_reply(self):
+    def test_tour_packages_with_results_uses_llm_reply(self):
         tool_results = [{
             'tool_name': 'search_tour_packages',
             'result': {
@@ -79,9 +79,10 @@ class TourEmptyFormatTests(TestCase):
                 'results': [{'title': 'Dubay Turi', 'base_price': 1000}],
             },
         }]
-        self.assertTrue(should_use_local_reply(tool_results, 'Dubay turlari soat nechchida?', 'uz'))
+        # Turlar doimo AI (LLM) orqali boyitilib javob beriladi
+        self.assertFalse(should_use_local_reply(tool_results, 'Dubay turlari soat nechchida?', 'uz'))
 
-    def test_restaurants_skips_detail_keywords_check(self):
+    def test_restaurants_uses_llm_reply(self):
         tool_results = [{
             'tool_name': 'search_restaurants',
             'result': {
@@ -89,15 +90,16 @@ class TourEmptyFormatTests(TestCase):
                 'results': [{'name': 'Nobu', 'address': 'Amir Temur'}],
             },
         }]
-        self.assertTrue(should_use_local_reply(tool_results, 'Soat 19:00 ga joy toping vaqtida', 'uz'))
+        # Restoranlar doimo AI (LLM) orqali boyitilib javob beriladi
+        self.assertFalse(should_use_local_reply(tool_results, 'Soat 19:00 ga joy toping vaqtida', 'uz'))
 
     def test_multilingual_local_reply_support(self):
         tool_results = [{
-            'tool_name': 'search_restaurants',
+            'tool_name': 'search_flights',
             'result': {
                 'status': 'ok',
-                'results': [{'name': 'Nobu', 'address': 'Amir Temur'}],
+                'offers': [{'price': 100}],
             },
         }]
-        self.assertTrue(should_use_local_reply(tool_results, 'Find restaurants', 'en'))
-        self.assertTrue(should_use_local_reply(tool_results, 'Найди ресторан', 'ru'))
+        self.assertTrue(should_use_local_reply(tool_results, 'Find flights', 'en'))
+        self.assertTrue(should_use_local_reply(tool_results, 'Найди рейс', 'ru'))

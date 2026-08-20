@@ -23,13 +23,22 @@ class Organization(BaseModel):
     """Hamkor tashkilot (restoran zanjiri, aviakassa va h.k.)."""
 
     class OrgType(models.TextChoices):
-        RESTAURANT     = 'restaurant',     'Restoran'
-        AIRLINE        = 'airline',        'Aviakompaniya'
-        RAILWAY        = 'railway',        'Temir yo\'l'
+        RESTAURANT      = 'restaurant',      'Restoran'
+        BAKERY          = 'bakery',          'Peykari / Kofe'
+        WELLNESS        = 'wellness',        'Wellness / Yoga'
+        SPORT           = 'sport',           'Sport / Padel'
+        FASHION         = 'fashion',         'Fashion / Kiyim'
+        KIDS            = 'kids',            'Bolalar mahsulotlari'
+        LIFESTYLE       = 'lifestyle',       'Lifestyle / Concept'
+        FITNESS         = 'fitness',         'Fitnes / Zallar'
+        TECH            = 'tech',            'Texnologiya / Gadjetlar'
+        PARFUM          = 'parfum',          'Parfyumeriya / Kosmetika'
+        AIRLINE         = 'airline',         'Aviakompaniya'
+        RAILWAY         = 'railway',         'Temir yo\'l'
         EVENT_ORGANIZER = 'event_organizer', 'Tadbir tashkilotchisi'
-        HOTEL          = 'hotel',          'Mehmonxona'
-        TOUR_COMPANY   = 'tour_company',   'Tur kompaniyasi'
-        OTHER          = 'other',          'Boshqa'
+        HOTEL           = 'hotel',           'Mehmonxona'
+        TOUR_COMPANY    = 'tour_company',    'Tur kompaniyasi'
+        OTHER           = 'other',           'Boshqa'
 
     name = models.CharField(max_length=200)
     org_type = models.CharField(max_length=30, choices=OrgType.choices)

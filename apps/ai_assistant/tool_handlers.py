@@ -200,6 +200,9 @@ def handle_search_restaurants(
             'address':     localized_field(b, 'address', lang),
             'city':        b.city,
             'phone':       b.phone,
+            'description': localized_field(b.organization, 'description', lang),
+            'working_hours': b.working_hours,
+            'capacity':    b.capacity,
         }
         for b in qs
     ] or [
@@ -209,6 +212,8 @@ def handle_search_restaurants(
             'branch_name': 'Asosiy filial',
             'address':     "Amir Temur ko'chasi, 107B",
             'city':        city,
+            'description': "Sharafli Yapon va Pan-Osiyo taomlari, premium interyer va ajoyib shinam muhit.",
+            'working_hours': {'mon_sun': '12:00-23:00'},
         }
     ]
     return {'status': 'ok', 'results': results}

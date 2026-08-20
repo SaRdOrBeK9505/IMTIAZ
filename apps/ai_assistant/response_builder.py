@@ -10,8 +10,8 @@ import json
 from .i18n import normalize_language, service_label, status_label, t
 
 
-def trim_tool_result_for_ai(result: dict, max_offers: int = 5) -> dict:
-    """AI ga yuboriladigan tool natijasini qisqartirish."""
+def trim_tool_result_for_ai(result: dict, max_offers: int = 3) -> dict:
+    """AI ga yuboriladigan tool natijasini qisqartirish (max 3 ta variant)."""
     if not isinstance(result, dict):
         return result
     trimmed = dict(result)
@@ -41,12 +41,7 @@ def should_use_local_reply(tool_results: list[dict], user_message: str, lang: st
 
     Strategiya — faqat eng oddiy, ro'yxat-tipidagi natijalar uchun shablon.
     Qolgan barcha holatlar (shaxsiy ma'lumot, bronlar, afzalliklar,
-    bo'sh natija, murakkab kontekst) uchun Gemini o'zi jonli javob yozadi.
-
-    Nima uchun muhim:
-      - get_user_preferences, get_user_bookings — shaxsiy, kontekstga bog'liq
-      - search_tour_packages — bo'sh natijada partner/yo'nalish taklif kerak
-      - Umumiy qoida: AI javob berishi > shablon, faqat token/tezlik sabab cheklanadi
+    bo'sh natija, murakkab kontekst, restoranlar, turlar) uchun AI o'zi jonli javob yozadi.
     """
     from django.conf import settings
 
@@ -57,12 +52,10 @@ def should_use_local_reply(tool_results: list[dict], user_message: str, lang: st
     if normalize_language(lang) not in {'uz', 'ru', 'en'}:
         return False
 
-    # Faqat ro'yxat-tipidagi oddiy tool'lar uchun shablon ruxsat etiladi.
-    # Shaxsiy/kontekstga bog'liq tool'lar (preferences, bookings) — har doim AI orqali.
-    # search_tour_packages qo'shildi (Faza 3).
+    # Faqat parvoz, poyezd, event kabi oddiy tool'lar uchun shablon ruxsat etiladi.
+    # Restoranlar va turlar — har doim AI (LLM) orqali boyitilib javob beriladi.
     SIMPLE_LIST_TOOLS = {
-        'search_flights', 'search_restaurants', 'search_events',
-        'search_trains', 'search_tour_packages'
+        'search_flights', 'search_events', 'search_trains'
     }
     tool_names = {item.get('tool_name') for item in tool_results}
     if not tool_names.issubset(SIMPLE_LIST_TOOLS):
