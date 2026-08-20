@@ -12,11 +12,14 @@ class AnalyzeLatencyCommandTests(TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.log_path = os.path.join(self.temp_dir.name, 'analyze.log')
 
+        from datetime import datetime, timedelta
+        now_str = (datetime.now() - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S,123")
+
         # Test log yozuvlari
         self.log_entries = [
             # 1-so'rov: muvaffaqiyatli
             {
-                "asctime": "2026-08-18 21:14:00,123",
+                "asctime": now_str,
                 "message": "AI chat timing",
                 "data": {
                     "request_id": "abc1",
@@ -30,7 +33,7 @@ class AnalyzeLatencyCommandTests(TestCase):
             },
             # 2-so'rov: muvaffaqiyatli, sekinroq
             {
-                "asctime": "2026-08-18 21:14:05,456",
+                "asctime": now_str,
                 "message": "AI chat timing",
                 "data": {
                     "request_id": "abc2",
@@ -44,7 +47,7 @@ class AnalyzeLatencyCommandTests(TestCase):
             },
             # 3-so'rov: xatolik bilan tugagan
             {
-                "asctime": "2026-08-18 21:14:10,789",
+                "asctime": now_str,
                 "message": "AI chat timing (provider xatosi)",
                 "data": {
                     "request_id": "abc3",
