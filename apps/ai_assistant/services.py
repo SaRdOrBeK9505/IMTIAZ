@@ -239,6 +239,51 @@ class AIAssistantService:
             'requires_confirmation': False,
         }
 
+    # ─── Salomlashish aniqlash ────────────────────────────────────────────────
+
+    _GREETING_WORDS: frozenset[str] = frozenset({
+        # O'zbek
+        'salom', 'assalomu', 'alaykum', 'assalamu', 'xayr', 'hayr',
+        'salomlashing', 'salamlar', 'salomlar',
+        # Rus
+        'привет', 'здравствуйте', 'здравствуй', 'добрый', 'доброе',
+        'доброго', 'утро', 'день', 'вечер', 'хай',
+        # Ingliz
+        'hi', 'hello', 'hey', 'howdy', 'greetings', 'sup',
+        'good', 'morning', 'afternoon', 'evening', 'night',
+    })
+
+    @classmethod
+    def _is_pure_greeting(cls, message: str) -> bool:
+        """
+        Xabar faqat salomlashish so'zlaridan iborat bo'lsa True.
+        Aniq so'rov (savol belgisi, narx, joy nomi) bo'lsa False.
+
+        Misollar:
+            True  — "salom", "Assalomu alaykum", "hi there", "hey!"
+            False — "salom, tur bormi?", "hello, find flight to Dubai"
+        """
+        if not message:
+            return False
+
+        import re
+        # Maxsus belgilar va raqamlarni olib tashlash
+        cleaned = re.sub(r"[!?.,:;'\"\-\(\)]+", ' ', message.lower()).strip()
+        words = set(cleaned.split())
+
+        # So'rov belgisi bo'lsa — aniq savol bor
+        if '?' in message:
+            return False
+
+        # Salomlashish so'zlaridan tashqari boshqa gap bo'lsa — aniq so'rov
+        non_greeting = words - cls._GREETING_WORDS
+        # 2+ ta qo'shimcha so'z bo'lsa — aniq so'rov
+        if len(non_greeting) >= 2:
+            return False
+
+        # Kamida bitta salomlashish so'zi bo'lishi kerak
+        return bool(words & cls._GREETING_WORDS)
+
     def chat(
         self, user, message: str, session_id: str | None = None,
         request_id: str = '',
@@ -258,6 +303,26 @@ class AIAssistantService:
         ConversationMessage.objects.create(
             session=session, role='user', content=message,
         )
+
+        # ── Salomlashish — AI chaqirmasdan to'g'ridan-to'g'ri javob ─────────
+        if self._is_pure_greeting(message):
+            welcome   = t('ai_welcome', lang)
+            quick_rep = t('quick_replies', lang)
+            if not isinstance(quick_rep, list):
+                quick_rep = ['✈️ Chipta izlash', '🍽️ Stol band qilish', '❓ Boshqa savol']
+            msg = ConversationMessage.objects.create(
+                session=session, role='assistant', content=welcome,
+            )
+            logger.debug('[ai] Greeting detected — local welcome sent (no provider call)')
+            return {
+                'session_id':            str(session.id),
+                'message_id':            str(msg.id),
+                'content':               welcome,
+                'quick_replies':         quick_rep,
+                'tool_calls_count':      0,
+                'requires_confirmation': False,
+            }
+        # ─────────────────────────────────────────────────────────────────────
 
         with timer.measure('history_load'):
             history = self._load_history(session)

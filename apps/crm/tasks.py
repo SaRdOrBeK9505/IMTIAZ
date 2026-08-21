@@ -1,7 +1,8 @@
 """
 CRM — Celery tasks.
-    calculate_staff_performance — kunlik 00:00
-    send_tour_lead_to_crm      — AI lead yaratilgach hamkor webhook'iga yuborish
+    calculate_staff_performance    — kunlik 00:00
+    send_tour_lead_to_crm          — AI lead yaratilgach hamkor webhook'iga yuborish
+    notify_telegram_tour_lead      — yangi lead haqida Telegram guruhga xabar yuborish
 """
 
 import hashlib
@@ -11,6 +12,7 @@ import logging
 
 import httpx
 from celery import shared_task
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +108,8 @@ def send_tour_lead_to_crm(self, lead_id: str):
         )
         lead.status = TourLeadStatus.NEW
         lead.save(update_fields=['status', 'updated_at'])
+        # Webhook bo'lmasa ham Telegram guruhga xabar yuboriladi
+        notify_telegram_tour_lead.delay(str(lead.id))
         return {'status': 'no_webhook_configured'}
 
     payload = {
@@ -143,6 +147,10 @@ def send_tour_lead_to_crm(self, lead_id: str):
             lead.crm_response = {'raw': resp.text[:500]}
         lead.save(update_fields=['status', 'sent_at', 'crm_response', 'updated_at'])
         logger.info('[crm] Tour lead %s hamkor CRM ga yuborildi: org=%s', lead.id, org.id)
+
+        # Telegram guruhga ham xabar yuborish
+        notify_telegram_tour_lead.delay(str(lead.id))
+
         return {'status': 'sent'}
 
     except Exception as exc:
@@ -157,3 +165,112 @@ def send_tour_lead_to_crm(self, lead_id: str):
         )
         countdown = 60 * (2 ** self.request.retries)
         raise self.retry(exc=exc, countdown=countdown)
+
+
+# ─── Telegram Lead Notification ───────────────────────────────────────────────
+
+@shared_task(name='crm.notify_telegram_tour_lead', bind=True, max_retries=2, default_retry_delay=30)
+def notify_telegram_tour_lead(self, lead_id: str):
+    """
+    Yangi TourLead haqida Telegram guruhga to'liq ma'lumot yuboradi.
+
+    .env da talab qilinadi:
+        TELEGRAM_BOT_TOKEN         — bot token (@BotFather dan)
+        TELEGRAM_TOUR_LEADS_CHAT_ID — guruh chat ID (manfiy raqam, masalan: -1001234567890)
+
+    Xabar formati:
+        🔔 YANGI TUR SO'ROVI
+        ━━━━━━━━━━━━━━━━━━
+        👤 Ism:        Ali Valiyev
+        📞 Tel:        +998901234567
+        🌍 Tur paketi: Istanbul VIP Tour
+        📅 Jo'nash:    2026-10-15
+        👥 Yo'lovchilar: 2 kishi
+        🏢 Kompaniya:  Silk Road Premium Tours
+        💬 Izoh:       Bolalar bilan bormoqchimiz...
+        ─────────────────────
+        🕐 Vaqt: 21.08.2026 13:45
+        🆔 Lead ID: ab12cd34
+    """
+    from apps.crm.models import TourLead
+    from apps.notifications.telegram import get_bot
+
+    # Sozlamalarni olish
+    bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
+    chat_id   = getattr(settings, 'TELEGRAM_TOUR_LEADS_CHAT_ID', None)
+
+    if not bot_token:
+        logger.warning('[crm.telegram] TELEGRAM_BOT_TOKEN sozlanmagan — xabar yuborilmadi')
+        return {'status': 'no_token'}
+
+    if not chat_id:
+        logger.warning('[crm.telegram] TELEGRAM_TOUR_LEADS_CHAT_ID sozlanmagan — xabar yuborilmadi')
+        return {'status': 'no_chat_id'}
+
+    try:
+        lead = TourLead.objects.select_related(
+            'organization', 'package', 'package__destination', 'user',
+        ).get(id=lead_id)
+    except TourLead.DoesNotExist:
+        logger.error('[crm.telegram] TourLead topilmadi: id=%s', lead_id)
+        return {'status': 'not_found'}
+
+    # ── Xabar matni ───────────────────────────────────────────────────────────
+    departure = (
+        lead.preferred_departure_date.strftime('%d.%m.%Y')
+        if lead.preferred_departure_date else '—'
+    )
+    package_info = '—'
+    destination_info = '—'
+    if lead.package:
+        package_info = lead.package.title
+        if lead.package.destination:
+            dest = lead.package.destination
+            destination_info = f'{dest.name} ({dest.country})'
+
+    user_info = '—'
+    if lead.user:
+        user_info = f'{lead.user.get_full_name() or lead.user.phone_number or str(lead.user)}'
+
+    note_section = f'\n💬 <b>Izoh:</b> {lead.note}' if lead.note else ''
+    created_str  = lead.created_at.strftime('%d.%m.%Y %H:%M') if lead.created_at else '—'
+    lead_short   = str(lead.id)[:8].upper()
+
+    text = (
+        "🔔 <b>YANGI TUR SO'ROVI KELDI!</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👤 <b>Ism:</b>          {lead.full_name or '—'}\n"
+        f"📞 <b>Telefon:</b>     <code>{lead.phone}</code>\n"
+        f"🌍 <b>Tur paketi:</b>  {package_info}\n"
+        f"📍 <b>Yo'nalish:</b>   {destination_info}\n"
+        f"📅 <b>Jo'nash:</b>     {departure}\n"
+        f"👥 <b>Yo'lovchilar:</b> {lead.passengers} kishi\n"
+        f"🏢 <b>Kompaniya:</b>   {lead.organization.name}"
+        f"{note_section}\n\n"
+        "──────────────────────────\n"
+        f"🕐 <b>Vaqt:</b> {created_str}\n"
+        f"👤 <b>Foydalanuvchi:</b> {user_info}\n"
+        f"🆔 <b>Lead ID:</b> <code>{lead_short}</code>\n\n"
+        "<i>IMTIAZ — AI Travel Assistant</i>"
+    )
+
+    # ── Yuborish ──────────────────────────────────────────────────────────────
+    try:
+        bot = get_bot()
+        msg_id = bot.send_message(chat_id=int(chat_id), text=text, parse_mode='HTML')
+
+        if msg_id:
+            logger.info(
+                '[crm.telegram] Tour lead %s Telegram guruhga yuborildi: chat_id=%s, msg_id=%s',
+                lead_id, chat_id, msg_id,
+            )
+            return {'status': 'sent', 'message_id': msg_id}
+        else:
+            logger.warning('[crm.telegram] Telegram xabar yuborilmadi (bot None qaytardi): lead=%s', lead_id)
+            return {'status': 'failed'}
+
+    except Exception as exc:
+        logger.error('[crm.telegram] Telegram xabarda xato: lead=%s, exc=%s', lead_id, exc)
+        countdown = 30 * (2 ** self.request.retries)
+        raise self.retry(exc=exc, countdown=countdown)
+

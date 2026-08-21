@@ -461,6 +461,8 @@ TELEGRAM_BOT_TOKEN  = env('TELEGRAM_BOT_TOKEN',  default='')
 TELEGRAM_BOT_SECRET = env('TELEGRAM_BOT_SECRET', default='')
 # Mini App ichida AI chat ochiladigan manzil (masalan: https://t.me/bot/app yoki https://frontend-domain.uz/ai)
 TELEGRAM_MINI_APP_AI_URL = env('TELEGRAM_MINI_APP_AI_URL', default='')
+# Tur leadlar Telegram guruh chat ID (manfiy raqam: -1001234567890)
+TELEGRAM_TOUR_LEADS_CHAT_ID = env('TELEGRAM_TOUR_LEADS_CHAT_ID', default='')
 
 # ─── SMS — DevSMS ─────────────────────────────────────────────────────────────
 # https://devsms.uz — Bearer token bilan ishlaydi, login kerak emas
