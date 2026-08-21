@@ -5,7 +5,11 @@ Barcha tool'lar provayderdan mustaqil — faqat JSON sxema.
 
 FLIGHT_SEARCH_TOOL = {
     'name': 'search_flights',
-    'description': 'Parvoz variantlarini qidiradi. Yo\'nalish, sana va yo\'lovchilar soni bo\'yicha.',
+    'description': (
+        'Parvoz variantlarini qidiradi. MUHIM: Faqat foydalanuvchi ANIQ aviabilet yoki samolyot parvozi '
+        'so\'raganda (masalan: "bilet kerak", "parvoz", "samolyot chiptasi") chaqir. '
+        'Sayohat, tur, dam olish, ta\'til so\'rovlarida buni QAT\'IYAN CHAQIRMA!'
+    ),
     'input_schema': {
         'type': 'object',
         'properties': {
@@ -224,7 +228,9 @@ TOUR_SEARCH_TOOL = {
 TOUR_LEAD_TOOL = {
     'name': 'submit_tour_lead',
     'description': (
-        'Mijoz tur paketiga qiziqish bildirganda va telefon raqamini bergandan keyin lead yaratadi. '
+        'Mijoz sayohat/tur bo\'yicha qiziqish bildirganda va telefon raqamini bergandan keyin lead yaratadi. '
+        'Mijozdan to\'plangan barcha ma\'lumotlarni (yo\'nalish, sanalar, odamlar soni, davomiylik, byudjet, '
+        'mehmonxona, parvoz afzalligi, mavjud taklif, sotib olishga tayyorlik) kirit. '
         'MUHIM: telefon raqamisiz chaqirma — avval mijozdan +998XXXXXXXXX formatida so\'ra.'
     ),
     'input_schema': {
@@ -232,7 +238,7 @@ TOUR_LEAD_TOOL = {
         'properties': {
             'package_id': {
                 'type': 'string',
-                'description': 'search_tour_packages natijasidagi paket UUID',
+                'description': 'search_tour_packages natijasidagi paket UUID (ixtiyoriy, muayyan paket bo\'lsa)',
             },
             'phone': {
                 'type': 'string',
@@ -242,21 +248,53 @@ TOUR_LEAD_TOOL = {
                 'type': 'string',
                 'description': 'Mijoz ismi (ixtiyoriy)',
             },
+            'destination': {
+                'type': 'string',
+                'description': 'Boradigan mamlakat / shahar (ixtiyoriy)',
+            },
             'preferred_departure_date': {
                 'type': 'string',
                 'description': 'Afzal jo\'nash sanasi YYYY-MM-DD (ixtiyoriy)',
             },
+            'duration_days': {
+                'type': 'integer',
+                'description': 'Sayohat davomiyligi kunlarda (ixtiyoriy)',
+            },
             'passengers': {
                 'type': 'integer',
-                'description': 'Sayohatchilar soni',
+                'description': 'Sayohatchilar soni (kattalar + bolalar)',
                 'default': 1,
+            },
+            'budget': {
+                'type': 'string',
+                'description': 'Byudjet diapazoni (masalan: $1000-$1500 yoki 15-20 mln UZS)',
+            },
+            'vacation_type': {
+                'type': 'string',
+                'description': 'Dam olish turi (plyaj, luxury, family, romance, ski va h.k.)',
+            },
+            'hotel_preference': {
+                'type': 'string',
+                'description': 'Mehmonxona toifasi yoki aniq mehmonxona nomi',
+            },
+            'flight_preference': {
+                'type': 'string',
+                'description': 'Jo\'nash shahri, to\'g\'ridan-to\'g\'ri reys, klass',
+            },
+            'existing_offer': {
+                'type': 'string',
+                'description': 'Mijoz topgan taklif yoki skrinshot ma\'lumoti',
+            },
+            'purchase_readiness': {
+                'type': 'string',
+                'description': 'Qachon sotib olishga tayyor (bugun / 1 hafta ichida / keyinroq)',
             },
             'note': {
                 'type': 'string',
-                'description': 'Qo\'shimcha talablar yoki savollar (ixtiyoriy)',
+                'description': 'Qo\'shimcha barcha yig\'ilgan tafsilotlar va izohlar',
             },
         },
-        'required': ['package_id', 'phone'],
+        'required': ['phone'],
     },
 }
 
@@ -305,6 +343,101 @@ RESTAURANT_LEAD_TOOL = {
 }
 
 
+SERVICE_LEAD_TOOL = {
+    'name': 'submit_service_lead',
+    'description': (
+        'Mijoz platformaning istalgan xizmati bo\'yicha (Yo\'lda yordam, Tibbiyot, Sug\'urta, '
+        'Family Office, Dam olish, yoki har qanday maxsus konsyerj so\'rovi) qiziqish bildirganda '
+        'va telefon raqamini berganda lead yaratadi. '
+        'MUHIM: Agar so\'ralgan xizmat bazamizda mavjud bo\'lmasa ham, HECH QACHON rad etma — '
+        'mijoz ehtiyojini aniqlab, ushbu tool orqali lead yarat va mijoz haqida AI tahliliy '
+        'tavsifini (customer_analysis) yozib kirit.'
+    ),
+    'input_schema': {
+        'type': 'object',
+        'properties': {
+            'category': {
+                'type': 'string',
+                'enum': ['travel', 'restaurant', 'roadside', 'medical', 'insurance', 'family_office', 'leisure', 'flight', 'other'],
+                'description': 'Xizmat kategoriyasi (masalan: roadside, medical, insurance, family_office, leisure, flight, other)',
+            },
+            'phone': {
+                'type': 'string',
+                'description': 'Mijoz telefon raqami (+998XXXXXXXXX)',
+            },
+            'full_name': {
+                'type': 'string',
+                'description': 'Mijoz ismi (ixtiyoriy)',
+            },
+            'service_name': {
+                'type': 'string',
+                'description': 'Mijoz so\'ragan xizmat yoki mahsulot nomi',
+            },
+            'customer_analysis': {
+                'type': 'string',
+                'description': 'AI tomonidan mijoz portreti, shoshilinchligi va ehtiyojlari bo\'yicha yozilgan tahliliy tavsif',
+            },
+            'note': {
+                'type': 'string',
+                'description': 'So\'rovning to\'liq tafsilotlari (sana, joy, byudjet, maxsus xohishlar)',
+            },
+        },
+        'required': ['category', 'phone'],
+    },
+}
+
+FLIGHT_LEAD_TOOL = {
+    'name': 'submit_flight_lead',
+    'description': (
+        'Mijoz samolyot parvozi/aviabilet sotib olmoqchi bo\'lganda va telefon raqamini berganda '
+        'parvoz leada yaratadi va Telegram Call-Center guruhiga yuboradi.'
+    ),
+    'input_schema': {
+        'type': 'object',
+        'properties': {
+            'phone': {
+                'type': 'string',
+                'description': 'Mijoz telefon raqami (+998XXXXXXXXX)',
+            },
+            'origin': {
+                'type': 'string',
+                'description': 'Jo\'nash shahri yoki kodi (masalan: Toshkent / TAS)',
+            },
+            'destination': {
+                'type': 'string',
+                'description': 'Boradigan shahar yoki kodi (masalan: Istanbul / IST)',
+            },
+            'departure_date': {
+                'type': 'string',
+                'description': 'Jo\'nash sanasi YYYY-MM-DD (ixtiyoriy)',
+            },
+            'passengers': {
+                'type': 'integer',
+                'description': 'Yo\'lovchilar soni',
+                'default': 1,
+            },
+            'seat_class': {
+                'type': 'string',
+                'description': 'Kreslo klassi (ekonom / biznes)',
+            },
+            'full_name': {
+                'type': 'string',
+                'description': 'Mijoz ismi (ixtiyoriy)',
+            },
+            'customer_analysis': {
+                'type': 'string',
+                'description': 'AI tahliliy tavsifi',
+            },
+            'note': {
+                'type': 'string',
+                'description': 'Qo\'shimcha parvoz talablari va izohlar',
+            },
+        },
+        'required': ['phone', 'origin', 'destination'],
+    },
+}
+
+
 def get_all_tools() -> list[dict]:
     """Barcha mavjud tool'lar ro'yxatini qaytaradi."""
     return [
@@ -319,4 +452,6 @@ def get_all_tools() -> list[dict]:
         TOUR_SEARCH_TOOL,
         TOUR_LEAD_TOOL,
         RESTAURANT_LEAD_TOOL,
+        SERVICE_LEAD_TOOL,
+        FLIGHT_LEAD_TOOL,
     ]

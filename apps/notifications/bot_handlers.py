@@ -30,8 +30,19 @@ def handle_update(update: dict) -> None:
 
 
 def _handle_message(message: dict) -> None:
+    chat = message.get('chat') or {}
+    chat_id = chat.get('id')
+    if not chat_id:
+        return
+
+    chat_type = chat.get('type')
+    # Guruh va kanallardan kelgan xabarlarni inkor qilish.
+    # Bot faqat lead/bildirishnomalarni yuboradi, guruhdagi suhbatlarga javob bermaydi.
+    if chat_type in ('group', 'supergroup', 'channel') or (isinstance(chat_id, int) and chat_id < 0):
+        logger.info("Guruh/kanal xabari inkor qilindi: chat_id=%s, type=%s", chat_id, chat_type)
+        return
+
     text = (message.get('text') or '').strip()
-    chat_id = message['chat']['id']
 
     if text.startswith('/start'):
         _handle_start(message)
@@ -118,7 +129,16 @@ def _handle_start(message: dict) -> None:
 def _handle_callback(callback: dict) -> None:
     data = callback.get('data', '')
     message = callback.get('message') or {}
-    chat_id = message.get('chat', {}).get('id')
+    chat = message.get('chat') or {}
+    chat_id = chat.get('id')
+    chat_type = chat.get('type')
+
+    if not chat_id:
+        return
+
+    if chat_type in ('group', 'supergroup', 'channel') or (isinstance(chat_id, int) and chat_id < 0):
+        return
+
     message_id = message.get('message_id')
     callback_id = callback.get('id')
     tg_user = callback.get('from') or {}

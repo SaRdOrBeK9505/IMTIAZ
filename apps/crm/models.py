@@ -450,3 +450,74 @@ class RestaurantLead(BaseModel):
     def __str__(self):
         return f'{self.full_name or self.phone} → {self.branch or self.organization} [{self.status}]'
 
+
+# ─── ServiceLead (AI orqali kelgan barcha xizmatlar leadi) ─────────────────────
+
+class ServiceLeadCategory(models.TextChoices):
+    TRAVEL         = 'travel',         'Sayohatlar'
+    RESTAURANT     = 'restaurant',     'Stol band qilish'
+    ROADSIDE       = 'roadside',       "Yo'lda yordam"
+    MEDICAL        = 'medical',        'Tibbiyot'
+    INSURANCE      = 'insurance',      "Sug'urta"
+    FAMILY_OFFICE  = 'family_office',  'Family Office'
+    LEISURE        = 'leisure',        'Dam olish'
+    FLIGHT         = 'flight',         'Parvoz bileti'
+    OTHER          = 'other',          'Boshqa xizmat'
+
+
+class ServiceLeadStatus(models.TextChoices):
+    NEW        = 'new',        'Yangi'
+    SENT       = 'sent',       'CRM / Telegram ga yuborildi'
+    FAILED     = 'failed',     'Yuborishda xato'
+    CONTACTED  = 'contacted',  'Mijoz bilan bog\'lanildi'
+    CONVERTED  = 'converted',  'Bajarildi'
+    DECLINED   = 'declined',   'Rad etildi'
+
+
+class ServiceLead(BaseModel):
+    """
+    AI orqali kelgan barcha platforma xizmatlari (Sayohat, Stol, Yo'lda yordam,
+    Tibbiyot, Sug'urta, Family Office, Dam olish, Parvoz) bo'yicha lead.
+    """
+    category = models.CharField(
+        max_length=30, choices=ServiceLeadCategory.choices, default=ServiceLeadCategory.OTHER,
+        db_index=True,
+    )
+    organization = models.ForeignKey(
+        Organization, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='service_leads',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='service_leads',
+    )
+    session = models.ForeignKey(
+        'ai_assistant.ConversationSession', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='service_leads',
+    )
+
+    full_name = models.CharField(max_length=200, blank=True)
+    phone = models.CharField(max_length=20)
+    service_name = models.CharField(max_length=255, blank=True, help_text="So'ralgan xizmat nomi")
+    customer_analysis = models.TextField(blank=True, help_text="AI tomonidan mijoz haqida yozilgan tahliliy tavsif")
+    note = models.TextField(blank=True, help_text="Mijoz so'rovining to'liq tafsilotlari")
+
+    status = models.CharField(
+        max_length=12, choices=ServiceLeadStatus.choices, default=ServiceLeadStatus.NEW,
+    )
+    crm_response = models.JSONField(default=dict, blank=True, help_text='Yuborish javobi')
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Xizmat leadi'
+        verbose_name_plural = 'Xizmat leadlari'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['category', 'status']),
+            models.Index(fields=['phone']),
+        ]
+
+    def __str__(self):
+        return f'[{self.get_category_display()}] {self.full_name or self.phone} ({self.service_name or "Xizmat"})'
+
+

@@ -543,17 +543,25 @@ def handle_search_tour_packages(
 
 def handle_submit_tour_lead(
     user,
-    package_id: str,
     phone: str,
+    package_id: str = None,
     full_name: str = '',
+    destination: str = None,
     preferred_departure_date: str = None,
+    duration_days: int = None,
     passengers: int = 1,
+    budget: str = None,
+    vacation_type: str = None,
+    hotel_preference: str = None,
+    flight_preference: str = None,
+    existing_offer: str = None,
+    purchase_readiness: str = None,
     note: str = '',
     session=None,
     lang: str = 'uz',
     **kwargs,
 ) -> dict:
-    from apps.crm.models import TourLead, TourLeadStatus
+    from apps.crm.models import Organization, TourLead, TourLeadStatus
     from apps.crm.tasks import send_tour_lead_to_crm
     from apps.tours.models import TourPackage
     from .i18n import t
@@ -565,28 +573,65 @@ def handle_submit_tour_lead(
             'message': t('tour_lead_invalid_phone', lang),
         }
 
-    try:
-        package = TourPackage.objects.select_related('organization').get(
-            id=package_id,
+    package = None
+    organization = None
+
+    if package_id:
+        try:
+            package = TourPackage.objects.select_related('organization').get(
+                id=package_id,
+                is_active=True,
+                organization__org_type='tour_company',
+                organization__is_active=True,
+            )
+            organization = package.organization
+        except (TourPackage.DoesNotExist, ValidationError, ValueError):
+            pass
+
+    if not organization:
+        organization = Organization.objects.filter(
+            org_type=Organization.OrgType.TOUR_COMPANY,
             is_active=True,
-            organization__org_type='tour_company',
-            organization__is_active=True,
-        )
-    except (TourPackage.DoesNotExist, ValidationError, ValueError):
-        return {'status': 'error', 'message': t('tour_lead_package_not_found', lang)}
+        ).first()
+
+    if not organization:
+        organization = Organization.objects.filter(is_active=True).first()
 
     dep_date = None
     if preferred_departure_date:
         try:
             dep_date = datetime.strptime(preferred_departure_date, '%Y-%m-%d').date()
         except ValueError:
-            return {'status': 'error', 'message': t('tour_lead_invalid_date', lang)}
+            pass
 
-    if not full_name.strip():
+    if not full_name or not full_name.strip():
         full_name = user.full_name or ''
 
+    # To'plangan ma'lumotlarni sermazmun va tartibli note formatida yig'ish
+    details = []
+    if destination:
+        details.append(f"📍 Yo'nalish: {destination}")
+    if duration_days:
+        details.append(f"⏱️ Davomiyligi: {duration_days} kun")
+    if budget:
+        details.append(f"💰 Byudjet: {budget}")
+    if vacation_type:
+        details.append(f"🏝️ Dam olish turi: {vacation_type}")
+    if hotel_preference:
+        details.append(f"🏨 Mehmonxona: {hotel_preference}")
+    if flight_preference:
+        details.append(f"✈️ Parvoz afzalligi: {flight_preference}")
+    if existing_offer:
+        details.append(f"📄 Mavjud taklif: {existing_offer}")
+    if purchase_readiness:
+        details.append(f"🛒 Sotib olishga tayyorlik: {purchase_readiness}")
+    if note and note.strip():
+        details.append(f"💬 Izoh: {note.strip()}")
+
+    combined_note = "\n".join(details) if details else note.strip()
+
     lead = TourLead.objects.create(
-        organization=package.organization,
+        organization=organization,
         package=package,
         user=user,
         session=session,
@@ -594,7 +639,7 @@ def handle_submit_tour_lead(
         phone=normalized_phone,
         preferred_departure_date=dep_date,
         passengers=max(passengers, 1),
-        note=note.strip(),
+        note=combined_note,
         status=TourLeadStatus.NEW,
     )
 
@@ -609,13 +654,14 @@ def handle_submit_tour_lead(
 
     logger.info(
         'AI tur lead yaratildi: lead=%s, package=%s, user=%s',
-        lead.id, package.id, user.id,
+        lead.id, package.id if package else None, user.id,
     )
 
+    title_val = package.title if package else (destination or 'Sayohat turi')
     return {
         'status': 'ok',
         'lead_id': str(lead.id),
-        'message': t('tour_lead_submitted', lang, title=package.title),
+        'message': t('tour_lead_submitted', lang, title=title_val),
     }
 
 
@@ -686,6 +732,12 @@ def handle_submit_restaurant_lead(
         status=RestaurantLeadStatus.NEW,
     )
 
+    try:
+        from apps.crm.tasks import send_telegram_restaurant_lead_notification
+        send_telegram_restaurant_lead_notification(str(lead.id))
+    except Exception as exc:
+        logger.exception('Telegram restaurant lead notification error: %s', exc)
+
     logger.info(
         'AI restoran lead yaratildi: lead=%s, branch=%s, user=%s',
         lead.id, branch.id, user.id,
@@ -696,6 +748,103 @@ def handle_submit_restaurant_lead(
         'lead_id': str(lead.id),
         'message': f"✅ {branch.organization.name} bo'yicha stol bron so'rovingiz qabul qilindi. Restoran menejerlari tez fursatda siz bilan bog'lanishadi — bu uzoq vaqt olmaydi.",
     }
+
+
+def handle_submit_service_lead(
+    user,
+    phone: str,
+    category: str = 'other',
+    full_name: str = '',
+    service_name: str = '',
+    customer_analysis: str = '',
+    note: str = '',
+    session=None,
+    lang: str = 'uz',
+    **kwargs,
+) -> dict:
+    from apps.crm.models import ServiceLead, ServiceLeadCategory, ServiceLeadStatus
+    from apps.crm.tasks import send_telegram_service_lead_notification
+    from .i18n import t
+
+    normalized_phone = _normalize_phone(phone)
+    if not _PHONE_RE.match(normalized_phone):
+        return {
+            'status': 'error',
+            'message': t('tour_lead_invalid_phone', lang),
+        }
+
+    if not full_name or not full_name.strip():
+        full_name = user.full_name or ''
+
+    valid_category = category if category in ServiceLeadCategory.values else ServiceLeadCategory.OTHER
+
+    lead = ServiceLead.objects.create(
+        category=valid_category,
+        user=user,
+        session=session,
+        full_name=full_name.strip(),
+        phone=normalized_phone,
+        service_name=service_name.strip(),
+        customer_analysis=customer_analysis.strip(),
+        note=note.strip(),
+        status=ServiceLeadStatus.NEW,
+    )
+
+    try:
+        send_telegram_service_lead_notification(str(lead.id))
+    except Exception as exc:
+        logger.exception('Telegram service lead notification error: %s', exc)
+
+    logger.info('AI service lead yaratildi: lead=%s, category=%s, user=%s', lead.id, valid_category, user.id)
+
+    service_title = service_name or lead.get_category_display()
+    return {
+        'status': 'ok',
+        'lead_id': str(lead.id),
+        'message': f"✅ {service_title} bo'yicha so'rovingiz qabul qilindi. Mutaxassislarimiz tez orada siz bilan bog'lanishadi.",
+    }
+
+
+def handle_submit_flight_lead(
+    user,
+    phone: str,
+    origin: str,
+    destination: str,
+    departure_date: str = None,
+    passengers: int = 1,
+    seat_class: str = 'economy',
+    full_name: str = '',
+    customer_analysis: str = '',
+    note: str = '',
+    session=None,
+    lang: str = 'uz',
+    **kwargs,
+) -> dict:
+    from apps.crm.models import ServiceLeadCategory
+
+    details = [
+        f"✈️ Yo'nalish: {origin} → {destination}",
+        f"📅 Sana: {departure_date or 'Belgilanmagan'}",
+        f"👥 Yo'lovchilar: {passengers} kishi ({seat_class} klass)",
+    ]
+    if note and note.strip():
+        details.append(f"💬 Izoh: {note.strip()}")
+
+    combined_note = "\n".join(details)
+    service_title = f"Parvoz: {origin} → {destination}"
+
+    return handle_submit_service_lead(
+        user=user,
+        phone=phone,
+        category=ServiceLeadCategory.FLIGHT,
+        full_name=full_name,
+        service_name=service_title,
+        customer_analysis=customer_analysis,
+        note=combined_note,
+        session=session,
+        lang=lang,
+        **kwargs,
+    )
 
 
 TOOL_DISPATCH: dict = {
@@ -712,4 +861,6 @@ TOOL_DISPATCH: dict = {
     'search_tour_packages':   handle_search_tour_packages,
     'submit_tour_lead':       handle_submit_tour_lead,
     'submit_restaurant_lead': handle_submit_restaurant_lead,
+    'submit_service_lead':    handle_submit_service_lead,
+    'submit_flight_lead':     handle_submit_flight_lead,
 }

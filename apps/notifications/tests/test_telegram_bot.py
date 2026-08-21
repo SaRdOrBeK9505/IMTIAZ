@@ -69,6 +69,25 @@ class TelegramBotHandlerTests(TestCase):
         self.assertEqual(args[0], 99999)
         self.assertIn('Assalomu alaykum', args[1])
 
+    @patch('apps.notifications.bot_handlers.AIAssistantService')
+    @patch('apps.notifications.bot_handlers.get_bot')
+    def test_group_messages_ignored(self, mock_get_bot, mock_ai_service_cls):
+        bot = MagicMock()
+        mock_get_bot.return_value = bot
+
+        handle_update({
+            'message': {
+                'message_id': 3,
+                'chat': {'id': -100123456789, 'type': 'supergroup'},
+                'from': {'id': 11111, 'username': 'groupmember'},
+                'text': 'Tur lead guruhi matni',
+            },
+        })
+
+        mock_ai_service_cls.assert_not_called()
+        bot.send_chat_action.assert_not_called()
+        bot.send_message.assert_not_called()
+
     @patch('apps.notifications.bot_handlers.get_bot')
     def test_callback_about_edits_message(self, mock_get_bot):
         bot = MagicMock()

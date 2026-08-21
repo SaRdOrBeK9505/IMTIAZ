@@ -86,3 +86,30 @@ class TourLeadToolTests(TestCase):
         self.assertEqual(lead.full_name, 'Bobur')
         self.assertEqual(lead.passengers, 2)
         mock_delay.assert_called_once_with(str(lead.id))
+
+    @patch('apps.crm.tasks.send_tour_lead_to_crm.delay')
+    def test_submit_tour_lead_custom_fields(self, mock_delay):
+        result = handle_submit_tour_lead(
+            self.user,
+            phone='998901237005',
+            full_name='Jasur',
+            destination='Dubay',
+            duration_days=7,
+            budget='$1500',
+            vacation_type='Luxury plyaj',
+            hotel_preference='5* Resort',
+            flight_preference='Pryamoy reys, biznes klass',
+            existing_offer='Boshqa firmada $1700',
+            purchase_readiness='Bugun',
+            passengers=3,
+            lang='uz',
+        )
+        self.assertEqual(result['status'], 'ok')
+        lead = TourLead.objects.get(phone='+998901237005')
+        self.assertEqual(lead.full_name, 'Jasur')
+        self.assertIn("Dubay", lead.note)
+        self.assertIn("7 kun", lead.note)
+        self.assertIn("$1500", lead.note)
+        self.assertIn("Luxury plyaj", lead.note)
+        self.assertIn("5* Resort", lead.note)
+        mock_delay.assert_called_once_with(str(lead.id))

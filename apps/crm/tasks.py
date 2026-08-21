@@ -273,3 +273,218 @@ def notify_telegram_tour_lead(self, lead_id: str):
         raise self.retry(exc=Exception(res.get('error')), countdown=countdown)
     return res
 
+
+# ── Restoran Lead Notification ───────────────────────────────────────────────
+
+def send_telegram_restaurant_lead_notification(lead_id: str) -> dict:
+    """Yangi RestaurantLead haqida Telegram guruhga xabar yuboradi."""
+    from apps.crm.models import RestaurantLead
+    from apps.notifications.telegram import get_bot
+
+    raw_chat_id = getattr(settings, 'TELEGRAM_TOUR_LEADS_CHAT_ID', None)
+    if not raw_chat_id:
+        return {'status': 'no_chat_id'}
+
+    try:
+        chat_id = int(str(raw_chat_id).split('#')[0].strip())
+    except (ValueError, TypeError):
+        return {'status': 'invalid_chat_id'}
+
+    try:
+        lead = RestaurantLead.objects.select_related('organization', 'branch', 'user').get(id=lead_id)
+    except RestaurantLead.DoesNotExist:
+        return {'status': 'not_found'}
+
+    pref_date = lead.preferred_date.strftime('%d.%m.%Y') if lead.preferred_date else '—'
+    pref_time = lead.preferred_time.strftime('%H:%M') if lead.preferred_time else '—'
+    org_name  = lead.organization.name if lead.organization else '—'
+    branch_name = lead.branch.name if lead.branch else 'Asosiy filial'
+    created_str = lead.created_at.strftime('%d.%m.%Y %H:%M') if lead.created_at else '—'
+    lead_short = str(lead.id)[:8].upper()
+
+    note_sec = f"\n💬 <b>Izoh / So'rov:</b> {lead.note}" if lead.note else ''
+
+    text = (
+        "🍴 <b>YANGI RESTORAN STOL BRONI!</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👤 <b>Ism:</b>          {lead.full_name or '—'}\n"
+        f"📞 <b>Telefon:</b>     <code>{lead.phone}</code>\n"
+        f"🏛️ <b>Restoran:</b>    {org_name} ({branch_name})\n"
+        f"📅 <b>Sana va Vaqt:</b> {pref_date} soat {pref_time}\n"
+        f"👥 <b>Mehmonlar:</b>   {lead.guests} kishi"
+        f"{note_sec}\n\n"
+        "──────────────────────────\n"
+        f"🕐 <b>Vaqt:</b> {created_str}\n"
+        f"🆔 <b>Lead ID:</b> <code>{lead_short}</code>\n\n"
+        "<i>IMTIAZ — Restoran Konsyerj</i>"
+    )
+
+    try:
+        bot = get_bot()
+        msg_id = bot.send_message(chat_id=chat_id, text=text, parse_mode='HTML')
+        if msg_id:
+            lead.status = 'sent'
+            lead.save(update_fields=['status', 'updated_at'])
+            return {'status': 'sent', 'message_id': msg_id}
+        return {'status': 'failed'}
+    except Exception as exc:
+        logger.error('[crm.telegram] Restaurant lead error: %s', exc)
+        return {'status': 'error', 'error': str(exc)}
+
+
+@shared_task(name='crm.notify_telegram_restaurant_lead', bind=True, max_retries=2, default_retry_delay=30)
+def notify_telegram_restaurant_lead(self, lead_id: str):
+    return send_telegram_restaurant_lead_notification(lead_id)
+
+
+# ── Universal Service & Flight Lead Notification ─────────────────────────────
+
+def send_telegram_service_lead_notification(lead_id: str) -> dict:
+    """Yangi ServiceLead (Parvoz, Yo'lda yordam, Tibbiyot, Sug'urta, Family Office va b.) haqida Telegram guruhga xabar yuboradi."""
+    from apps.crm.models import ServiceLead, ServiceLeadCategory
+    from apps.notifications.telegram import get_bot
+
+    raw_chat_id = getattr(settings, 'TELEGRAM_TOUR_LEADS_CHAT_ID', None)
+    if not raw_chat_id:
+        return {'status': 'no_chat_id'}
+
+    try:
+        chat_id = int(str(raw_chat_id).split('#')[0].strip())
+    except (ValueError, TypeError):
+        return {'status': 'invalid_chat_id'}
+
+    try:
+        lead = ServiceLead.objects.select_related('organization', 'user').get(id=lead_id)
+    except ServiceLead.DoesNotExist:
+        return {'status': 'not_found'}
+
+    category_icons = {
+        ServiceLeadCategory.FLIGHT: "✈️ <b>YANGI PARVOZ BILETI SO'ROVI!</b>",
+        ServiceLeadCategory.ROADSIDE: "🚗 <b>YANGI YO'LDA YORDAM SO'ROVI!</b>",
+        ServiceLeadCategory.MEDICAL: "🩺 <b>YANGI TIBBIYOT KONSYERJ SO'ROVI!</b>",
+        ServiceLeadCategory.INSURANCE: "🛡️ <b>YANGI SUG'URTA SO'ROVI!</b>",
+        ServiceLeadCategory.FAMILY_OFFICE: "💼 <b>YANGI FAMILY OFFICE SO'ROVI!</b>",
+        ServiceLeadCategory.LEISURE: "🎭 <b>YANGI DAM OLISH SO'ROVI!</b>",
+        ServiceLeadCategory.RESTAURANT: "🍴 <b>YANGI RESTORAN SO'ROVI!</b>",
+        ServiceLeadCategory.TRAVEL: "🌍 <b>YANGI SAYOHAT SO'ROVI!</b>",
+        ServiceLeadCategory.OTHER: "🌟 <b>YANGI MAXSUS XIZMAT SO'ROVI!</b>",
+    }
+    header = category_icons.get(lead.category, "🌟 <b>YANGI XIZMAT SO'ROVI!</b>")
+
+    created_str = lead.created_at.strftime('%d.%m.%Y %H:%M') if lead.created_at else '—'
+    lead_short = str(lead.id)[:8].upper()
+
+    analysis_sec = f"\n🧠 <b>AI Mijoz Tahlili:</b>\n<i>{lead.customer_analysis}</i>\n" if lead.customer_analysis else ''
+    note_sec = f"\n💬 <b>So'rov Tafsilotlari:</b>\n{lead.note}" if lead.note else ''
+
+    text = (
+        f"{header}\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🏷️ <b>Xizmat Turi:</b> {lead.get_category_display()}\n"
+        f"📌 <b>Nomi:</b>        {lead.service_name or '—'}\n"
+        f"👤 <b>Ism:</b>        {lead.full_name or '—'}\n"
+        f"📞 <b>Telefon:</b>     <code>{lead.phone}</code>"
+        f"{analysis_sec}"
+        f"{note_sec}\n\n"
+        "──────────────────────────\n"
+        f"🕐 <b>Vaqt:</b> {created_str}\n"
+        f"🆔 <b>Lead ID:</b> <code>{lead_short}</code>\n\n"
+        "<i>IMTIAZ — AI Lifestyle Concierge</i>"
+    )
+
+    try:
+        bot = get_bot()
+        msg_id = bot.send_message(chat_id=chat_id, text=text, parse_mode='HTML')
+        if msg_id:
+            lead.status = 'sent'
+            lead.save(update_fields=['status', 'updated_at'])
+            return {'status': 'sent', 'message_id': msg_id}
+        return {'status': 'failed'}
+    except Exception as exc:
+        logger.error('[crm.telegram] Service lead notification error: %s', exc)
+        return {'status': 'error', 'error': str(exc)}
+
+
+@shared_task(name='crm.notify_telegram_service_lead', bind=True, max_retries=2, default_retry_delay=30)
+def notify_telegram_service_lead(self, lead_id: str):
+    return send_telegram_service_lead_notification(lead_id)
+
+
+# ── Kunlik AI Analitika va Statistik Xabarnoma ────────────────────────────────
+
+@shared_task(name='crm.daily_ai_lead_stats_summary', bind=True, max_retries=2)
+def daily_ai_lead_stats_summary(self):
+    """
+    So'nggi 24 soat ichida kelgan barcha leadlarni tahlil qilib,
+    guruhga AI statistika va analitika hisobotini yuboradi.
+    """
+    from datetime import timedelta
+    from django.utils import timezone
+    from apps.crm.models import TourLead, RestaurantLead, ServiceLead, ServiceLeadCategory
+    from apps.notifications.telegram import get_bot
+
+    raw_chat_id = getattr(settings, 'TELEGRAM_TOUR_LEADS_CHAT_ID', None)
+    if not raw_chat_id:
+        logger.warning('[daily_stats] TELEGRAM_TOUR_LEADS_CHAT_ID sozlanmagan')
+        return {'status': 'no_chat_id'}
+
+    try:
+        chat_id = int(str(raw_chat_id).split('#')[0].strip())
+    except (ValueError, TypeError):
+        return {'status': 'invalid_chat_id'}
+
+    now = timezone.now()
+    since = now - timedelta(days=1)
+
+    tour_leads = TourLead.objects.filter(created_at__gte=since)
+    rest_leads = RestaurantLead.objects.filter(created_at__gte=since)
+    serv_leads = ServiceLead.objects.filter(created_at__gte=since)
+
+    total_leads_count = tour_leads.count() + rest_leads.count() + serv_leads.count()
+
+    cat_counts = {
+        'travel': tour_leads.count() + serv_leads.filter(category=ServiceLeadCategory.TRAVEL).count(),
+        'restaurant': rest_leads.count() + serv_leads.filter(category=ServiceLeadCategory.RESTAURANT).count(),
+        'flight': serv_leads.filter(category=ServiceLeadCategory.FLIGHT).count(),
+        'roadside': serv_leads.filter(category=ServiceLeadCategory.ROADSIDE).count(),
+        'medical': serv_leads.filter(category=ServiceLeadCategory.MEDICAL).count(),
+        'insurance': serv_leads.filter(category=ServiceLeadCategory.INSURANCE).count(),
+        'family_office': serv_leads.filter(category=ServiceLeadCategory.FAMILY_OFFICE).count(),
+        'leisure': serv_leads.filter(category=ServiceLeadCategory.LEISURE).count(),
+        'other': serv_leads.filter(category=ServiceLeadCategory.OTHER).count(),
+    }
+
+    # Platdormalarda hali bo'lmagan, so'ralgan xizmatlarni aniqlash
+    unhandled_services = list(serv_leads.filter(category=ServiceLeadCategory.OTHER).values_list('service_name', flat=True)[:5])
+    unhandled_str = ", ".join(s for s in unhandled_services if s) if unhandled_services else "Barcha so'rovlar qamrab olindi"
+
+    report_text = (
+        "📊 <b>IMTIAZ AI — KUNLIK LEAD VA ANALITIKA STATISTIKASI</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📅 <b>Sana:</b> {now.strftime('%d.%m.%Y')}\n"
+        f"📈 <b>Oxirgi 24 soatdagi jami leadlar:</b> <b>{total_leads_count} ta</b>\n\n"
+        "📂 <b>Yo'nalishlar bo'yicha taqsimot:</b>\n"
+        f"  • 🌍 <b>Sayohatlar:</b> {cat_counts['travel']} ta\n"
+        f"  • 🍴 <b>Stol band qilish:</b> {cat_counts['restaurant']} ta\n"
+        f"  • ✈️ <b>Parvoz biletlari:</b> {cat_counts['flight']} ta\n"
+        f"  • 🚗 <b>Yo'lda yordam:</b> {cat_counts['roadside']} ta\n"
+        f"  • 🩺 <b>Tibbiyot:</b> {cat_counts['medical']} ta\n"
+        f"  • 🛡️ <b>Sug'urta:</b> {cat_counts['insurance']} ta\n"
+        f"  • 💼 <b>Family Office:</b> {cat_counts['family_office']} ta\n"
+        f"  • 🎭 <b>Dam olish:</b> {cat_counts['leisure']} ta\n"
+        f"  • 🌟 <b>Maxsus/Boshqa:</b> {cat_counts['other']} ta\n\n"
+        "💡 <b>Tahlil va Tavsiyalar:</b>\n"
+        f"  📌 <i>Qo'shish tavsiya etiladigan xizmatlar:</i> {unhandled_str}\n"
+        "  🧠 <i>AI xulosasi:</i> Mijozlar faolligi barqaror. Premium concierge va sayohat so'rovlari yuqori ulushga ega.\n\n"
+        "<i>IMTIAZ — AI Automated Analytics System</i>"
+    )
+
+    try:
+        bot = get_bot()
+        msg_id = bot.send_message(chat_id=chat_id, text=report_text, parse_mode='HTML')
+        return {'status': 'sent', 'message_id': msg_id, 'total_leads': total_leads_count}
+    except Exception as exc:
+        logger.error('[daily_stats] Telegram report send error: %s', exc)
+        return {'status': 'error', 'error': str(exc)}
+
+
