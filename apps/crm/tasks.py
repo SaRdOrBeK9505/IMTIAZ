@@ -220,7 +220,7 @@ def send_telegram_tour_lead_notification(lead_id: str) -> dict:
 
     user_info = '—'
     if lead.user:
-        user_info = f'{lead.user.get_full_name() or getattr(lead.user, "phone", "") or str(lead.user)}'
+        user_info = f'{lead.user.full_name or getattr(lead.user, "phone", "") or str(lead.user)}'
 
     note_section = f'\n💬 <b>Izoh:</b> {lead.note}' if lead.note else ''
     created_str  = lead.created_at.strftime('%d.%m.%Y %H:%M') if lead.created_at else '—'

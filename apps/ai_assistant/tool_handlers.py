@@ -9,6 +9,7 @@ import re
 from decimal import Decimal
 from datetime import datetime
 
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -571,7 +572,7 @@ def handle_submit_tour_lead(
             organization__org_type='tour_company',
             organization__is_active=True,
         )
-    except TourPackage.DoesNotExist:
+    except (TourPackage.DoesNotExist, ValidationError, ValueError):
         return {'status': 'error', 'message': t('tour_lead_package_not_found', lang)}
 
     dep_date = None
@@ -648,7 +649,7 @@ def handle_submit_restaurant_lead(
             is_active=True,
             organization__is_active=True,
         )
-    except Branch.DoesNotExist:
+    except (Branch.DoesNotExist, ValidationError, ValueError):
         # Mock or general search fallback
         branch = Branch.objects.filter(is_active=True, organization__org_type='restaurant').first()
         if not branch:
