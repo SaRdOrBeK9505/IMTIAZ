@@ -184,9 +184,10 @@ class Command(BaseCommand):
 
         if not silk.owner_id and not dry_run:
             owner, _ = User.objects.get_or_create(
-                phone_number='+998900000001',
+                phone='+998900000001',
                 defaults={
-                    'full_name': 'Silk Road Director',
+                    'first_name': 'Silk Road',
+                    'last_name': 'Director',
                     'role': 'owner_tour',
                     'is_active': True,
                 }
