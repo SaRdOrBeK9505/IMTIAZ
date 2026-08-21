@@ -550,6 +550,29 @@ class AIAssistantService:
             session=session, role='user', content=message,
         )
 
+        # ── Salomlashish — AI chaqirmasdan to'g'ridan-to'g'ri javob ─────────
+        if self._is_pure_greeting(message):
+            welcome   = t('ai_welcome', lang)
+            quick_rep = t('quick_replies', lang)
+            if not isinstance(quick_rep, list):
+                quick_rep = ['✈️ Chipta izlash', '🍽️ Stol band qilish', '❓ Boshqa savol']
+            msg = ConversationMessage.objects.create(
+                session=session, role='assistant', content=welcome,
+            )
+            logger.debug('[ai] Greeting detected (stream) — local welcome sent')
+            yield {'type': 'chunk', 'text': welcome}
+            yield {
+                'type':                  'done',
+                'session_id':            str(session.id),
+                'message_id':            str(msg.id),
+                'content':               welcome,
+                'quick_replies':         quick_rep,
+                'tool_calls_count':      0,
+                'requires_confirmation': False,
+            }
+            return
+        # ─────────────────────────────────────────────────────────────────────
+
         with timer.measure('history_load'):
             history = self._load_history(session)
         with timer.measure('user_profile_summary'):
@@ -664,9 +687,11 @@ class AIAssistantService:
 
             if pending_action_id:
                 final_content = pending_summary
+                yield {'type': 'chunk', 'text': final_content}
             elif should_use_local_reply(tool_results, message, lang):
                 with timer.measure('local_reply_build'):
                     final_content = build_reply_from_tools(tool_results, lang=lang)
+                    yield {'type': 'chunk', 'text': final_content}
             else:
                 tool_msgs = [
                     AIMessage(role='assistant', content=text_so_far),
@@ -693,11 +718,9 @@ class AIAssistantService:
                             max_tokens=getattr(settings, 'AI_FOLLOWUP_MAX_TOKENS', 512),
                         )
                     final_content = (
-                            final_resp.content
-                            or build_reply_from_tools(tool_results, lang=lang)
+                        final_resp.content
+                        or build_reply_from_tools(tool_results, lang=lang)
                     )
-                    # Follow-up javobni ham chunk sifatida yuboramiz —
-                    # frontend buni xuddi streamdek ko'rsatadi
                     yield {'type': 'chunk', 'text': final_content}
                 except Exception as e:
                     logger.exception('Tool result qayta chaqiruvda xato: %s', e)
