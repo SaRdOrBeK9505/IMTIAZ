@@ -165,15 +165,70 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.HTTP_INFO('\n[**]  BOSQICH 2: Silk Road Premium Tours — paketlar qo\'shish\n'))
 
-        try:
-            silk = Organization.objects.get(name=SILK_ROAD_NAME)
-        except Organization.DoesNotExist:
-            raise CommandError(f'{SILK_ROAD_NAME} topilmadi!')
+        from django.contrib.auth import get_user_model
+        from apps.crm.models import Branch
+
+        User = get_user_model()
+
+        silk, org_created = Organization.objects.get_or_create(
+            name=SILK_ROAD_NAME,
+            defaults={
+                'org_type':      'tour_company',
+                'business_type': 'travel',
+                'description':   'O\'zbekistonning eng premium tur operatori. VIP sayohatlar, eksklyuziv paketlar va shaxsiy xizmat.',
+                'is_active':     True,
+            }
+        )
+        if org_created:
+            self.stdout.write(self.style.SUCCESS(f'  [+] Organization yaratildi: {silk.name}'))
+
+        if not silk.owner_id and not dry_run:
+            owner, _ = User.objects.get_or_create(
+                phone_number='+998900000001',
+                defaults={
+                    'full_name': 'Silk Road Director',
+                    'role': 'owner_tour',
+                    'is_active': True,
+                }
+            )
+            silk.owner = owner
+            silk.save(update_fields=['owner', 'updated_at'])
+
+        if not dry_run:
+            Branch.objects.get_or_create(
+                organization=silk,
+                name='Bosh Ofis',
+                defaults={
+                    'address': 'Toshkent, Chilonzor tumani',
+                    'city': 'Toshkent',
+                    'country': 'Uzbekistan',
+                    'is_active': True,
+                }
+            )
 
         self.stdout.write(f'  Organization: {silk.name} ({silk.id})')
 
-        # Kategoriyalar
-        cats = {c.name: c for c in TourCategory.objects.all()}
+        # Kategoriyalar (yo'q bo'lsa yaratiladi)
+        cats_data = [
+            ('Dengiz va VIP Ta\'til',  'beach',    '', 1),
+            ('Ekzotika & Osiyo',       'exotic',   '', 2),
+            ('Madaniy-Tarixiy',        'culture',  '', 3),
+            ('Mualliflik Turlari',     'author',   '', 4),
+            ('Yevropa & Madaniyat',    'europe',   '', 5),
+        ]
+        cats = {}
+        for c_name, _, icon, order in cats_data:
+            if not dry_run:
+                cat, _ = TourCategory.objects.get_or_create(
+                    name=c_name,
+                    defaults={'icon': icon, 'is_active': True, 'sort_order': order}
+                )
+                cats[c_name] = cat
+            else:
+                try:
+                    cats[c_name] = TourCategory.objects.get(name=c_name)
+                except TourCategory.DoesNotExist:
+                    cats[c_name] = None
 
         # Yangi paketlar ro'yxati
         packages_data = self._get_packages_data()
@@ -278,7 +333,7 @@ class Command(BaseCommand):
                 created_count += 1
 
         self.stdout.write(
-            f'\n  📊 Natija: {created_count} ta yangi, {skipped_count} ta mavjud (o\'tkazildi)'
+            f'\n  [SUMMARY] Natija: {created_count} ta yangi, {skipped_count} ta mavjud (o\'tkazildi)'
         )
 
     # ──────────────────────────────────────────────────────────────────────────
