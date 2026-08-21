@@ -169,43 +169,33 @@ def send_tour_lead_to_crm(self, lead_id: str):
 
 # ─── Telegram Lead Notification ───────────────────────────────────────────────
 
-@shared_task(name='crm.notify_telegram_tour_lead', bind=True, max_retries=2, default_retry_delay=30)
-def notify_telegram_tour_lead(self, lead_id: str):
-    """
-    Yangi TourLead haqida Telegram guruhga to'liq ma'lumot yuboradi.
-
-    .env da talab qilinadi:
-        TELEGRAM_BOT_TOKEN         — bot token (@BotFather dan)
-        TELEGRAM_TOUR_LEADS_CHAT_ID — guruh chat ID (manfiy raqam, masalan: -1001234567890)
-
-    Xabar formati:
-        🔔 YANGI TUR SO'ROVI
-        ━━━━━━━━━━━━━━━━━━
-        👤 Ism:        Ali Valiyev
-        📞 Tel:        +998901234567
-        🌍 Tur paketi: Istanbul VIP Tour
-        📅 Jo'nash:    2026-10-15
-        👥 Yo'lovchilar: 2 kishi
-        🏢 Kompaniya:  Silk Road Premium Tours
-        💬 Izoh:       Bolalar bilan bormoqchimiz...
-        ─────────────────────
-        🕐 Vaqt: 21.08.2026 13:45
-        🆔 Lead ID: ab12cd34
-    """
+def send_telegram_tour_lead_notification(lead_id: str) -> dict:
+    """Yangi TourLead haqida Telegram guruhga to'liq ma'lumot yuboradi (sinxron helper)."""
     from apps.crm.models import TourLead
     from apps.notifications.telegram import get_bot
 
-    # Sozlamalarni olish
     bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
-    chat_id   = getattr(settings, 'TELEGRAM_TOUR_LEADS_CHAT_ID', None)
+    raw_chat_id = getattr(settings, 'TELEGRAM_TOUR_LEADS_CHAT_ID', None)
 
     if not bot_token:
         logger.warning('[crm.telegram] TELEGRAM_BOT_TOKEN sozlanmagan — xabar yuborilmadi')
         return {'status': 'no_token'}
 
-    if not chat_id:
+    if not raw_chat_id:
         logger.warning('[crm.telegram] TELEGRAM_TOUR_LEADS_CHAT_ID sozlanmagan — xabar yuborilmadi')
         return {'status': 'no_chat_id'}
+
+    # Inline izohlarni (#...) va bo'sh joylarni tozalash
+    chat_str = str(raw_chat_id).split('#')[0].strip()
+    if not chat_str:
+        logger.warning('[crm.telegram] TELEGRAM_TOUR_LEADS_CHAT_ID bo\'sh — xabar yuborilmadi')
+        return {'status': 'no_chat_id'}
+
+    try:
+        chat_id = int(chat_str)
+    except (ValueError, TypeError):
+        logger.error('[crm.telegram] TELEGRAM_TOUR_LEADS_CHAT_ID noto\'g\'ri format: %r', raw_chat_id)
+        return {'status': 'invalid_chat_id'}
 
     try:
         lead = TourLead.objects.select_related(
@@ -230,7 +220,7 @@ def notify_telegram_tour_lead(self, lead_id: str):
 
     user_info = '—'
     if lead.user:
-        user_info = f'{lead.user.get_full_name() or lead.user.phone_number or str(lead.user)}'
+        user_info = f'{lead.user.get_full_name() or getattr(lead.user, "phone", "") or str(lead.user)}'
 
     note_section = f'\n💬 <b>Izoh:</b> {lead.note}' if lead.note else ''
     created_str  = lead.created_at.strftime('%d.%m.%Y %H:%M') if lead.created_at else '—'
@@ -271,6 +261,15 @@ def notify_telegram_tour_lead(self, lead_id: str):
 
     except Exception as exc:
         logger.error('[crm.telegram] Telegram xabarda xato: lead=%s, exc=%s', lead_id, exc)
+        return {'status': 'error', 'error': str(exc)}
+
+
+@shared_task(name='crm.notify_telegram_tour_lead', bind=True, max_retries=2, default_retry_delay=30)
+def notify_telegram_tour_lead(self, lead_id: str):
+    """Yangi TourLead haqida Telegram guruhga Celery task orqali yuboradi."""
+    res = send_telegram_tour_lead_notification(lead_id)
+    if res.get('status') == 'error':
         countdown = 30 * (2 ** self.request.retries)
-        raise self.retry(exc=exc, countdown=countdown)
+        raise self.retry(exc=Exception(res.get('error')), countdown=countdown)
+    return res
 

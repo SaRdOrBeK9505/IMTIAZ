@@ -598,6 +598,14 @@ def handle_submit_tour_lead(
     )
 
     send_tour_lead_to_crm.delay(str(lead.id))
+
+    # Telegram guruhga ham sinxron yuborish (Celery worker ishlamayotgan bo'lsa ham xabar zudlik bilan yetib borishi uchun)
+    try:
+        from apps.crm.tasks import send_telegram_tour_lead_notification
+        send_telegram_tour_lead_notification(str(lead.id))
+    except Exception as exc:
+        logger.exception('Telegram lead notification direct send error: %s', exc)
+
     logger.info(
         'AI tur lead yaratildi: lead=%s, package=%s, user=%s',
         lead.id, package.id, user.id,
