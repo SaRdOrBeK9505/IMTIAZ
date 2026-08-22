@@ -697,6 +697,15 @@ def handle_submit_restaurant_lead(
         status=RestaurantLeadStatus.NEW,
     )
 
+    # Telegram guruhga sinxron yuborish — send_telegram_restaurant_lead_notification
+    # crm/tasks.py da tayyor turgan edi, lekin bu yerdan hech qachon chaqirilmagan
+    # edi, shuning uchun restoran leadlari hech qachon Telegram guruhga bormas edi.
+    try:
+        from apps.crm.tasks import send_telegram_restaurant_lead_notification
+        send_telegram_restaurant_lead_notification(str(lead.id))
+    except Exception as exc:
+        logger.exception('Telegram restaurant lead notification error: %s', exc)
+
     logger.info(
         'AI restoran lead yaratildi: lead=%s, branch=%s, user=%s',
         lead.id, branch.id, user.id,
@@ -707,6 +716,118 @@ def handle_submit_restaurant_lead(
         'lead_id': str(lead.id),
         'message': f"✅ {branch.organization.name} bo'yicha stol bron so'rovingiz qabul qilindi. Restoran menejerlari tez fursatda siz bilan bog'lanishadi — bu uzoq vaqt olmaydi.",
     }
+
+
+def handle_submit_service_lead(
+    user,
+    phone: str,
+    category: str = 'other',
+    full_name: str = '',
+    service_name: str = '',
+    customer_analysis: str = '',
+    note: str = '',
+    session=None,
+    lang: str = 'uz',
+    **kwargs,
+) -> dict:
+    """
+    Platformaning "universal" lead oqimi — search_flights/search_restaurants/
+    search_tour_packages ostida aniq mos tool bo'lmagan barcha xizmatlar
+    (Yo'lda yordam, Tibbiyot, Sug'urta, Family Office, Dam olish va h.k.) uchun.
+    """
+    from apps.crm.models import ServiceLead, ServiceLeadCategory, ServiceLeadStatus
+    from .i18n import t
+
+    normalized_phone = _normalize_phone(phone)
+    if not _PHONE_RE.match(normalized_phone):
+        return {
+            'status': 'error',
+            'message': t('tour_lead_invalid_phone', lang),
+        }
+
+    if not full_name or not full_name.strip():
+        full_name = user.full_name or ''
+
+    valid_category = category if category in ServiceLeadCategory.values else ServiceLeadCategory.OTHER
+
+    lead = ServiceLead.objects.create(
+        category=valid_category,
+        user=user,
+        session=session,
+        full_name=full_name.strip(),
+        phone=normalized_phone,
+        service_name=service_name.strip(),
+        customer_analysis=customer_analysis.strip(),
+        note=note.strip(),
+        status=ServiceLeadStatus.NEW,
+    )
+
+    # Telegram guruhga sinxron yuborish (Celery worker ishlamayotgan bo'lsa ham
+    # xabar zudlik bilan yetib borishi uchun — submit_tour_lead bilan bir xil naqsh).
+    try:
+        from apps.crm.tasks import send_telegram_service_lead_notification
+        send_telegram_service_lead_notification(str(lead.id))
+    except Exception as exc:
+        logger.exception('Telegram service lead notification error: %s', exc)
+
+    logger.info(
+        'AI service lead yaratildi: lead=%s, category=%s, user=%s',
+        lead.id, valid_category, user.id,
+    )
+
+    service_title = service_name or lead.get_category_display()
+    return {
+        'status': 'ok',
+        'lead_id': str(lead.id),
+        'message': f"✅ {service_title} bo'yicha so'rovingiz qabul qilindi. Mutaxassislarimiz tez orada siz bilan bog'lanishadi.",
+    }
+
+
+def handle_submit_flight_lead(
+    user,
+    phone: str,
+    origin: str,
+    destination: str,
+    departure_date: str = None,
+    passengers: int = 1,
+    seat_class: str = 'economy',
+    full_name: str = '',
+    customer_analysis: str = '',
+    note: str = '',
+    session=None,
+    lang: str = 'uz',
+    **kwargs,
+) -> dict:
+    """
+    Parvoz uchun "menejer orqali" lead oqimi — search_flights/book_flight
+    ishlamagan yoki mijoz to'g'ridan-to'g'ri operator orqali xarid qilishni
+    istagan hollarda ishlatiladi. Ichkarida universal ServiceLead orqali yuriladi.
+    """
+    from apps.crm.models import ServiceLeadCategory
+
+    details = [
+        f"✈️ Yo'nalish: {origin} → {destination}",
+        f"📅 Sana: {departure_date or 'Belgilanmagan'}",
+        f"👥 Yo'lovchilar: {passengers} kishi ({seat_class} klass)",
+    ]
+    if note and note.strip():
+        details.append(f"💬 Izoh: {note.strip()}")
+
+    combined_note = "\n".join(details)
+    service_title = f"Parvoz: {origin} → {destination}"
+
+    return handle_submit_service_lead(
+        user=user,
+        phone=phone,
+        category=ServiceLeadCategory.FLIGHT,
+        full_name=full_name,
+        service_name=service_title,
+        customer_analysis=customer_analysis,
+        note=combined_note,
+        session=session,
+        lang=lang,
+        **kwargs,
+    )
 
 
 TOOL_DISPATCH: dict = {
@@ -723,4 +844,6 @@ TOOL_DISPATCH: dict = {
     'search_tour_packages':   handle_search_tour_packages,
     'submit_tour_lead':       handle_submit_tour_lead,
     'submit_restaurant_lead': handle_submit_restaurant_lead,
+    'submit_service_lead':    handle_submit_service_lead,
+    'submit_flight_lead':     handle_submit_flight_lead,
 }
