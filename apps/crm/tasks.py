@@ -170,7 +170,7 @@ def send_tour_lead_to_crm(self, lead_id: str):
 # ─── Telegram Lead Notification Helpers ─────────────────────────────────────
 
 def build_lead_keyboard(lead_type: str, lead_id: str, phone: str, current_status: str) -> dict:
-    """Lead uchun Telegram inline klaviaturasi (Telefon dialer + Status menyusi)."""
+    """Lead uchun Telegram inline klaviaturasi (Telegram link + Status menyusi)."""
     clean_phone = (phone or '').strip()
     if clean_phone and not clean_phone.startswith('+') and clean_phone.isdigit():
         clean_phone = '+' + clean_phone
@@ -187,16 +187,18 @@ def build_lead_keyboard(lead_type: str, lead_id: str, phone: str, current_status
     }
     st_text = status_labels.get(current_status, '🆕 Yangi')
 
-    call_btn_text = "📞 Mijoz bilan bog'lanish"
+    call_btn_text = "💬 Mijoz bilan bog'lanish"
     if lead_type == 'roadside':
         call_btn_text = "🤝 Yordamni qabul qilish"
     elif lead_type == 'flight':
         call_btn_text = "💬 Mijozga murojaat qilish"
 
+    tg_url = f"https://t.me/{clean_phone}" if clean_phone else "https://t.me/"
+
     return {
         'inline_keyboard': [
             [
-                {'text': call_btn_text, 'url': f'tel:{clean_phone}'}
+                {'text': call_btn_text, 'url': tg_url}
             ],
             [
                 {'text': f'⚙️ Status: {st_text}', 'callback_data': f'st_menu:{lead_type}:{lead_id}'}
@@ -226,6 +228,10 @@ def build_lead_status_selection_keyboard(lead_type: str, lead_id: str) -> dict:
 
 def format_tour_lead_card(lead) -> tuple[str, dict]:
     """TourLead uchun Telegram karta matni va klaviaturasi."""
+    clean_phone = (lead.phone or '').strip()
+    if clean_phone and not clean_phone.startswith('+') and clean_phone.isdigit():
+        clean_phone = '+' + clean_phone
+
     departure = (
         lead.preferred_departure_date.strftime('%d.%m.%Y')
         if lead.preferred_departure_date else '—'
@@ -255,11 +261,13 @@ def format_tour_lead_card(lead) -> tuple[str, dict]:
 
     staff_sec = f"\n👤 <b>Mas'ul xodim:</b> @{lead.assigned_staff_name}" if lead.assigned_staff_name else ''
 
+    phone_html = f'<a href="tel:{clean_phone}"><code>{lead.phone}</code></a>' if clean_phone else '—'
+
     text = (
         "🔔 <b>YANGI TUR SO'ROVI KELDI!</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"👤 <b>Ism:</b>          {lead.full_name or '—'}\n"
-        f"📞 <b>Telefon:</b>     <code>{lead.phone}</code>\n"
+        f"📞 <b>Telefon:</b>     {phone_html}\n"
         f"🌍 <b>Tur paketi:</b>  {package_info}\n"
         f"📍 <b>Yo'nalish:</b>   {destination_info}\n"
         f"📅 <b>Jo'nash:</b>     {departure}\n"
@@ -281,6 +289,10 @@ def format_tour_lead_card(lead) -> tuple[str, dict]:
 
 def format_restaurant_lead_card(lead) -> tuple[str, dict]:
     """RestaurantLead uchun Telegram karta matni va klaviaturasi."""
+    clean_phone = (lead.phone or '').strip()
+    if clean_phone and not clean_phone.startswith('+') and clean_phone.isdigit():
+        clean_phone = '+' + clean_phone
+
     pref_date = lead.preferred_date.strftime('%d.%m.%Y') if lead.preferred_date else '—'
     pref_time = lead.preferred_time.strftime('%H:%M') if lead.preferred_time else '—'
     org_name  = lead.organization.name if lead.organization else '—'
@@ -301,11 +313,13 @@ def format_restaurant_lead_card(lead) -> tuple[str, dict]:
 
     staff_sec = f"\n👤 <b>Mas'ul xodim:</b> @{lead.assigned_staff_name}" if lead.assigned_staff_name else ''
 
+    phone_html = f'<a href="tel:{clean_phone}"><code>{lead.phone}</code></a>' if clean_phone else '—'
+
     text = (
         "🍴 <b>YANGI RESTORAN STOL BRONI!</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"👤 <b>Ism:</b>          {lead.full_name or '—'}\n"
-        f"📞 <b>Telefon:</b>     <code>{lead.phone}</code>\n"
+        f"📞 <b>Telefon:</b>     {phone_html}\n"
         f"🏛️ <b>Restoran:</b>    {org_name} ({branch_name})\n"
         f"📅 <b>Sana va Vaqt:</b> {pref_date} soat {pref_time}\n"
         f"👥 <b>Mehmonlar:</b>   {lead.guests} kishi"
@@ -325,6 +339,10 @@ def format_restaurant_lead_card(lead) -> tuple[str, dict]:
 def format_service_lead_card(lead) -> tuple[str, dict]:
     """ServiceLead (Parvoz, Yo'lda yordam, Umumiy/Boshqa va b.) uchun Telegram karta matni va klaviaturasi."""
     from apps.crm.models import ServiceLeadCategory
+
+    clean_phone = (lead.phone or '').strip()
+    if clean_phone and not clean_phone.startswith('+') and clean_phone.isdigit():
+        clean_phone = '+' + clean_phone
 
     category_config = {
         ServiceLeadCategory.FLIGHT: ("✈️ <b>YANGI PARVOZ BILETI SO'ROVI!</b>", "flight"),
@@ -359,13 +377,15 @@ def format_service_lead_card(lead) -> tuple[str, dict]:
 
     staff_sec = f"\n👤 <b>Mas'ul xodim:</b> @{lead.assigned_staff_name}" if lead.assigned_staff_name else ''
 
+    phone_html = f'<a href="tel:{clean_phone}"><code>{lead.phone}</code></a>' if clean_phone else '—'
+
     text = (
         f"{header}\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"🏷️ <b>Xizmat Turi:</b> {lead.get_category_display()}\n"
         f"📌 <b>Nomi:</b>        {lead.service_name or '—'}\n"
         f"👤 <b>Ism:</b>        {lead.full_name or '—'}\n"
-        f"📞 <b>Telefon:</b>     <code>{lead.phone}</code>"
+        f"📞 <b>Telefon:</b>     {phone_html}"
         f"{analysis_sec}"
         f"{note_sec}\n\n"
         "──────────────────────────\n"

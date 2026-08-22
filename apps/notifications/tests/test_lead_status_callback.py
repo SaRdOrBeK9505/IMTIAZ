@@ -42,8 +42,8 @@ class LeadKeyboardAndStatusCallbackTestCase(TestCase):
         kb = build_lead_keyboard('tour', str(self.tour_lead.id), self.tour_lead.phone, 'new')
         buttons = kb.get('inline_keyboard', [])
         self.assertEqual(len(buttons), 2)
-        # Call button uses tel: URI
-        self.assertTrue(buttons[0][0]['url'].startswith('tel:+998907765431'))
+        # Call button uses https://t.me/ URL scheme for Telegram API compatibility
+        self.assertTrue(buttons[0][0]['url'].startswith('https://t.me/'))
         # Status button opens menu
         self.assertEqual(buttons[1][0]['callback_data'], f'st_menu:tour:{self.tour_lead.id}')
 
@@ -57,11 +57,11 @@ class LeadKeyboardAndStatusCallbackTestCase(TestCase):
     def test_format_lead_cards(self):
         text, markup = format_tour_lead_card(self.tour_lead)
         self.assertIn("YANGI TUR SO'ROVI KELDI!", text)
-        self.assertIn("tel:+998907765431", markup['inline_keyboard'][0][0]['url'])
+        self.assertIn("https://t.me/+998907765431", markup['inline_keyboard'][0][0]['url'])
 
         text_serv, markup_serv = format_service_lead_card(self.service_lead)
         self.assertIn("YANGI PARVOZ BILETI SO'ROVI!", text_serv)
-        self.assertIn("tel:+998907765433", markup_serv['inline_keyboard'][0][0]['url'])
+        self.assertIn("https://t.me/+998907765433", markup_serv['inline_keyboard'][0][0]['url'])
 
     @patch('apps.notifications.bot_handlers.get_bot')
     def test_handle_lead_status_callback_st_set(self, mock_get_bot):
