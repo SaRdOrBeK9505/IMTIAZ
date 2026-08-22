@@ -134,6 +134,20 @@ class TelegramBotClient:
             payload['reply_markup'] = reply_markup
         return self._api_post('editMessageText', payload) is not None
 
+    def edit_message_reply_markup(
+        self,
+        chat_id: int,
+        message_id: int,
+        reply_markup: dict | None = None,
+    ) -> bool:
+        payload: dict = {
+            'chat_id':    chat_id,
+            'message_id': message_id,
+        }
+        if reply_markup:
+            payload['reply_markup'] = reply_markup
+        return self._api_post('editMessageReplyMarkup', payload) is not None
+
     def send_booking_confirmation(self, chat_id: int, booking) -> int | None:
         """Bron tasdiqlash xabarini yuboradi."""
         text = (

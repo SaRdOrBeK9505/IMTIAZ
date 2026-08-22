@@ -379,6 +379,9 @@ class TourLead(BaseModel):
     status = models.CharField(
         max_length=12, choices=TourLeadStatus.choices, default=TourLeadStatus.NEW,
     )
+    assigned_staff_name = models.CharField(
+        max_length=150, blank=True, help_text="Lead bo'yicha shug'ullanayotgan xodim ismi/username"
+    )
     crm_response = models.JSONField(default=dict, blank=True, help_text='Hamkor CRM javobi (debug uchun)')
     sent_at = models.DateTimeField(null=True, blank=True)
     retry_count = models.PositiveSmallIntegerField(default=0)
@@ -433,6 +436,9 @@ class RestaurantLead(BaseModel):
 
     status = models.CharField(
         max_length=12, choices=RestaurantLeadStatus.choices, default=RestaurantLeadStatus.NEW,
+    )
+    assigned_staff_name = models.CharField(
+        max_length=150, blank=True, help_text="Lead bo'yicha shug'ullanayotgan xodim ismi/username"
     )
     crm_response = models.JSONField(default=dict, blank=True, help_text='Hamkor CRM javobi')
     sent_at = models.DateTimeField(null=True, blank=True)
@@ -504,6 +510,9 @@ class ServiceLead(BaseModel):
 
     status = models.CharField(
         max_length=12, choices=ServiceLeadStatus.choices, default=ServiceLeadStatus.NEW,
+    )
+    assigned_staff_name = models.CharField(
+        max_length=150, blank=True, help_text="Lead bo'yicha shug'ullanayotgan xodim ismi/username"
     )
     crm_response = models.JSONField(default=dict, blank=True, help_text='Yuborish javobi')
     sent_at = models.DateTimeField(null=True, blank=True)

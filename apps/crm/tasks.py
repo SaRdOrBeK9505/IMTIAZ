@@ -167,6 +167,219 @@ def send_tour_lead_to_crm(self, lead_id: str):
         raise self.retry(exc=exc, countdown=countdown)
 
 
+# ─── Telegram Lead Notification Helpers ─────────────────────────────────────
+
+def build_lead_keyboard(lead_type: str, lead_id: str, phone: str, current_status: str) -> dict:
+    """Lead uchun Telegram inline klaviaturasi (Telefon dialer + Status menyusi)."""
+    clean_phone = (phone or '').strip()
+    if clean_phone and not clean_phone.startswith('+') and clean_phone.isdigit():
+        clean_phone = '+' + clean_phone
+
+    status_labels = {
+        'new': '🆕 Yangi',
+        'sent': '🆕 Yangi',
+        'contacted': '⏳ Jarayonda',
+        'in_progress': '⏳ Jarayonda',
+        'converted': '✅ Bajarildi',
+        'confirmed': '✅ Bajarildi',
+        'declined': '❌ Rad etildi',
+        'failed': '⚠️ Xato',
+    }
+    st_text = status_labels.get(current_status, '🆕 Yangi')
+
+    call_btn_text = "📞 Mijoz bilan bog'lanish"
+    if lead_type == 'roadside':
+        call_btn_text = "🤝 Yordamni qabul qilish"
+    elif lead_type == 'flight':
+        call_btn_text = "💬 Mijozga murojaat qilish"
+
+    return {
+        'inline_keyboard': [
+            [
+                {'text': call_btn_text, 'url': f'tel:{clean_phone}'}
+            ],
+            [
+                {'text': f'⚙️ Status: {st_text}', 'callback_data': f'st_menu:{lead_type}:{lead_id}'}
+            ]
+        ]
+    }
+
+
+def build_lead_status_selection_keyboard(lead_type: str, lead_id: str) -> dict:
+    """Statusni o'zgartirish sub-menyusi klaviaturasi."""
+    return {
+        'inline_keyboard': [
+            [
+                {'text': '🆕 Yangi', 'callback_data': f'st_set:{lead_type}:{lead_id}:new'},
+                {'text': '⏳ Jarayonda', 'callback_data': f'st_set:{lead_type}:{lead_id}:contacted'},
+            ],
+            [
+                {'text': '✅ Bajarildi', 'callback_data': f'st_set:{lead_type}:{lead_id}:converted'},
+                {'text': '❌ Rad etildi', 'callback_data': f'st_set:{lead_type}:{lead_id}:declined'},
+            ],
+            [
+                {'text': '⬅️ Orqaga', 'callback_data': f'st_back:{lead_type}:{lead_id}'}
+            ]
+        ]
+    }
+
+
+def format_tour_lead_card(lead) -> tuple[str, dict]:
+    """TourLead uchun Telegram karta matni va klaviaturasi."""
+    departure = (
+        lead.preferred_departure_date.strftime('%d.%m.%Y')
+        if lead.preferred_departure_date else '—'
+    )
+    package_info = lead.package.title if lead.package else '—'
+    destination_info = '—'
+    if lead.package and lead.package.destination:
+        dest = lead.package.destination
+        destination_info = f'{dest.name} ({dest.country})'
+
+    user_info = '—'
+    if lead.user:
+        user_info = f'{lead.user.full_name or getattr(lead.user, "phone", "") or str(lead.user)}'
+
+    note_section = f'\n💬 <b>Izoh:</b> {lead.note}' if lead.note else ''
+    created_str  = lead.created_at.strftime('%d.%m.%Y %H:%M') if lead.created_at else '—'
+    lead_short   = str(lead.id)[:8].upper()
+
+    status_labels = {
+        'new': '🆕 Yangi',
+        'sent': '🆕 Yangi',
+        'contacted': '⏳ Jarayonda',
+        'converted': '✅ Bajarildi',
+        'declined': '❌ Rad etildi',
+    }
+    st_display = status_labels.get(lead.status, '🆕 Yangi')
+
+    staff_sec = f"\n👤 <b>Mas'ul xodim:</b> @{lead.assigned_staff_name}" if lead.assigned_staff_name else ''
+
+    text = (
+        "🔔 <b>YANGI TUR SO'ROVI KELDI!</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👤 <b>Ism:</b>          {lead.full_name or '—'}\n"
+        f"📞 <b>Telefon:</b>     <code>{lead.phone}</code>\n"
+        f"🌍 <b>Tur paketi:</b>  {package_info}\n"
+        f"📍 <b>Yo'nalish:</b>   {destination_info}\n"
+        f"📅 <b>Jo'nash:</b>     {departure}\n"
+        f"👥 <b>Yo'lovchilar:</b> {lead.passengers} kishi\n"
+        f"🏢 <b>Kompaniya:</b>   {lead.organization.name if lead.organization else '—'}"
+        f"{note_section}\n\n"
+        "──────────────────────────\n"
+        f"🕐 <b>Vaqt:</b> {created_str}\n"
+        f"👤 <b>Foydalanuvchi:</b> {user_info}\n"
+        f"🆔 <b>Lead ID:</b> <code>{lead_short}</code>\n"
+        f"📊 <b>Status:</b> {st_display}"
+        f"{staff_sec}\n\n"
+        "<i>IMTIAZ — AI Travel Assistant</i>"
+    )
+
+    markup = build_lead_keyboard('tour', str(lead.id), lead.phone, lead.status)
+    return text, markup
+
+
+def format_restaurant_lead_card(lead) -> tuple[str, dict]:
+    """RestaurantLead uchun Telegram karta matni va klaviaturasi."""
+    pref_date = lead.preferred_date.strftime('%d.%m.%Y') if lead.preferred_date else '—'
+    pref_time = lead.preferred_time.strftime('%H:%M') if lead.preferred_time else '—'
+    org_name  = lead.organization.name if lead.organization else '—'
+    branch_name = lead.branch.name if lead.branch else 'Asosiy filial'
+    created_str = lead.created_at.strftime('%d.%m.%Y %H:%M') if lead.created_at else '—'
+    lead_short = str(lead.id)[:8].upper()
+
+    note_sec = f"\n💬 <b>Izoh / So'rov:</b> {lead.note}" if lead.note else ''
+
+    status_labels = {
+        'new': '🆕 Yangi',
+        'sent': '🆕 Yangi',
+        'contacted': '⏳ Jarayonda',
+        'confirmed': '✅ Bajarildi',
+        'declined': '❌ Rad etildi',
+    }
+    st_display = status_labels.get(lead.status, '🆕 Yangi')
+
+    staff_sec = f"\n👤 <b>Mas'ul xodim:</b> @{lead.assigned_staff_name}" if lead.assigned_staff_name else ''
+
+    text = (
+        "🍴 <b>YANGI RESTORAN STOL BRONI!</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👤 <b>Ism:</b>          {lead.full_name or '—'}\n"
+        f"📞 <b>Telefon:</b>     <code>{lead.phone}</code>\n"
+        f"🏛️ <b>Restoran:</b>    {org_name} ({branch_name})\n"
+        f"📅 <b>Sana va Vaqt:</b> {pref_date} soat {pref_time}\n"
+        f"👥 <b>Mehmonlar:</b>   {lead.guests} kishi"
+        f"{note_sec}\n\n"
+        "──────────────────────────\n"
+        f"🕐 <b>Vaqt:</b> {created_str}\n"
+        f"🆔 <b>Lead ID:</b> <code>{lead_short}</code>\n"
+        f"📊 <b>Status:</b> {st_display}"
+        f"{staff_sec}\n\n"
+        "<i>IMTIAZ — Restoran Konsyerj</i>"
+    )
+
+    markup = build_lead_keyboard('restaurant', str(lead.id), lead.phone, lead.status)
+    return text, markup
+
+
+def format_service_lead_card(lead) -> tuple[str, dict]:
+    """ServiceLead (Parvoz, Yo'lda yordam, Umumiy/Boshqa va b.) uchun Telegram karta matni va klaviaturasi."""
+    from apps.crm.models import ServiceLeadCategory
+
+    category_config = {
+        ServiceLeadCategory.FLIGHT: ("✈️ <b>YANGI PARVOZ BILETI SO'ROVI!</b>", "flight"),
+        ServiceLeadCategory.ROADSIDE: ("🚨 <b>YANGI YO'LDA YORDAM SO'ROVI! [URGENT]</b>", "roadside"),
+        ServiceLeadCategory.MEDICAL: ("🩺 <b>YANGI TIBBIYOT KONSYERJ SO'ROVI!</b>", "service"),
+        ServiceLeadCategory.INSURANCE: ("🛡️ <b>YANGI SUG'URTA SO'ROVI!</b>", "service"),
+        ServiceLeadCategory.FAMILY_OFFICE: ("💼 <b>YANGI FAMILY OFFICE SO'ROVI!</b>", "service"),
+        ServiceLeadCategory.LEISURE: ("🎭 <b>YANGI DAM OLISH SO'ROVI!</b>", "service"),
+        ServiceLeadCategory.RESTAURANT: ("🍴 <b>YANGI RESTORAN SO'ROVI!</b>", "service"),
+        ServiceLeadCategory.TRAVEL: ("🌍 <b>YANGI SAYOHAT SO'ROVI!</b>", "service"),
+        ServiceLeadCategory.OTHER: ("🌟 <b>YANGI UMUMIY XIZMAT SO'ROVI! (Boshqa / Maxsus)</b>", "service"),
+    }
+    header, lead_ktype = category_config.get(
+        lead.category,
+        ("🌟 <b>YANGI UMUMIY XIZMAT SO'ROVI! (Boshqa / Maxsus)</b>", "service")
+    )
+
+    created_str = lead.created_at.strftime('%d.%m.%Y %H:%M') if lead.created_at else '—'
+    lead_short = str(lead.id)[:8].upper()
+
+    analysis_sec = f"\n🧠 <b>AI Mijoz Tahlili:</b>\n<i>{lead.customer_analysis}</i>\n" if lead.customer_analysis else ''
+    note_sec = f"\n💬 <b>So'rov Tafsilotlari:</b>\n{lead.note}" if lead.note else ''
+
+    status_labels = {
+        'new': '🆕 Yangi',
+        'sent': '🆕 Yangi',
+        'contacted': '⏳ Jarayonda',
+        'converted': '✅ Bajarildi',
+        'declined': '❌ Rad etildi',
+    }
+    st_display = status_labels.get(lead.status, '🆕 Yangi')
+
+    staff_sec = f"\n👤 <b>Mas'ul xodim:</b> @{lead.assigned_staff_name}" if lead.assigned_staff_name else ''
+
+    text = (
+        f"{header}\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🏷️ <b>Xizmat Turi:</b> {lead.get_category_display()}\n"
+        f"📌 <b>Nomi:</b>        {lead.service_name or '—'}\n"
+        f"👤 <b>Ism:</b>        {lead.full_name or '—'}\n"
+        f"📞 <b>Telefon:</b>     <code>{lead.phone}</code>"
+        f"{analysis_sec}"
+        f"{note_sec}\n\n"
+        "──────────────────────────\n"
+        f"🕐 <b>Vaqt:</b> {created_str}\n"
+        f"🆔 <b>Lead ID:</b> <code>{lead_short}</code>\n"
+        f"📊 <b>Status:</b> {st_display}"
+        f"{staff_sec}\n\n"
+        "<i>IMTIAZ — AI Lifestyle Concierge</i>"
+    )
+
+    markup = build_lead_keyboard(lead_ktype, str(lead.id), lead.phone, lead.status)
+    return text, markup
+
+
 # ─── Telegram Lead Notification ───────────────────────────────────────────────
 
 def send_telegram_tour_lead_notification(lead_id: str) -> dict:
@@ -205,49 +418,12 @@ def send_telegram_tour_lead_notification(lead_id: str) -> dict:
         logger.error('[crm.telegram] TourLead topilmadi: id=%s', lead_id)
         return {'status': 'not_found'}
 
-    # ── Xabar matni ───────────────────────────────────────────────────────────
-    departure = (
-        lead.preferred_departure_date.strftime('%d.%m.%Y')
-        if lead.preferred_departure_date else '—'
-    )
-    package_info = '—'
-    destination_info = '—'
-    if lead.package:
-        package_info = lead.package.title
-        if lead.package.destination:
-            dest = lead.package.destination
-            destination_info = f'{dest.name} ({dest.country})'
-
-    user_info = '—'
-    if lead.user:
-        user_info = f'{lead.user.full_name or getattr(lead.user, "phone", "") or str(lead.user)}'
-
-    note_section = f'\n💬 <b>Izoh:</b> {lead.note}' if lead.note else ''
-    created_str  = lead.created_at.strftime('%d.%m.%Y %H:%M') if lead.created_at else '—'
-    lead_short   = str(lead.id)[:8].upper()
-
-    text = (
-        "🔔 <b>YANGI TUR SO'ROVI KELDI!</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"👤 <b>Ism:</b>          {lead.full_name or '—'}\n"
-        f"📞 <b>Telefon:</b>     <code>{lead.phone}</code>\n"
-        f"🌍 <b>Tur paketi:</b>  {package_info}\n"
-        f"📍 <b>Yo'nalish:</b>   {destination_info}\n"
-        f"📅 <b>Jo'nash:</b>     {departure}\n"
-        f"👥 <b>Yo'lovchilar:</b> {lead.passengers} kishi\n"
-        f"🏢 <b>Kompaniya:</b>   {lead.organization.name}"
-        f"{note_section}\n\n"
-        "──────────────────────────\n"
-        f"🕐 <b>Vaqt:</b> {created_str}\n"
-        f"👤 <b>Foydalanuvchi:</b> {user_info}\n"
-        f"🆔 <b>Lead ID:</b> <code>{lead_short}</code>\n\n"
-        "<i>IMTIAZ — AI Travel Assistant</i>"
-    )
+    text, reply_markup = format_tour_lead_card(lead)
 
     # ── Yuborish ──────────────────────────────────────────────────────────────
     try:
         bot = get_bot()
-        msg_id = bot.send_message(chat_id=int(chat_id), text=text, parse_mode='HTML')
+        msg_id = bot.send_message(chat_id=int(chat_id), text=text, parse_mode='HTML', reply_markup=reply_markup)
 
         if msg_id:
             logger.info(
@@ -295,33 +471,11 @@ def send_telegram_restaurant_lead_notification(lead_id: str) -> dict:
     except RestaurantLead.DoesNotExist:
         return {'status': 'not_found'}
 
-    pref_date = lead.preferred_date.strftime('%d.%m.%Y') if lead.preferred_date else '—'
-    pref_time = lead.preferred_time.strftime('%H:%M') if lead.preferred_time else '—'
-    org_name  = lead.organization.name if lead.organization else '—'
-    branch_name = lead.branch.name if lead.branch else 'Asosiy filial'
-    created_str = lead.created_at.strftime('%d.%m.%Y %H:%M') if lead.created_at else '—'
-    lead_short = str(lead.id)[:8].upper()
-
-    note_sec = f"\n💬 <b>Izoh / So'rov:</b> {lead.note}" if lead.note else ''
-
-    text = (
-        "🍴 <b>YANGI RESTORAN STOL BRONI!</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"👤 <b>Ism:</b>          {lead.full_name or '—'}\n"
-        f"📞 <b>Telefon:</b>     <code>{lead.phone}</code>\n"
-        f"🏛️ <b>Restoran:</b>    {org_name} ({branch_name})\n"
-        f"📅 <b>Sana va Vaqt:</b> {pref_date} soat {pref_time}\n"
-        f"👥 <b>Mehmonlar:</b>   {lead.guests} kishi"
-        f"{note_sec}\n\n"
-        "──────────────────────────\n"
-        f"🕐 <b>Vaqt:</b> {created_str}\n"
-        f"🆔 <b>Lead ID:</b> <code>{lead_short}</code>\n\n"
-        "<i>IMTIAZ — Restoran Konsyerj</i>"
-    )
+    text, reply_markup = format_restaurant_lead_card(lead)
 
     try:
         bot = get_bot()
-        msg_id = bot.send_message(chat_id=chat_id, text=text, parse_mode='HTML')
+        msg_id = bot.send_message(chat_id=chat_id, text=text, parse_mode='HTML', reply_markup=reply_markup)
         if msg_id:
             lead.status = 'sent'
             lead.save(update_fields=['status', 'updated_at'])
@@ -341,7 +495,7 @@ def notify_telegram_restaurant_lead(self, lead_id: str):
 
 def send_telegram_service_lead_notification(lead_id: str) -> dict:
     """Yangi ServiceLead (Parvoz, Yo'lda yordam, Tibbiyot, Sug'urta, Family Office va b.) haqida Telegram guruhga xabar yuboradi."""
-    from apps.crm.models import ServiceLead, ServiceLeadCategory
+    from apps.crm.models import ServiceLead
     from apps.notifications.telegram import get_bot
 
     raw_chat_id = getattr(settings, 'TELEGRAM_TOUR_LEADS_CHAT_ID', None)
@@ -358,43 +512,11 @@ def send_telegram_service_lead_notification(lead_id: str) -> dict:
     except ServiceLead.DoesNotExist:
         return {'status': 'not_found'}
 
-    category_icons = {
-        ServiceLeadCategory.FLIGHT: "✈️ <b>YANGI PARVOZ BILETI SO'ROVI!</b>",
-        ServiceLeadCategory.ROADSIDE: "🚗 <b>YANGI YO'LDA YORDAM SO'ROVI!</b>",
-        ServiceLeadCategory.MEDICAL: "🩺 <b>YANGI TIBBIYOT KONSYERJ SO'ROVI!</b>",
-        ServiceLeadCategory.INSURANCE: "🛡️ <b>YANGI SUG'URTA SO'ROVI!</b>",
-        ServiceLeadCategory.FAMILY_OFFICE: "💼 <b>YANGI FAMILY OFFICE SO'ROVI!</b>",
-        ServiceLeadCategory.LEISURE: "🎭 <b>YANGI DAM OLISH SO'ROVI!</b>",
-        ServiceLeadCategory.RESTAURANT: "🍴 <b>YANGI RESTORAN SO'ROVI!</b>",
-        ServiceLeadCategory.TRAVEL: "🌍 <b>YANGI SAYOHAT SO'ROVI!</b>",
-        ServiceLeadCategory.OTHER: "🌟 <b>YANGI MAXSUS XIZMAT SO'ROVI!</b>",
-    }
-    header = category_icons.get(lead.category, "🌟 <b>YANGI XIZMAT SO'ROVI!</b>")
-
-    created_str = lead.created_at.strftime('%d.%m.%Y %H:%M') if lead.created_at else '—'
-    lead_short = str(lead.id)[:8].upper()
-
-    analysis_sec = f"\n🧠 <b>AI Mijoz Tahlili:</b>\n<i>{lead.customer_analysis}</i>\n" if lead.customer_analysis else ''
-    note_sec = f"\n💬 <b>So'rov Tafsilotlari:</b>\n{lead.note}" if lead.note else ''
-
-    text = (
-        f"{header}\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🏷️ <b>Xizmat Turi:</b> {lead.get_category_display()}\n"
-        f"📌 <b>Nomi:</b>        {lead.service_name or '—'}\n"
-        f"👤 <b>Ism:</b>        {lead.full_name or '—'}\n"
-        f"📞 <b>Telefon:</b>     <code>{lead.phone}</code>"
-        f"{analysis_sec}"
-        f"{note_sec}\n\n"
-        "──────────────────────────\n"
-        f"🕐 <b>Vaqt:</b> {created_str}\n"
-        f"🆔 <b>Lead ID:</b> <code>{lead_short}</code>\n\n"
-        "<i>IMTIAZ — AI Lifestyle Concierge</i>"
-    )
+    text, reply_markup = format_service_lead_card(lead)
 
     try:
         bot = get_bot()
-        msg_id = bot.send_message(chat_id=chat_id, text=text, parse_mode='HTML')
+        msg_id = bot.send_message(chat_id=chat_id, text=text, parse_mode='HTML', reply_markup=reply_markup)
         if msg_id:
             lead.status = 'sent'
             lead.save(update_fields=['status', 'updated_at'])

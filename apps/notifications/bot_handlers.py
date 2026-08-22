@@ -127,6 +127,10 @@ def _handle_start(message: dict) -> None:
 
 
 def _handle_callback(callback: dict) -> None:
+    # Lead status callbacklarini guruh va kanallardan qat'i nazar birinchi navbatda qayta ishlash
+    if _handle_lead_status_callback(callback):
+        return
+
     data = callback.get('data', '')
     message = callback.get('message') or {}
     chat = message.get('chat') or {}
@@ -168,6 +172,98 @@ def _handle_callback(callback: dict) -> None:
             text=section_fn(lang=lang),
             reply_markup=section_keyboard(lang=lang),
         )
+
+
+def _handle_lead_status_callback(callback: dict) -> bool:
+    """
+    Lead statusini o'zgartirish tugmalaridan kelgan callback query'larni qayta ishlaydi.
+    data formatlari:
+      - st_menu:<lead_type>:<lead_id>
+      - st_set:<lead_type>:<lead_id>:<new_status>
+      - st_back:<lead_type>:<lead_id>
+    """
+    data = callback.get('data', '')
+    if not (data.startswith('st_menu:') or data.startswith('st_set:') or data.startswith('st_back:')):
+        return False
+
+    message = callback.get('message') or {}
+    chat_id = message.get('chat', {}).get('id')
+    message_id = message.get('message_id')
+    callback_id = callback.get('id')
+    tg_user = callback.get('from') or {}
+
+    if not chat_id or not message_id:
+        return True
+
+    bot = get_bot()
+
+    from apps.crm.models import TourLead, RestaurantLead, ServiceLead
+    from apps.crm.tasks import (
+        build_lead_status_selection_keyboard,
+        format_tour_lead_card,
+        format_restaurant_lead_card,
+        format_service_lead_card,
+    )
+
+    parts = data.split(':')
+    action = parts[0]
+    lead_type = parts[1] if len(parts) > 1 else ''
+    lead_id = parts[2] if len(parts) > 2 else ''
+
+    model_map = {
+        'tour': (TourLead, format_tour_lead_card),
+        'restaurant': (RestaurantLead, format_restaurant_lead_card),
+        'service': (ServiceLead, format_service_lead_card),
+        'flight': (ServiceLead, format_service_lead_card),
+        'roadside': (ServiceLead, format_service_lead_card),
+    }
+
+    item = model_map.get(lead_type)
+    if not item:
+        bot.answer_callback_query(callback_id, text="Noma'lum lead turi")
+        return True
+
+    model_cls, format_fn = item
+
+    try:
+        lead = model_cls.objects.get(id=lead_id)
+    except (model_cls.DoesNotExist, ValueError):
+        bot.answer_callback_query(callback_id, text="Lead topilmadi")
+        return True
+
+    if action == 'st_menu':
+        markup = build_lead_status_selection_keyboard(lead_type, lead_id)
+        bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=markup)
+        bot.answer_callback_query(callback_id, text="Statusni tanlang")
+        return True
+
+    elif action == 'st_back':
+        _, markup = format_fn(lead)
+        bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=markup)
+        bot.answer_callback_query(callback_id)
+        return True
+
+    elif action == 'st_set':
+        new_status = parts[3] if len(parts) > 3 else 'contacted'
+        staff_username = tg_user.get('username') or tg_user.get('first_name') or 'xodim'
+
+        lead.status = new_status
+        lead.assigned_staff_name = staff_username
+        lead.save(update_fields=['status', 'assigned_staff_name', 'updated_at'])
+
+        new_text, new_markup = format_fn(lead)
+        bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=new_text, parse_mode='HTML', reply_markup=new_markup)
+
+        st_display_names = {
+            'new': 'Yangi',
+            'contacted': 'Jarayonda',
+            'converted': 'Bajarildi',
+            'declined': 'Rad etildi',
+        }
+        bot.answer_callback_query(callback_id, text=f"Status yangilandi: {st_display_names.get(new_status, new_status)}")
+        return True
+
+    return True
 
 
 def _get_user_info(chat_id: int, tg_user: dict) -> tuple[str, str]:
