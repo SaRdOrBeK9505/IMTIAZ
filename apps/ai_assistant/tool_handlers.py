@@ -10,6 +10,7 @@ from decimal import Decimal
 from datetime import datetime
 
 from django.core.exceptions import ValidationError
+from django.db import models
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -181,42 +182,70 @@ def handle_search_trains(
 
 
 def handle_search_restaurants(
-    user, city: str, date: str, time: str,
+    user, city: str, date: str = None, time: str = None,
     guests: int = 2, cuisine: str = None, lang: str = 'uz', **kwargs,
 ) -> dict:
     from apps.crm.models import Branch
     from .i18n import localized_field
 
+    # Keng qidirish: shahar nomi, manzil yoki org nomi bo'yicha
     qs = Branch.objects.filter(
         organization__org_type='restaurant',
         organization__is_active=True,
         is_active=True,
-        city__icontains=city,
-    ).select_related('organization')[:10]
+    ).filter(
+        models.Q(city__icontains=city) |
+        models.Q(address__icontains=city) |
+        models.Q(organization__name__icontains=city)
+    ).select_related('organization')
+
+    if cuisine:
+        qs = qs.filter(
+            models.Q(organization__description__icontains=cuisine) |
+            models.Q(organization__name__icontains=cuisine)
+        )
+
+    qs = qs[:10]
     results = [
         {
-            'branch_id':   str(b.id),
-            'name':        localized_field(b.organization, 'name', lang),
-            'branch_name': localized_field(b, 'name', lang),
-            'address':     localized_field(b, 'address', lang),
-            'city':        b.city,
-            'phone':       b.phone,
-            'description': localized_field(b.organization, 'description', lang),
+            'branch_id':     str(b.id),
+            'name':          localized_field(b.organization, 'name', lang),
+            'branch_name':   localized_field(b, 'name', lang),
+            'address':       localized_field(b, 'address', lang),
+            'city':          b.city,
+            'phone':         b.phone,
+            'description':   localized_field(b.organization, 'description', lang),
             'working_hours': b.working_hours,
-            'capacity':    b.capacity,
+            'capacity':      b.capacity,
         }
         for b in qs
-    ] or [
-        {
-            'branch_id':   'mock-branch-001',
-            'name':        'Nobu Tashkent',
-            'branch_name': 'Asosiy filial',
-            'address':     "Amir Temur ko'chasi, 107B",
-            'city':        city,
-            'description': "Sharafli Yapon va Pan-Osiyo taomlari, premium interyer va ajoyib shinam muhit.",
-            'working_hours': {'mon_sun': '12:00-23:00'},
-        }
     ]
+
+    if not results:
+        # Yumshoq javob — AI foydalanuvchiga taklif bera olsin
+        soft_messages = {
+            'uz': (
+                f"Hozircha {city} shahridagi restoranlar ro'yxatimizda mavjud emas. "
+                "Boshqa shaharni ko'rib chiqishimiz mumkinmi, yoki maxsus talab va xohishlaringizni "
+                "aytib bersangiz, eng mos variantni topishga harakat qilamiz."
+            ),
+            'ru': (
+                f"На данный момент рестораны в городе {city} не представлены в нашей базе. "
+                "Можем рассмотреть другой город или уточните ваши предпочтения — "
+                "постараемся подобрать лучший вариант."
+            ),
+            'en': (
+                f"We currently don't have restaurants in {city} in our database. "
+                "Shall we look at another city, or share your preferences and "
+                "we'll do our best to find the right option for you."
+            ),
+        }
+        return {
+            'status': 'not_found',
+            'city': city,
+            'message': soft_messages.get(lang, soft_messages['uz']),
+        }
+
     return {'status': 'ok', 'results': results}
 
 
@@ -630,6 +659,13 @@ def handle_submit_tour_lead(
 
     combined_note = "\n".join(details) if details else note.strip()
 
+    # Suhbat tarixidan mijoz tahlilini avtomatik yaratish
+    try:
+        from apps.ai_assistant.services import AIAssistantService
+        auto_analysis = AIAssistantService._build_full_chat_analysis(session) if session else ''
+    except Exception:
+        auto_analysis = ''
+
     lead = TourLead.objects.create(
         organization=organization,
         package=package,
@@ -640,6 +676,7 @@ def handle_submit_tour_lead(
         preferred_departure_date=dep_date,
         passengers=max(passengers, 1),
         note=combined_note,
+        customer_analysis=auto_analysis,
         status=TourLeadStatus.NEW,
     )
 
@@ -718,6 +755,16 @@ def handle_submit_restaurant_lead(
     if not full_name.strip():
         full_name = user.full_name or ''
 
+    # Suhbat tarixidan mijoz tahlilini avtomatik yaratish
+    if not getattr(session, 'id', None):
+        auto_analysis = ''
+    else:
+        try:
+            from apps.ai_assistant.services import AIAssistantService
+            auto_analysis = AIAssistantService._build_full_chat_analysis(session)
+        except Exception:
+            auto_analysis = ''
+
     lead = RestaurantLead.objects.create(
         organization=branch.organization,
         branch=branch,
@@ -729,6 +776,7 @@ def handle_submit_restaurant_lead(
         preferred_time=p_time,
         guests=max(guests, 1),
         note=note.strip(),
+        customer_analysis=auto_analysis,
         status=RestaurantLeadStatus.NEW,
     )
 

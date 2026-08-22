@@ -375,6 +375,7 @@ class TourLead(BaseModel):
     preferred_departure_date = models.DateField(null=True, blank=True)
     passengers = models.PositiveSmallIntegerField(default=1)
     note = models.TextField(blank=True, help_text="Mijoz bildirgan qo'shimcha talablar")
+    customer_analysis = models.TextField(blank=True, help_text="AI tomonidan suhbat tarixidan yaratilgan mijoz tahlili")
 
     status = models.CharField(
         max_length=12, choices=TourLeadStatus.choices, default=TourLeadStatus.NEW,
@@ -433,6 +434,7 @@ class RestaurantLead(BaseModel):
     preferred_time = models.TimeField(null=True, blank=True)
     guests = models.PositiveSmallIntegerField(default=2)
     note = models.TextField(blank=True, help_text="Mijoz bildirgan qo'shimcha so'rovlar")
+    customer_analysis = models.TextField(blank=True, help_text="AI tomonidan suhbat tarixidan yaratilgan mijoz tahlili")
 
     status = models.CharField(
         max_length=12, choices=RestaurantLeadStatus.choices, default=RestaurantLeadStatus.NEW,
