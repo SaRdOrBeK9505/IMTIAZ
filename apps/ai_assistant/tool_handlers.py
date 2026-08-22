@@ -645,16 +645,16 @@ def handle_submit_tour_lead(
 
     send_tour_lead_to_crm.delay(str(lead.id))
 
-    # Telegram guruhga ham sinxron yuborish (Celery worker ishlamayotgan bo'lsa ham xabar zudlik bilan yetib borishi uchun)
+    tg_res = None
     try:
         from apps.crm.tasks import send_telegram_tour_lead_notification
-        send_telegram_tour_lead_notification(str(lead.id))
+        tg_res = send_telegram_tour_lead_notification(str(lead.id))
     except Exception as exc:
         logger.exception('Telegram lead notification direct send error: %s', exc)
 
     logger.info(
-        'AI tur lead yaratildi: lead=%s, package=%s, user=%s',
-        lead.id, package.id if package else None, user.id,
+        'AI tur lead yaratildi: lead=%s, package=%s, user=%s, telegram_status=%s',
+        lead.id, package.id if package else None, user.id, tg_res,
     )
 
     title_val = package.title if package else (destination or 'Sayohat turi')
@@ -732,15 +732,16 @@ def handle_submit_restaurant_lead(
         status=RestaurantLeadStatus.NEW,
     )
 
+    tg_res = None
     try:
         from apps.crm.tasks import send_telegram_restaurant_lead_notification
-        send_telegram_restaurant_lead_notification(str(lead.id))
+        tg_res = send_telegram_restaurant_lead_notification(str(lead.id))
     except Exception as exc:
         logger.exception('Telegram restaurant lead notification error: %s', exc)
 
     logger.info(
-        'AI restoran lead yaratildi: lead=%s, branch=%s, user=%s',
-        lead.id, branch.id, user.id,
+        'AI restoran lead yaratildi: lead=%s, branch=%s, user=%s, telegram_status=%s',
+        lead.id, branch.id, user.id, tg_res,
     )
 
     return {
@@ -790,12 +791,13 @@ def handle_submit_service_lead(
         status=ServiceLeadStatus.NEW,
     )
 
+    tg_res = None
     try:
-        send_telegram_service_lead_notification(str(lead.id))
+        tg_res = send_telegram_service_lead_notification(str(lead.id))
     except Exception as exc:
         logger.exception('Telegram service lead notification error: %s', exc)
 
-    logger.info('AI service lead yaratildi: lead=%s, category=%s, user=%s', lead.id, valid_category, user.id)
+    logger.info('AI service lead yaratildi: lead=%s, category=%s, user=%s, telegram_status=%s', lead.id, valid_category, user.id, tg_res)
 
     service_title = service_name or lead.get_category_display()
     return {
