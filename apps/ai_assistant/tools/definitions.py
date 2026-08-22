@@ -308,10 +308,14 @@ RESTAURANT_LEAD_TOOL = {
 SERVICE_LEAD_TOOL = {
     'name': 'submit_service_lead',
     'description': (
-        "Mijoz Yo'lda yordam, Tibbiyot, Sug'urta, Family Office yoki Dam olish "
-        "xizmatlaridan biriga (yoki platformada hali aniq bo'lmagan boshqa har qanday "
-        "ehtiyojga) qiziqish bildirganda va telefon raqamini bergandan keyin lead yaratadi. "
-        "MUHIM: telefon raqamisiz chaqirma — avval mijozdan +998XXXXXXXXX formatida so'ra."
+        "Mijoz Sayohat/Tur (travel), Restoran/stol (restaurant), Yo'lda yordam, Tibbiyot, "
+        "Sug'urta, Family Office yoki Dam olish xizmatlaridan biriga (yoki platformada hali "
+        "aniq bo'lmagan boshqa har qanday ehtiyojga) qiziqish bildirganda va telefon raqamini "
+        "bergandan keyin lead yaratadi. "
+        "MUHIM: telefon raqamisiz chaqirma — avval mijozdan +998XXXXXXXXX formatida so'ra. "
+        "Tur va restoran so'rovlari uchun bu — YAGONA to'g'ri tool: aniq paket/filial "
+        "TANLANMAYDI, faqat mijozning qiziqishlari (yo'nalish/oshxona turi, sana, odam soni, "
+        "byudjet va h.k.) customer_analysis/note ichiga yozib, lead sifatida guruhga yuboriladi."
     ),
     'input_schema': {
         'type': 'object',
@@ -322,8 +326,15 @@ SERVICE_LEAD_TOOL = {
             },
             'category': {
                 'type': 'string',
-                'enum': ['roadside', 'medical', 'insurance', 'family_office', 'leisure', 'other'],
-                'description': "Xizmat kategoriyasi (Yo'lda yordam=roadside, Tibbiyot=medical, Sug'urta=insurance, Family Office=family_office, Dam olish=leisure, boshqa=other)",
+                'enum': [
+                    'travel', 'restaurant', 'roadside', 'medical',
+                    'insurance', 'family_office', 'leisure', 'other',
+                ],
+                'description': (
+                    "Xizmat kategoriyasi (Sayohat/Tur=travel, Restoran/stol=restaurant, "
+                    "Yo'lda yordam=roadside, Tibbiyot=medical, Sug'urta=insurance, "
+                    "Family Office=family_office, Dam olish=leisure, boshqa=other)"
+                ),
             },
             'full_name': {
                 'type': 'string',
@@ -331,11 +342,19 @@ SERVICE_LEAD_TOOL = {
             },
             'service_name': {
                 'type': 'string',
-                'description': "Mijoz so'ragan xizmatning qisqa nomi (masalan: 'Evakuator xizmati', 'Sog'liq tekshiruvi')",
+                'description': (
+                    "Mijoz so'ragan xizmatning qisqa nomi (masalan: 'Dubay turi', "
+                    "'Italyan restorani uchun stol', 'Evakuator xizmati')"
+                ),
             },
             'customer_analysis': {
                 'type': 'string',
-                'description': "Mijoz ehtiyoji haqida AI tomonidan yozilgan qisqa tahliliy izoh (ixtiyoriy, lekin tavsiya etiladi)",
+                'description': (
+                    "Mijoz ehtiyoji haqida AI tomonidan yozilgan qisqa tahliliy izoh. "
+                    "Tur/restoran leadlari uchun BU MAJBURIY: yo'nalish yoki oshxona turi, "
+                    "sana(lar), odam soni, byudjet/afzalliklar kabi suhbatda yig'ilgan "
+                    "barcha ma'lumotni shu yerga qisqa va tushunarli qilib yoz."
+                ),
             },
             'note': {
                 'type': 'string',
@@ -381,19 +400,29 @@ FLIGHT_LEAD_TOOL = {
 
 
 def get_all_tools() -> list[dict]:
-    """Barcha mavjud tool'lar ro'yxatini qaytaradi."""
+    """
+    Barcha mavjud tool'lar ro'yxatini qaytaradi (AI chatga taqdim etiladigan tool'lar).
+
+    MUHIM — OWNER TALABI (tur/restoran oqimi o'zgardi):
+    Tur paketlari va restoranlar uchun AI endi aniq variantlar (narx/tarif) ro'yxatini
+    KO'RSATMAYDI va mijozdan biror raqamni "tanlashini" SO'RAMAYDI. Buning o'rniga faqat
+    mijozning qiziqishlarini (yo'nalish, sana, odam soni, byudjet va h.k.) suhbat orqali
+    yig'ib, submit_service_lead (category='travel' yoki 'restaurant') orqali guruhga
+    yuboradi — aniq paket/filial ID'siz.
+    Shu sababli RESTAURANT_SEARCH_TOOL, RESTAURANT_BOOK_TOOL, TOUR_SEARCH_TOOL,
+    TOUR_LEAD_TOOL va RESTAURANT_LEAD_TOOL ataylab AI'ga TAQDIM ETILMAYDI (AI ularni
+    chaqira olmaydi) — shu bilan "variantlarni ko'rsatish" imkoniyati texnik jihatdan
+    ham yopiladi. Parvoz oqimi (search_flights/book_flight/submit_flight_lead)
+    o'zgarishsiz qoladi.
+    """
     return [
         FLIGHT_SEARCH_TOOL,
-        RESTAURANT_SEARCH_TOOL,
         FLIGHT_BOOK_TOOL,
         EVENT_SEARCH_TOOL,
         BOOKING_CANCEL_TOOL,
         USER_BOOKINGS_TOOL,
         NEARBY_PLACES_TOOL,
         USER_PREFERENCES_TOOL,
-        TOUR_SEARCH_TOOL,
-        TOUR_LEAD_TOOL,
-        RESTAURANT_LEAD_TOOL,
         SERVICE_LEAD_TOOL,
         FLIGHT_LEAD_TOOL,
     ]
