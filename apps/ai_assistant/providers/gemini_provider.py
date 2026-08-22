@@ -100,6 +100,30 @@ class GeminiProvider(BaseAIProvider):
 
         return types.GenerateContentConfig(**config_kwargs)
 
+    @staticmethod
+    def _format_message_content(content) -> str:
+        """
+        AIMessage.content string bo'lishi mumkin, yoki services.py'dan
+        Claude-uslubidagi tool_result bloklari ro'yxati sifatida kelishi
+        mumkin: [{'type': 'tool_result', 'tool_use_id': ..., 'content': ...}, ...]
+
+        Avval bu yerda shunchaki str(content) qilinar edi — natijada model
+        Python ro'yxatining xom matn ko'rinishini ("[{'type': 'tool_result', ...}]")
+        ko'rar edi, bu token isrofi va tushunish sifatini pasaytiradi.
+        Endi tool natijalari o'qiladigan matn ko'rinishida beriladi.
+        """
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get('type') == 'tool_result':
+                    parts.append(f"[Tool natijasi]\n{block.get('content', '')}")
+                else:
+                    parts.append(str(block))
+            return '\n\n'.join(parts)
+        return str(content)
+
     def _build_contents(self, messages: list[AIMessage]):
         from google.genai import types
 
@@ -108,7 +132,7 @@ class GeminiProvider(BaseAIProvider):
             if msg.role == 'system':
                 continue
             role    = 'user' if msg.role == 'user' else 'model'
-            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            content = self._format_message_content(msg.content)
             gemini_contents.append(
                 types.Content(role=role, parts=[types.Part(text=content)])
             )
@@ -307,10 +331,23 @@ class GeminiProvider(BaseAIProvider):
             properties = {}
             for prop_name, prop_val in schema.get('properties', {}).items():
                 prop_type = prop_val.get('type', 'string')
-                properties[prop_name] = types.Schema(
-                    type        = _map_type(prop_type),
-                    description = prop_val.get('description', ''),
-                )
+                schema_kwargs: dict = {
+                    'type':        _map_type(prop_type),
+                    'description': prop_val.get('description', ''),
+                }
+                if prop_val.get('enum'):
+                    # Gemini enum qiymatlari string bo'lishi kerak.
+                    schema_kwargs['enum'] = [str(v) for v in prop_val['enum']]
+                if prop_type == 'array':
+                    # Gemini array-type parametrlar uchun 'items' SHART —
+                    # bo'lmasa API xato qaytaradi. Hozircha tool ta'riflarida
+                    # array parametr yo'q, lekin kelajakda qo'shilsa (masalan
+                    # passenger_details) bu yerda avtomatik ishlaydi.
+                    item_schema = prop_val.get('items', {'type': 'string'})
+                    schema_kwargs['items'] = types.Schema(
+                        type=_map_type(item_schema.get('type', 'string')),
+                    )
+                properties[prop_name] = types.Schema(**schema_kwargs)
 
             parameters = types.Schema(
                 type       = types.Type.OBJECT,

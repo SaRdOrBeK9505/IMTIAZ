@@ -129,6 +129,25 @@ class OpenAIProvider(BaseAIProvider):
     def get_model_name(self) -> str:
         return self.model
 
+    @staticmethod
+    def _format_message_content(content) -> str:
+        """
+        AIMessage.content string yoki Claude-uslubidagi tool_result bloklari
+        ro'yxati bo'lishi mumkin. Avval bu yerda str(list) qilinar edi —
+        model xom Python ro'yxatini ko'rar edi. Endi o'qiladigan matn beriladi.
+        """
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get('type') == 'tool_result':
+                    parts.append(f"[Tool natijasi]\n{block.get('content', '')}")
+                else:
+                    parts.append(str(block))
+            return '\n\n'.join(parts)
+        return str(content)
+
     def _build_messages(self, messages: list[AIMessage], system: str | None) -> list[dict]:
         """AIMessage ro'yxatini OpenAI messages formatiga o'girish."""
         result = []
@@ -137,7 +156,7 @@ class OpenAIProvider(BaseAIProvider):
         for msg in messages:
             if msg.role == 'system':
                 continue  # system allaqachon qo'shildi
-            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            content = self._format_message_content(msg.content)
             result.append({'role': msg.role, 'content': content})
         return result
 

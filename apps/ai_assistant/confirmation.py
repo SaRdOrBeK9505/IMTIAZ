@@ -25,6 +25,7 @@ import logging
 from datetime import timedelta
 from decimal import Decimal
 
+from django.db import transaction
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -141,51 +142,57 @@ def confirm_pending_action(
             f"Kelgan manba: '{confirmation_source}'"
         )
 
-    # Log topish
-    try:
-        log = AIActionLog.objects.select_for_update().get(id=action_log_id)
-    except AIActionLog.DoesNotExist:
-        raise ConfirmationError(f'AIActionLog topilmadi: {action_log_id}')
+    # Log topish — select_for_update() faqat transaction.atomic() ichida
+    # ishlatilishi SHART, aks holda Django TransactionManagementError beradi
+    # (bu productionda /confirm chaqirilganda doim ishlamay qolgan edi).
+    # Bir vaqtda kelgan ikki xil confirm so'rovi (masalan mijoz tugmani
+    # ikki marta bossa) shu qulf orqali ketma-ket ishlanadi — status
+    # tekshiruvi pastda takroriy bajarishning oldini oladi.
+    with transaction.atomic():
+        try:
+            log = AIActionLog.objects.select_for_update().get(id=action_log_id)
+        except AIActionLog.DoesNotExist:
+            raise ConfirmationError(f'AIActionLog topilmadi: {action_log_id}')
 
-    # User tekshiruvi
-    if log.user_id != user.id:
-        logger.warning(
-            'Boshqa user tasdiqlashga urindi: log.user=%s, request.user=%s',
-            log.user_id, user.id,
-        )
-        raise ConfirmationError('Bu harakat sizga tegishli emas.')
+        # User tekshiruvi
+        if log.user_id != user.id:
+            logger.warning(
+                'Boshqa user tasdiqlashga urindi: log.user=%s, request.user=%s',
+                log.user_id, user.id,
+            )
+            raise ConfirmationError('Bu harakat sizga tegishli emas.')
 
-    # Status tekshiruvi (ikki marta tasdiqlash oldini olish)
-    if log.status != AIActionLog.ActionStatus.NEEDS_CONFIRMATION:
-        raise ConfirmationError(
-            f"Bu harakat allaqachon '{log.status}' holatida. "
-            f"Qayta tasdiqlash mumkin emas."
-        )
+        # Status tekshiruvi (ikki marta tasdiqlash oldini olish)
+        if log.status != AIActionLog.ActionStatus.NEEDS_CONFIRMATION:
+            raise ConfirmationError(
+                f"Bu harakat allaqachon '{log.status}' holatida. "
+                f"Qayta tasdiqlash mumkin emas."
+            )
 
-    # Muddati tekshiruvi
-    if log.expires_at and timezone.now() > log.expires_at:
-        log.status = AIActionLog.ActionStatus.FAILED
-        log.error_message = 'Tasdiqlash muddati o\'tdi (5 daqiqa)'
-        log.save(update_fields=['status', 'error_message', 'updated_at'])
-        from .i18n import resolve_language, t
-        raise ConfirmationError(t('confirm_expired', resolve_language(user)))
+        # Muddati tekshiruvi
+        if log.expires_at and timezone.now() > log.expires_at:
+            log.status = AIActionLog.ActionStatus.FAILED
+            log.error_message = 'Tasdiqlash muddati o\'tdi (5 daqiqa)'
+            log.save(update_fields=['status', 'error_message', 'updated_at'])
+            from .i18n import resolve_language, t
+            raise ConfirmationError(t('confirm_expired', resolve_language(user)))
 
-    # ── Haqiqiy bajarish ──────────────────────────────────────────────────────
-    try:
-        result = _execute_confirmed_action(log, user)
-        log.result = result
-        log.status = AIActionLog.ActionStatus.SUCCESS
-        log.save(update_fields=['result', 'status', 'updated_at'])
-        logger.info(
-            'Pending action tasdiqlandi va bajarildi: id=%s, type=%s, user=%s',
-            log.id, log.action_type, user.id,
-        )
-    except Exception as e:
-        log.status = AIActionLog.ActionStatus.FAILED
-        log.error_message = str(e)
-        log.save(update_fields=['status', 'error_message', 'updated_at'])
-        logger.exception('Confirmed action bajarishda xato: id=%s — %s', log.id, e)
-        raise ConfirmationError(f'Harakat bajarishda xato: {e}')
+        # ── Haqiqiy bajarish ──────────────────────────────────────────────
+        try:
+            result = _execute_confirmed_action(log, user)
+            log.result = result
+            log.status = AIActionLog.ActionStatus.SUCCESS
+            log.save(update_fields=['result', 'status', 'updated_at'])
+            logger.info(
+                'Pending action tasdiqlandi va bajarildi: id=%s, type=%s, user=%s',
+                log.id, log.action_type, user.id,
+            )
+        except Exception as e:
+            log.status = AIActionLog.ActionStatus.FAILED
+            log.error_message = str(e)
+            log.save(update_fields=['status', 'error_message', 'updated_at'])
+            logger.exception('Confirmed action bajarishda xato: id=%s — %s', log.id, e)
+            raise ConfirmationError(f'Harakat bajarishda xato: {e}')
 
     return log
 

@@ -146,6 +146,23 @@ def get_ai_provider() -> BaseAIProvider:
     fallback_enabled = getattr(settings, 'AI_FALLBACK_ENABLED', True)
     if fallback_enabled:
         fallback_name = getattr(settings, 'AI_FALLBACK_PROVIDER', 'openai').lower()
+
+        if fallback_name == primary_name:
+            # XATOLIK HIMOYASI: agar .env'da AI_PROVIDER o'zgartirilgan bo'lsa-yu
+            # AI_FALLBACK_PROVIDER eski qiymatida qolib ketgan bo'lsa (ikkalasi bir xil),
+            # avvalgi kod fallback'ni JIM-JIM o'chirib qo'yardi — primary
+            # provayder butunlay ishlamay qolganda ham foydalanuvchiga to'g'ridan-to'g'ri
+            # xato qaytardi. Endi bunday holatda avtomatik boshqa provayderga
+            # o'tiladi va sozlamadagi xatolik logga aniq yoziladi.
+            auto_fallback = 'openai' if primary_name != 'openai' else 'gemini'
+            logger.warning(
+                "AI_FALLBACK_PROVIDER (%s) AI_PROVIDER (%s) bilan bir xil — "
+                "sozlash xatosi. Avtomatik ravishda '%s' zaxira sifatida ishlatiladi. "
+                ".env faylida AI_FALLBACK_PROVIDER'ni to'g'irlang.",
+                fallback_name, primary_name, auto_fallback,
+            )
+            fallback_name = auto_fallback
+
         if fallback_name != primary_name:
             fallback = _create_provider_by_name(fallback_name)
             from .providers.fallback_provider import FallbackProvider
@@ -760,10 +777,9 @@ class AIAssistantService:
         }
 
     def _load_history(self, session: ConversationSession) -> list[AIMessage]:
-        limit = getattr(settings, 'AI_HISTORY_LIMIT', 20)
+        limit = getattr(settings, 'AI_HISTORY_LIMIT', 8)
         rows = (
             session.messages
-            .exclude(content='')
             .order_by('-created_at')
             .values('role', 'content')[:limit]
         )
@@ -1024,26 +1040,7 @@ class AIAssistantService:
     def _build_session_summary(self, session: ConversationSession) -> str:
         parts = []
 
-        # ── 1. Suhbat tarixi (oxirgi 20 xabar) ────────────────────────────────
-        # AI uchun kontekst: oldingi savollar va javoblar
-        recent_msgs = list(
-            session.messages
-            .exclude(content='')
-            .order_by('-created_at')
-            .values('role', 'content')[:20]
-        )
-        if recent_msgs:
-            chat_lines = []
-            for msg in reversed(recent_msgs):
-                role_label = 'Foydalanuvchi' if msg['role'] == 'user' else 'Bika (AI)'
-                # Juda uzun xabarlarni qisqartirish (500 belgi)
-                text = (msg['content'] or '').strip()[:500]
-                if text:
-                    chat_lines.append(f"{role_label}: {text}")
-            if chat_lines:
-                parts.append("Joriy suhbat tarixi:\n" + "\n".join(chat_lines))
-
-        # ── 2. Oxirgi 5 ta bajarilgan harakat (AIActionLog) ────────────────────
+        # Oxirgi 5 ta bajarilgan harakat (AIActionLog)
         recent_logs = AIActionLog.objects.filter(session=session).order_by('-created_at')[:5]
         if recent_logs:
             log_lines = []
@@ -1051,112 +1048,20 @@ class AIAssistantService:
                 payload_str = ", ".join(f"{k}={v}" for k, v in (l.payload or {}).items() if v)
                 status_str = "SUCCESS" if l.status == AIActionLog.ActionStatus.SUCCESS else "FAILED"
                 log_lines.append(f"- {l.action_type}({payload_str}) => {status_str}")
-            parts.append("Bajarilgan harakatlar tarixi:\n" + "\n".join(log_lines))
+            parts.append("Harakatlar tarixi:\n" + "\n".join(log_lines))
 
-        # ── 3. Redis session entity state ──────────────────────────────────────
+        # Redis'dagi saqlangan session entity state
         state_key = f"ai_tool_state:{session.id}"
         state_data = cache.get(state_key)
         if state_data and isinstance(state_data, dict):
             state_lines = [f"- {k}: {v}" for k, v in state_data.items()]
             parts.append("Saqlangan ob'ektlar state:\n" + "\n".join(state_lines))
 
-        # ── 4. Doimiy foydalanuvchi profili ────────────────────────────────────
         user_profile_summary = self._build_user_profile_summary(session.user)
         if user_profile_summary:
             parts.append("Doimiy foydalanuvchi profili:\n" + user_profile_summary)
 
         return "\n\n".join(parts)
-
-    @staticmethod
-    def _build_full_chat_analysis(session: ConversationSession) -> str:
-        """
-        Suhbat tarixidan mijoz haqida strukturaviy tahlil matnini yaratadi.
-        Lead'ning `customer_analysis` maydoniga yoziladi.
-
-        Quyidagilarni ajratib oladi:
-        - So'ralgan xizmat turi va maqsad
-        - Vaqt / sana afzalligi
-        - Shahar / yo'nalish
-        - Mehmonlar / yo'lovchilar soni
-        - Maxsus talablar, izohllar
-        - Suhbat tili
-        """
-        msgs = list(
-            session.messages
-            .exclude(content='')
-            .order_by('created_at')
-            .values('role', 'content')[:30]
-        )
-        if not msgs:
-            return ''
-
-        lines = []
-        for msg in msgs:
-            role_label = 'Mijoz' if msg['role'] == 'user' else 'AI'
-            text = (msg['content'] or '').strip()[:400]
-            if text:
-                lines.append(f"{role_label}: {text}")
-
-        if not lines:
-            return ''
-
-        chat_text = '\n'.join(lines)
-
-        # Kalit ma'lumotlarni regex orqali ajratib olish
-        import re as _re
-
-        analysis_parts = []
-
-        # Vaqt
-        time_matches = _re.findall(
-            r'\b(\d{1,2}[:\s]\d{2}|\d{1,2}\s*da\b|\d{1,2}:00|\bkechqurun\b|\btush\b)',
-            chat_text, _re.IGNORECASE
-        )
-        if time_matches:
-            analysis_parts.append(f"Vaqt afzalligi: {', '.join(dict.fromkeys(time_matches[:3]))}")
-
-        # Sana
-        date_matches = _re.findall(
-            r'\b(\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?|bugun|ertaga|shanba|yakshanba|dushanba|seshanba|chorshanba|payshanba|juma|\d{1,2}\s+(?:yanvar|fevral|mart|aprel|may|iyun|iyul|avgust|sentabr|oktabr|noyabr|dekabr))',
-            chat_text, _re.IGNORECASE
-        )
-        if date_matches:
-            analysis_parts.append(f"Sana afzalligi: {', '.join(dict.fromkeys(date_matches[:3]))}")
-
-        # Mehmonlar soni
-        guests_matches = _re.findall(
-            r'\b(\d+)\s*(?:kishi|nafar|mehmon|yo.lovchi|kishilik)\b',
-            chat_text, _re.IGNORECASE
-        )
-        if guests_matches:
-            analysis_parts.append(f"Mehmonlar soni: {guests_matches[0]} kishi")
-
-        # Shahar / yo'nalish
-        city_matches = _re.findall(
-            r'\b(Toshkent|Samarqand|Buxoro|Namangan|Farg.ona|Andijon|Nukus|Termiz|Chirchiq|Qarshi|Dubai|Istanbul|Moskva|Antalya|Bali|Tailand|Misr)\b',
-            chat_text, _re.IGNORECASE
-        )
-        if city_matches:
-            analysis_parts.append(f"Shahar/yo'nalish: {', '.join(dict.fromkeys(city_matches[:3]))}")
-
-        # Maxsus talablar (kalit so'zlar)
-        special_keywords = []
-        for kw in ['bolalar', 'vegetarian', 'halol', 'halal', 'vip', 'maxsus', 'alergiya', 'nogironlik', 'balkon', 'terassa', 'xususiy', 'private', 'yoqimli', 'romantik']:
-            if kw.lower() in chat_text.lower():
-                special_keywords.append(kw)
-        if special_keywords:
-            analysis_parts.append(f"Maxsus talablar: {', '.join(special_keywords)}")
-
-        # To'liq suhbat matni (qisqartirilgan)
-        summary_text = '; '.join(analysis_parts) if analysis_parts else ''
-
-        # Jami tahlil
-        full_analysis = ''
-        if summary_text:
-            full_analysis = summary_text + '\n\n'
-        full_analysis += f"Suhbat log:\n{chat_text[:800]}"
-
-        return full_analysis.strip()
 
     def _update_session_entity_state(
         self, session: ConversationSession, tool_name: str, tool_input: dict, result: dict
