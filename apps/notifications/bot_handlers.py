@@ -91,6 +91,8 @@ def _handle_message(message: dict) -> None:
 
     if text in service_mapping:
         # Reply keyboard tugmasi bosildi - callback sifatida qayta ishlash
+        # Bot o'zgaruvchisini oldin aniqlash
+        bot = get_bot()
         callback_data = service_mapping[text]
         _handle_service_callback(bot, chat_id, None, callback_data, lang, tg_user)
         return
@@ -210,8 +212,8 @@ def _handle_callback(callback: dict) -> None:
             text=welcome_text(first_name=first_name, lang=lang),
             reply_markup=main_menu_keyboard(lang=lang),
         )
-        # Reply keyboardni yashirish
-        bot.send_message(chat_id, '👇', reply_markup=hide_keyboard())
+        # Reply keyboardni yashirish (ixtiyoriy - hozircha yashirmaymiz)
+        # bot.send_message(chat_id, reply_markup=hide_keyboard())
         return
 
     if data == CB_SERVICES:
@@ -221,12 +223,8 @@ def _handle_callback(callback: dict) -> None:
             text=service_selection_text(lang=lang),
             reply_markup=services_menu_keyboard(lang=lang),
         )
-        # Reply keyboardni ko'rsatish
-        bot.send_message(
-            chat_id,
-            '👇 Quyidagi klaviaturadan xizmatingizni tanlang:',
-            reply_markup=services_reply_keyboard(lang=lang)
-        )
+        # Reply keyboardni ko'rsatish (agar hali ko'rsatilmagan bo'lsa)
+        # Hozircha inline tugmalardan foydalanamiz
         return
 
     section_fn = SECTION_TEXTS.get(data)
@@ -355,7 +353,13 @@ def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz', rep
     
     # Birinchi xabarni yuborish (bo'sh yoki birinchi belgi)
     message = bot.send_message(chat_id, '...')
-    message_id = message.get('message_id')
+    # Bot.send_message() int yoki dict qaytarishi mumkin
+    if isinstance(message, dict):
+        message_id = message.get('message_id')
+    elif isinstance(message, int):
+        message_id = message
+    else:
+        message_id = None
     
     if not message_id:
         # Agar message_id olinmasa, oddiy yuborish
