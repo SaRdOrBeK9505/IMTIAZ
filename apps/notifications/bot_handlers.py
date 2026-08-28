@@ -86,7 +86,8 @@ def _handle_message(message: dict) -> None:
                 note = "\n\n📌 <i>Ushbu amallarni tasdiqlash uchun Mini App ga o'ting:</i>"
             reply_content += note
 
-        _send_split_message(bot, chat_id, reply_content, reply_markup=None)
+        # AI javobini sekinroq, bo'lib-bo'lib yuborish
+        _send_streaming_response(bot, chat_id, reply_content, lang=lang)
 
     except Exception as e:
         logger.exception('Bot AI message error: %s', e)
@@ -283,8 +284,55 @@ def _handle_service_callback(bot, chat_id: int, message_id: int, data: str, lang
         parse_mode='HTML',
     )
     
-    # AI javobini yangi xabar sifatida yuborish
-    bot.send_message(chat_id, reply_content)
+    # AI javobini sekinroq, bo'lib-bo'lib yuborish
+    _send_streaming_response(bot, chat_id, reply_content, lang=lang)
+
+
+def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz') -> None:
+    """Javobni sekinroq, bo'lib-bo'lib yuborish."""
+    import time
+    import re
+    
+    if not text or len(text) < 50:
+        # Qisqa javobni to'g'ridan-to'g'ri yuborish
+        bot.send_message(chat_id, text)
+        return
+    
+    # Typing indicator ko'rsatish
+    bot.send_chat_action(chat_id, 'typing')
+    time.sleep(0.8)  # 0.8 sekund kutish
+    
+    # Matnni gaplarga bo'lish (yaxshiroq regex)
+    # . ! ? va yangi qatorlarga asoslangan bo'lish
+    sentences = re.split(r'(?<=[.!?])\s+|\n', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    
+    # Agar gaplar juda ko'p bo'lsa, ularni guruhlarga bo'lish
+    if len(sentences) > 5:
+        # Har bir guruhda 2-3 ta gap
+        grouped = []
+        current_group = []
+        for sentence in sentences:
+            current_group.append(sentence)
+            if len(current_group) >= 2:
+                grouped.append(' '.join(current_group))
+                current_group = []
+        if current_group:
+            grouped.append(' '.join(current_group))
+        sentences = grouped
+    
+    # Gaplarni bo'lib yuborish
+    for i, sentence in enumerate(sentences):
+        if sentence:
+            # Typing indicatorni qayta ko'rsatish
+            bot.send_chat_action(chat_id, 'typing')
+            
+            bot.send_message(chat_id, sentence)
+            
+            # Har bir gapdan keyin kutish vaqiti (gap uzunligiga qarab)
+            # Qisqa gap: 0.5s, Uzun gap: 1.2s
+            delay = 0.5 + min(len(sentence) / 150, 0.7)
+            time.sleep(delay)
 
 
 def _handle_lead_status_callback(callback: dict) -> bool:
