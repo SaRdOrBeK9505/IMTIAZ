@@ -288,10 +288,27 @@ def _handle_service_callback(bot, chat_id: int, message_id: int | None, data: st
 
     prompt_text = prompt_data.get(lang, prompt_data.get('uz', ''))
 
-    user = _get_or_create_user(chat_id, tg_user)
+    # Avval prompt matnini ko'rsatamiz va ESKI inline tugmalarni tozalaymiz.
+    # MUHIM: edit_message_text ga reply_markup aniq berilmasa, Telegram oldingi
+    # xabardagi inline_keyboard'ni (8 ta xizmat tugmasi) saqlab qoladi — shuning
+    # uchun bo'sh reply_markup={'inline_keyboard': []} yuboramiz.
+    if message_id:
+        try:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=prompt_text,
+                parse_mode='HTML',
+                reply_markup={'inline_keyboard': []},
+            )
+        except Exception:
+            logger.exception('Xizmat prompt matnini tahrirlashda xatolik: chat_id=%s', chat_id)
+    else:
+        bot.send_message(chat_id, prompt_text, parse_mode='HTML')
 
-    # AI ga xizmat haqida ma'lumot berib, lead yig'ish jarayonini boshlash
-    ai_service = AIAssistantService()
+    bot.send_chat_action(chat_id, 'typing')
+
+    user = _get_or_create_user(chat_id, tg_user)
 
     # Xizmat turi AI ga ma'lum qilish uchun maxsus prefiks
     service_context = {
@@ -308,21 +325,23 @@ def _handle_service_callback(bot, chat_id: int, message_id: int | None, data: st
     context_prefix = service_context.get(data, "")
     full_message = context_prefix + prompt_text
 
-    # AI ga yuborish (for_bot=True bilan)
-    result = ai_service.chat(user=user, message=full_message, for_bot=True)
-    reply_content = result.get('content') or ''
-
-    # Agar message_id bo'lsa, xabarni yangilash (inline callback)
-    if message_id:
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text=prompt_text,
-            parse_mode='HTML',
-        )
-    else:
-        # Reply keyboard - yangi xabar yuborish
-        bot.send_message(chat_id, prompt_text, parse_mode='HTML')
+    # MUHIM: AI chaqiruvi try/except ichiga olindi. Avval bu yerda himoya yo'q edi —
+    # AIAssistantService xatolik bersa, jarayon jim tugab, foydalanuvchi hech qanday
+    # javob olmasdi (aynan "Xizmatlar" bosilgach reply chiqmasligi shundan edi).
+    try:
+        ai_service = AIAssistantService()
+        result = ai_service.chat(user=user, message=full_message, for_bot=True)
+        reply_content = result.get('content') or ''
+        if not reply_content:
+            raise ValueError('AIAssistantService bo\'sh javob qaytardi')
+    except Exception as e:
+        logger.exception('Xizmat callback uchun AI javobida xatolik: data=%s, chat_id=%s, %s', data, chat_id, e)
+        if lang == 'ru':
+            reply_content = "Извините, произошла ошибка при обработке вашего запроса. Попробуйте позже."
+        elif lang == 'en':
+            reply_content = "Sorry, an error occurred while processing your request. Please try again later."
+        else:
+            reply_content = "Kechirasiz, so'rovingizni qayta ishlashda xatolik yuz berdi. Iltimos, bir ozdan so'ng qayta urinib ko'ring."
 
     # AI javobini bo'lib-bo'lib yuborish
     _send_streaming_response(bot, chat_id, reply_content, lang=lang)
