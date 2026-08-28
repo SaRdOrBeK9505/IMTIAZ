@@ -12,6 +12,16 @@ CB_ABOUT    = 'bot:about'
 CB_SERVICES = 'bot:services'
 CB_HELP     = 'bot:help'
 
+# Xizmatlar callback data'lari
+CB_SERVICE_TRAVEL        = 'service:travel'
+CB_SERVICE_RESTAURANT    = 'service:restaurant'
+CB_SERVICE_ROADSIDE      = 'service:roadside'
+CB_SERVICE_MEDICAL       = 'service:medical'
+CB_SERVICE_INSURANCE     = 'service:insurance'
+CB_SERVICE_FAMILY_OFFICE = 'service:family_office'
+CB_SERVICE_LEISURE       = 'service:leisure'
+CB_SERVICE_DISCOUNTS     = 'service:discounts'
+
 
 def mini_app_ai_url(start_param: str = 'ai_chat') -> str:
     """
@@ -217,3 +227,98 @@ def section_keyboard(lang: str = 'uz', start_param: str = 'ai_chat') -> dict:
             ],
         ],
     }
+
+
+def services_menu_keyboard(lang: str = 'uz') -> dict:
+    """Xizmatlar menyusi - 2x4 grid inline tugmalar."""
+    if lang == 'ru':
+        return {
+            'inline_keyboard': [
+                [
+                    {'text': '✈️ Путешествия', 'callback_data': CB_SERVICE_TRAVEL},
+                    {'text': '🍽️ Столики', 'callback_data': CB_SERVICE_RESTAURANT},
+                ],
+                [
+                    {'text': '🚗 Помощь в дороге', 'callback_data': CB_SERVICE_ROADSIDE},
+                    {'text': '❤️ Медицина', 'callback_data': CB_SERVICE_MEDICAL},
+                ],
+                [
+                    {'text': '🛡️ Страхование', 'callback_data': CB_SERVICE_INSURANCE},
+                    {'text': '💼 Семейный офис', 'callback_data': CB_SERVICE_FAMILY_OFFICE},
+                ],
+                [
+                    {'text': '🎭 Отдых', 'callback_data': CB_SERVICE_LEISURE},
+                    {'text': '🏷️ Мои скидки', 'callback_data': CB_SERVICE_DISCOUNTS},
+                ],
+                [
+                    {'text': '← Главное меню', 'callback_data': CB_MENU},
+                ],
+            ],
+        }
+    elif lang == 'en':
+        return {
+            'inline_keyboard': [
+                [
+                    {'text': '✈️ Travel', 'callback_data': CB_SERVICE_TRAVEL},
+                    {'text': '🍽️ Dining', 'callback_data': CB_SERVICE_RESTAURANT},
+                ],
+                [
+                    {'text': '🚗 Roadside Assist', 'callback_data': CB_SERVICE_ROADSIDE},
+                    {'text': '❤️ Medical', 'callback_data': CB_SERVICE_MEDICAL},
+                ],
+                [
+                    {'text': '🛡️ Insurance', 'callback_data': CB_SERVICE_INSURANCE},
+                    {'text': '💼 Family Office', 'callback_data': CB_SERVICE_FAMILY_OFFICE},
+                ],
+                [
+                    {'text': '🎭 Leisure', 'callback_data': CB_SERVICE_LEISURE},
+                    {'text': '🏷️ My Discounts', 'callback_data': CB_SERVICE_DISCOUNTS},
+                ],
+                [
+                    {'text': '← Main menu', 'callback_data': CB_MENU},
+                ],
+            ],
+        }
+    # default uz
+    return {
+        'inline_keyboard': [
+            [
+                {'text': '✈️ Sayohatlar', 'callback_data': CB_SERVICE_TRAVEL},
+                {'text': '🍽️ Stol band qilish', 'callback_data': CB_SERVICE_RESTAURANT},
+            ],
+            [
+                {'text': '🚗 Yo\'lda yordam', 'callback_data': CB_SERVICE_ROADSIDE},
+                {'text': '❤️ Tibbiyot', 'callback_data': CB_SERVICE_MEDICAL},
+            ],
+            [
+                {'text': '🛡️ Sug\'urta', 'callback_data': CB_SERVICE_INSURANCE},
+                {'text': '💼 Oilaviy ofis', 'callback_data': CB_SERVICE_FAMILY_OFFICE},
+            ],
+            [
+                {'text': '🎭 Dam olish', 'callback_data': CB_SERVICE_LEISURE},
+                {'text': '🏷️ Mening chegirmalarim', 'callback_data': CB_SERVICE_DISCOUNTS},
+            ],
+            [
+                {'text': '← Asosiy menyu', 'callback_data': CB_MENU},
+            ],
+        ],
+    }
+
+
+def service_selection_text(lang: str = 'uz') -> str:
+    """Xizmat tanlash sahifasi matni."""
+    if lang == 'ru':
+        return (
+            "<b>🧭 Выберите интересующую вас услугу:</b>\n\n"
+            "Нажмите на кнопку ниже, и я помогу вам с бронированием или консультацией."
+        )
+    elif lang == 'en':
+        return (
+            "<b>🧭 Select a service you're interested in:</b>\n\n"
+            "Tap a button below and I'll help you with booking or consultation."
+        )
+    return (
+        "<b>🧭 Qiziqqan xizmatingizni tanlang:</b>\n\n"
+        "Quyidagi tugmalardan birini bosing va men sizga bron yoki konsultatsiya "
+        "bo'yicha yordam beraman."
+    )

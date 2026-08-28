@@ -11,9 +11,20 @@ from apps.users.models import User, UserRole
 
 from .bot_content import (
     CB_MENU,
+    CB_SERVICES,
+    CB_SERVICE_TRAVEL,
+    CB_SERVICE_RESTAURANT,
+    CB_SERVICE_ROADSIDE,
+    CB_SERVICE_MEDICAL,
+    CB_SERVICE_INSURANCE,
+    CB_SERVICE_FAMILY_OFFICE,
+    CB_SERVICE_LEISURE,
+    CB_SERVICE_DISCOUNTS,
     SECTION_TEXTS,
     main_menu_keyboard,
     section_keyboard,
+    services_menu_keyboard,
+    service_selection_text,
     welcome_text,
 )
 from .telegram import get_bot
@@ -164,6 +175,15 @@ def _handle_callback(callback: dict) -> None:
         )
         return
 
+    if data == CB_SERVICES:
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=service_selection_text(lang=lang),
+            reply_markup=services_menu_keyboard(lang=lang),
+        )
+        return
+
     section_fn = SECTION_TEXTS.get(data)
     if section_fn:
         bot.edit_message_text(
@@ -172,6 +192,99 @@ def _handle_callback(callback: dict) -> None:
             text=section_fn(lang=lang),
             reply_markup=section_keyboard(lang=lang),
         )
+        return
+
+    # Xizmatlar callback'lari
+    _handle_service_callback(bot, chat_id, message_id, data, lang, tg_user)
+
+
+def _handle_service_callback(bot, chat_id: int, message_id: int, data: str, lang: str, tg_user: dict) -> None:
+    """Xizmat tanlanganda lead yig'ish jarayonini boshlaydi."""
+    service_prompts = {
+        CB_SERVICE_TRAVEL: {
+            'uz': '✈️ <b>Sayohatlar</b>\n\nQaysi yo\'nalishga sayohat qilmoqchisiz? (masalan: Dubay, Turkiya, Maldiv)',
+            'ru': '✈️ <b>Путешествия</b>\n\nВ какое направление вы хотите отправиться? (например: Дубай, Турция, Мальдивы)',
+            'en': '✈️ <b>Travel</b>\n\nWhich destination would you like to travel to? (e.g., Dubai, Turkey, Maldives)',
+        },
+        CB_SERVICE_RESTAURANT: {
+            'uz': '🍽️ <b>Stol band qilish</b>\n\nQaysi restoranda stol band qilmoqchisiz? (masalan: Nobu, Chayhona)',
+            'ru': '🍽️ <b>Бронирование столика</b>\n\nВ каком ресторане вы хотите забронировать столик? (например: Nobu, Chayhona)',
+            'en': '🍽️ <b>Table Reservation</b>\n\nWhich restaurant would you like to reserve a table at? (e.g., Nobu, Chayhona)',
+        },
+        CB_SERVICE_ROADSIDE: {
+            'uz': '🚗 <b>Yo\'lda yordam</b>\n\nQaysi xizmat kerak? (masalan: evakuator, yoqilg\'i yetkazib berish)',
+            'ru': '🚗 <b>Помощь в дороге</b>\n\nКакая услуга вам нужна? (например: эвакуатор, доставка топлива)',
+            'en': '🚗 <b>Roadside Assistance</b>\n\nWhat service do you need? (e.g., tow truck, fuel delivery)',
+        },
+        CB_SERVICE_MEDICAL: {
+            'uz': '❤️ <b>Tibbiyot</b>\n\nQanday tibbiy xizmat kerak? (masalan: shifokor konsultatsiyasi, diagnostika)',
+            'ru': '❤️ <b>Медицина</b>\n\nКакая медицинская услуга вам нужна? (например: консультация врача, диагностика)',
+            'en': '❤️ <b>Medical</b>\n\nWhat medical service do you need? (e.g., doctor consultation, diagnostics)',
+        },
+        CB_SERVICE_INSURANCE: {
+            'uz': '🛡️ <b>Sug\'urta</b>\n\nQanday sug\'urta turini xohlaysiz? (masalan: sayohat sug\'urtasi, sog\'liq sug\'urtasi)',
+            'ru': '🛡️ <b>Страхование</b>\n\nКакой тип страховки вы хотите? (например: туристическая, медицинская)',
+            'en': '🛡️ <b>Insurance</b>\n\nWhat type of insurance do you want? (e.g., travel insurance, health insurance)',
+        },
+        CB_SERVICE_FAMILY_OFFICE: {
+            'uz': '💼 <b>Oilaviy ofis</b>\n\nQanday moliyaviy xizmat kerak? (masalan: investitsiya maslahat, aktivlarni boshqarish)',
+            'ru': '💼 <b>Семейный офис</b>\n\nКакая финансовая услуга вам нужна? (например: инвестиционный консалтинг, управление активами)',
+            'en': '💼 <b>Family Office</b>\n\nWhat financial service do you need? (e.g., investment advisory, asset management)',
+        },
+        CB_SERVICE_LEISURE: {
+            'uz': '🎭 <b>Dam olish</b>\n\nQanday tadbir yoki ko\'ngilochar xizmat kerak? (masalan: konsert, teatr, sport tadbiri)',
+            'ru': '🎭 <b>Отдых</b>\n\nКакое мероприятие или развлечение вас интересует? (например: концерт, театр, спортивное событие)',
+            'en': '🎭 <b>Leisure</b>\n\nWhat event or entertainment service do you need? (e.g., concert, theater, sports event)',
+        },
+        CB_SERVICE_DISCOUNTS: {
+            'uz': '🏷️ <b>Mening chegirmalarim</b>\n\nSizning shaxsiy chegirmalaringiz va maxsus takliflaringiz AI yordamchisi orqali boshqariladi. Quyidagi tugmani bosing:',
+            'ru': '🏷️ <b>Мои скидки</b>\n\nВаши персональные скидки и специальные предложения управляются через AI-помощника. Нажмите кнопку ниже:',
+            'en': '🏷️ <b>My Discounts</b>\n\nYour personal discounts and special offers are managed via AI assistant. Tap the button below:',
+        },
+    }
+
+    prompt_data = service_prompts.get(data)
+    if not prompt_data:
+        return
+
+    prompt_text = prompt_data.get(lang, prompt_data.get('uz', ''))
+    
+    # Xizmat tanlanganini foydalanuvchi ma'lumotlariga saqlash (Redis yoki database orqali)
+    # Hozircha oddiy tarzda AI ga yuboramiz
+    user = _get_or_create_user(chat_id, tg_user)
+    
+    # AI ga xizmat haqida ma'lumot berib, lead yig'ish jarayonini boshlash
+    ai_service = AIAssistantService()
+    
+    # Xizmat turi AI ga ma'lum qilish uchun maxsus prefiks
+    service_context = {
+        CB_SERVICE_TRAVEL: "Foydalanuvchi sayohat xizmatiga qiziqmoqda. ",
+        CB_SERVICE_RESTAURANT: "Foydalanuvchi restoran bron qilmoqchi. ",
+        CB_SERVICE_ROADSIDE: "Foydalanuvchi yo'lda yordam xizmatiga muhtoj. ",
+        CB_SERVICE_MEDICAL: "Foydalanuvchi tibbiy xizmatga muhtoj. ",
+        CB_SERVICE_INSURANCE: "Foydalanuvchi sug'urta xizmatiga qiziqmoqda. ",
+        CB_SERVICE_FAMILY_OFFICE: "Foydalanuvchi oilaviy ofis xizmatiga qiziqmoqda. ",
+        CB_SERVICE_LEISURE: "Foydalanuvchi dam olish tadbirlariga qiziqmoqda. ",
+        CB_SERVICE_DISCOUNTS: "Foydalanuvchi chegirmalar haqida ma'lumot olmoqchi. ",
+    }
+    
+    context_prefix = service_context.get(data, "")
+    full_message = context_prefix + prompt_text
+    
+    # AI ga yuborish (for_bot=True bilan)
+    result = ai_service.chat(user=user, message=full_message, for_bot=True)
+    reply_content = result.get('content') or ''
+    
+    # Xabarni yangilash
+    bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=message_id,
+        text=prompt_text,
+        parse_mode='HTML',
+    )
+    
+    # AI javobini yangi xabar sifatida yuborish
+    bot.send_message(chat_id, reply_content)
 
 
 def _handle_lead_status_callback(callback: dict) -> bool:
