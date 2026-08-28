@@ -426,3 +426,29 @@ def get_all_tools() -> list[dict]:
         SERVICE_LEAD_TOOL,
         FLIGHT_LEAD_TOOL,
     ]
+
+
+def get_all_tools_for_bot() -> list[dict]:
+    """
+    Telegram bot uchun barcha tool'lar ro'yxatini qaytaradi.
+    Botda AI chat bilan bir xil ishlashi uchun barcha tool'larni (shu jumladan
+    olib tashlangan RESTAURANT_SEARCH_TOOL, RESTAURANT_BOOK_TOOL, TOUR_SEARCH_TOOL,
+    TOUR_LEAD_TOOL, RESTAURANT_LEAD_TOOL va TRAIN_SEARCH_TOOL) qaytaradi.
+    """
+    return [
+        FLIGHT_SEARCH_TOOL,
+        TRAIN_SEARCH_TOOL,
+        RESTAURANT_SEARCH_TOOL,
+        RESTAURANT_BOOK_TOOL,
+        FLIGHT_BOOK_TOOL,
+        EVENT_SEARCH_TOOL,
+        BOOKING_CANCEL_TOOL,
+        USER_BOOKINGS_TOOL,
+        NEARBY_PLACES_TOOL,
+        USER_PREFERENCES_TOOL,
+        TOUR_SEARCH_TOOL,
+        TOUR_LEAD_TOOL,
+        RESTAURANT_LEAD_TOOL,
+        SERVICE_LEAD_TOOL,
+        FLIGHT_LEAD_TOOL,
+    ]

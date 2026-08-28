@@ -303,13 +303,16 @@ class AIAssistantService:
 
     def chat(
         self, user, message: str, session_id: str | None = None,
-        request_id: str = '',
+        request_id: str = '', for_bot: bool = False,
     ) -> dict:
         """
         `request_id` — HTTP request_id (RequestLoggingMiddleware dan).
         Berilmasa, StepTimer o'zi qisqa UUID yaratadi. Bu ID orqali
         logdagi "AI chat timing" yozuvini va Nginx/Gunicorn access
         logdagi request_id'ni bitta so'rovga bog'lash mumkin.
+
+        `for_bot` — Telegram bot uchun to'liq tools ro'yxatini ishlatish.
+        True bo'lsa, barcha tool'lar (shu jumladan restoran va tur tool'lari) qaytariladi.
         """
         timer = StepTimer(request_id)
 
@@ -355,7 +358,12 @@ class AIAssistantService:
                 session_summary=session_summary,
                 user_profile_summary=user_profile_summary,
             )
-        tools = get_all_tools()
+        # Bot uchun to'liq tools ro'yxati, chat uchun cheklangan ro'yxat
+        if for_bot:
+            from .tools import get_all_tools_for_bot
+            tools = get_all_tools_for_bot()
+        else:
+            tools = get_all_tools()
 
         from apps.ai_assistant.providers.base import AIResponse as ProviderAIResponse
 
@@ -543,7 +551,7 @@ class AIAssistantService:
     # ── Ichki metodlar ────────────────────────────────────────────────────────
     def chat_stream(
             self, user, message: str, session_id: str | None = None,
-            request_id: str = '',
+            request_id: str = '', for_bot: bool = False,
     ):
         """
         SSE (Server-Sent Events) uchun generator.
@@ -556,6 +564,8 @@ class AIAssistantService:
             {'type': 'chunk', 'text': '...'}           — matn bo'lagi
             {'type': 'done', 'content': '...', ...}     — yakuniy natija
             {'type': 'error', 'message': '...'}          — xato
+
+        `for_bot` — Telegram bot uchun to'liq tools ro'yxatini ishlatish.
         """
         timer = StepTimer(request_id)
 
@@ -604,11 +614,16 @@ class AIAssistantService:
                 session_summary=session_summary,
                 user_profile_summary=user_profile_summary,
             )
-        tools = get_all_tools()
+        # Bot uchun to'liq tools ro'yxati, chat uchun cheklangan ro'yxat
+        if for_bot:
+            from .tools import get_all_tools_for_bot
+            tools = get_all_tools_for_bot()
+        else:
+            tools = get_all_tools()
 
         if not hasattr(self.provider, 'chat_stream'):
             # Provider streamni qo'llab-quvvatlamasa — oddiy chat() ga tushamiz
-            result = self.chat(user, message, session_id, request_id)
+            result = self.chat(user, message, session_id, request_id, for_bot=for_bot)
             yield {'type': 'done', **result}
             return
 

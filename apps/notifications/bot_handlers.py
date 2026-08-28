@@ -63,7 +63,7 @@ def _handle_message(message: dict) -> None:
 
     try:
         ai_service = AIAssistantService()
-        result = ai_service.chat(user=user, message=text)
+        result = ai_service.chat(user=user, message=text, for_bot=True)
         reply_content = result.get('content') or ''
 
         if result.get('requires_confirmation'):
