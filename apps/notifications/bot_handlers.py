@@ -33,6 +33,35 @@ from .telegram import get_bot
 
 logger = logging.getLogger(__name__)
 
+# Reply keyboard tugmalari (xizmatlar) -> callback data. Modul darajasida bir marta
+# yaratiladi, har xabarda qayta qurilmaydi.
+SERVICE_TEXT_MAPPING = {
+    '✈️ Sayohatlar': CB_SERVICE_TRAVEL,
+    '🍽️ Stol band qilish': CB_SERVICE_RESTAURANT,
+    '🚗 Yo\'lda yordam': CB_SERVICE_ROADSIDE,
+    '❤️ Tibbiyot': CB_SERVICE_MEDICAL,
+    '🛡️ Sug\'urta': CB_SERVICE_INSURANCE,
+    '💼 Oilaviy ofis': CB_SERVICE_FAMILY_OFFICE,
+    '🎭 Dam olish': CB_SERVICE_LEISURE,
+    '🏷️ Mening chegirmalarim': CB_SERVICE_DISCOUNTS,
+    '✈️ Путешествия': CB_SERVICE_TRAVEL,
+    '🍽️ Столики': CB_SERVICE_RESTAURANT,
+    '🚗 Помощь в дороге': CB_SERVICE_ROADSIDE,
+    '❤️ Медицина': CB_SERVICE_MEDICAL,
+    '🛡️ Страхование': CB_SERVICE_INSURANCE,
+    '💼 Семейный офис': CB_SERVICE_FAMILY_OFFICE,
+    '🎭 Отдых': CB_SERVICE_LEISURE,
+    '🏷️ Мои скидки': CB_SERVICE_DISCOUNTS,
+    '✈️ Travel': CB_SERVICE_TRAVEL,
+    '🍽️ Dining': CB_SERVICE_RESTAURANT,
+    '🚗 Roadside Assist': CB_SERVICE_ROADSIDE,
+    '❤️ Medical': CB_SERVICE_MEDICAL,
+    '🛡️ Insurance': CB_SERVICE_INSURANCE,
+    '💼 Family Office': CB_SERVICE_FAMILY_OFFICE,
+    '🎭 Leisure': CB_SERVICE_LEISURE,
+    '🏷️ My Discounts': CB_SERVICE_DISCOUNTS,
+}
+
 
 def handle_update(update: dict) -> None:
     """Telegram webhook update'ini qayta ishlaydi."""
@@ -61,54 +90,25 @@ def _handle_message(message: dict) -> None:
         _handle_start(message)
         return
 
-    # Reply keyboard tugmalari (xizmatlar)
-    service_mapping = {
-        '✈️ Sayohatlar': CB_SERVICE_TRAVEL,
-        '🍽️ Stol band qilish': CB_SERVICE_RESTAURANT,
-        '🚗 Yo\'lda yordam': CB_SERVICE_ROADSIDE,
-        '❤️ Tibbiyot': CB_SERVICE_MEDICAL,
-        '🛡️ Sug\'urta': CB_SERVICE_INSURANCE,
-        '💼 Oilaviy ofis': CB_SERVICE_FAMILY_OFFICE,
-        '🎭 Dam olish': CB_SERVICE_LEISURE,
-        '🏷️ Mening chegirmalarim': CB_SERVICE_DISCOUNTS,
-        '✈️ Путешествия': CB_SERVICE_TRAVEL,
-        '🍽️ Столики': CB_SERVICE_RESTAURANT,
-        '🚗 Помощь в дороге': CB_SERVICE_ROADSIDE,
-        '❤️ Медицина': CB_SERVICE_MEDICAL,
-        '🛡️ Страхование': CB_SERVICE_INSURANCE,
-        '💼 Семейный офис': CB_SERVICE_FAMILY_OFFICE,
-        '🎭 Отдых': CB_SERVICE_LEISURE,
-        '🏷️ Мои скидки': CB_SERVICE_DISCOUNTS,
-        '✈️ Travel': CB_SERVICE_TRAVEL,
-        '🍽️ Dining': CB_SERVICE_RESTAURANT,
-        '🚗 Roadside Assist': CB_SERVICE_ROADSIDE,
-        '❤️ Medical': CB_SERVICE_MEDICAL,
-        '🛡️ Insurance': CB_SERVICE_INSURANCE,
-        '💼 Family Office': CB_SERVICE_FAMILY_OFFICE,
-        '🎭 Leisure': CB_SERVICE_LEISURE,
-        '🏷️ My Discounts': CB_SERVICE_DISCOUNTS,
-    }
-
-    if text in service_mapping:
-        # Reply keyboard tugmasi bosildi - callback sifatida qayta ishlash
-        # Bot o'zgaruvchisini oldin aniqlash
-        bot = get_bot()
-        callback_data = service_mapping[text]
-        _handle_service_callback(bot, chat_id, None, callback_data, lang, tg_user)
-        return
-
     if not text:
         return
 
+    # MUHIM: tg_user, user va lang service_mapping tekshiruvidan OLDIN aniqlanishi kerak,
+    # aks holda "✈️ Sayohatlar" kabi reply-keyboard tugmasi bosilganda
+    # UnboundLocalError (lang/tg_user hali mavjud emas) yuzaga kelardi.
     tg_user = message.get('from') or {}
     bot = get_bot()
+    user = _get_or_create_user(chat_id, tg_user)
+    lang = user.language_code or 'uz'
+
+    if text in SERVICE_TEXT_MAPPING:
+        # Reply keyboard tugmasi bosildi - callback sifatida qayta ishlash
+        callback_data = SERVICE_TEXT_MAPPING[text]
+        _handle_service_callback(bot, chat_id, None, callback_data, lang, tg_user)
+        return
 
     # Telegram'da "typing..." statusini ko'rsatish
     bot.send_chat_action(chat_id, 'typing')
-
-    # Foydalanuvchini olish yoki avtomatik yaratish
-    user = _get_or_create_user(chat_id, tg_user)
-    lang = user.language_code or 'uz'
 
     try:
         ai_service = AIAssistantService()
@@ -124,7 +124,7 @@ def _handle_message(message: dict) -> None:
                 note = "\n\n📌 <i>Ushbu amallarni tasdiqlash uchun Mini App ga o'ting:</i>"
             reply_content += note
 
-        # AI javobini sekinroq, bo'lib-bo'lib yuborish
+        # AI javobini bo'lib-bo'lib yuborish (streaming effekti)
         _send_streaming_response(bot, chat_id, reply_content, lang=lang)
 
     except Exception as e:
@@ -212,8 +212,6 @@ def _handle_callback(callback: dict) -> None:
             text=welcome_text(first_name=first_name, lang=lang),
             reply_markup=main_menu_keyboard(lang=lang),
         )
-        # Reply keyboardni yashirish (ixtiyoriy - hozircha yashirmaymiz)
-        # bot.send_message(chat_id, reply_markup=hide_keyboard())
         return
 
     if data == CB_SERVICES:
@@ -223,8 +221,6 @@ def _handle_callback(callback: dict) -> None:
             text=service_selection_text(lang=lang),
             reply_markup=services_menu_keyboard(lang=lang),
         )
-        # Reply keyboardni ko'rsatish (agar hali ko'rsatilmagan bo'lsa)
-        # Hozircha inline tugmalardan foydalanamiz
         return
 
     section_fn = SECTION_TEXTS.get(data)
@@ -291,14 +287,12 @@ def _handle_service_callback(bot, chat_id: int, message_id: int | None, data: st
         return
 
     prompt_text = prompt_data.get(lang, prompt_data.get('uz', ''))
-    
-    # Xizmat tanlanganini foydalanuvchi ma'lumotlariga saqlash (Redis yoki database orqali)
-    # Hozircha oddiy tarzda AI ga yuboramiz
+
     user = _get_or_create_user(chat_id, tg_user)
-    
+
     # AI ga xizmat haqida ma'lumot berib, lead yig'ish jarayonini boshlash
     ai_service = AIAssistantService()
-    
+
     # Xizmat turi AI ga ma'lum qilish uchun maxsus prefiks
     service_context = {
         CB_SERVICE_TRAVEL: "Foydalanuvchi sayohat xizmatiga qiziqmoqda. ",
@@ -310,15 +304,15 @@ def _handle_service_callback(bot, chat_id: int, message_id: int | None, data: st
         CB_SERVICE_LEISURE: "Foydalanuvchi dam olish tadbirlariga qiziqmoqda. ",
         CB_SERVICE_DISCOUNTS: "Foydalanuvchi chegirmalar haqida ma'lumot olmoqchi. ",
     }
-    
+
     context_prefix = service_context.get(data, "")
     full_message = context_prefix + prompt_text
-    
+
     # AI ga yuborish (for_bot=True bilan)
     result = ai_service.chat(user=user, message=full_message, for_bot=True)
     reply_content = result.get('content') or ''
-    
-    # Agar message_id bo'lsa, xabarni yangilish (inline callback)
+
+    # Agar message_id bo'lsa, xabarni yangilash (inline callback)
     if message_id:
         bot.edit_message_text(
             chat_id=chat_id,
@@ -329,28 +323,35 @@ def _handle_service_callback(bot, chat_id: int, message_id: int | None, data: st
     else:
         # Reply keyboard - yangi xabar yuborish
         bot.send_message(chat_id, prompt_text, parse_mode='HTML')
-    
-    # AI javobini sekinroq, bo'lib-bo'lib yuborish
+
+    # AI javobini bo'lib-bo'lib yuborish
     _send_streaming_response(bot, chat_id, reply_content, lang=lang)
 
 
 def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz', reply_markup: dict | None = None) -> None:
-    """Javobni yozayotgan paytda o'zgartirib chiqish (Mira AI effekti - tokenlar kabi)."""
+    """Javobni yozayotgan paytda o'zgartirib chiqish (Mira AI effekti - tokenlar kabi).
+
+    Tezlik oldingi versiyaga nisbatan ~2x oshirilgan: boshlang'ich kutish va
+    har bir so'zdan keyingi kutish vaqtlari yarmiga tushirilgan, shuningdek
+    har bir so'zdan keyin emas, har 2 ta "token"dan keyin xabar yangilanadi —
+    bu Telegram API'ga yuboriladigan edit_message_text so'rovlari sonini
+    kamaytirib, real vaqtdagi tezlikni yanada oshiradi.
+    """
     import time
     import re
-    
+
     if not text:
         return
-    
+
     if len(text) < 30:
         # Juda qisqa javobni to'g'ridan-to'g'ri yuborish
         bot.send_message(chat_id, text, reply_markup=reply_markup)
         return
-    
+
     # Typing indicator ko'rsatish
     bot.send_chat_action(chat_id, 'typing')
-    time.sleep(0.5)
-    
+    time.sleep(0.25)  # oldingi 0.5s ning yarmi
+
     # Birinchi xabarni yuborish (bo'sh yoki birinchi belgi)
     message = bot.send_message(chat_id, '...')
     # Bot.send_message() int yoki dict qaytarishi mumkin
@@ -360,47 +361,54 @@ def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz', rep
         message_id = message
     else:
         message_id = None
-    
+
     if not message_id:
         # Agar message_id olinmasa, oddiy yuborish
         bot.send_message(chat_id, text, reply_markup=reply_markup)
         return
-    
+
     # Matnni so'zlar/guruhlarga bo'lish (tokenlar kabi)
-    # So'zlar, belgilar va spacelarni guruhlash
     words = re.findall(r'\S+|\s+', text)
-    
+
     current_text = ''
-    
-    for word in words:
+    UPDATE_EVERY = 2  # har 2 ta bo'lakdan keyin edit qilish - API chaqiruvlari 2x kamayadi
+
+    last_typing_action = time.monotonic()
+
+    for i, word in enumerate(words):
         current_text += word
-        
-        # Typing indicatorni davom ettirish
-        bot.send_chat_action(chat_id, 'typing')
-        
-        # Xabarni yangilash
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=current_text
-            )
-        except Exception:
-            # Agar edit qilib bo'lmasa, davom etamiz
-            pass
-        
-        # Kichik kutish (yozish tezligi - so'z uzunligiga qarab)
-        # Qisqa so'z: 0.05s, Uzun so'z: 0.15s
-        delay = 0.05 + min(len(word) / 50, 0.1)
-        time.sleep(delay)
-    
+
+        is_last = (i == len(words) - 1)
+        should_update = is_last or (i % UPDATE_EVERY == UPDATE_EVERY - 1)
+
+        # Typing indicatorni haddan tashqari tez-tez yubormaslik uchun cheklaymiz
+        now = time.monotonic()
+        if now - last_typing_action > 4:
+            bot.send_chat_action(chat_id, 'typing')
+            last_typing_action = now
+
+        if should_update:
+            try:
+                bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=current_text,
+                )
+            except Exception:
+                # Agar edit qilib bo'lmasa (masalan matn o'zgarmagan), davom etamiz
+                pass
+
+            # Kichik kutish (yozish tezligi) - oldingisidan 2x tezroq
+            delay = 0.025 + min(len(word) / 100, 0.05)
+            time.sleep(delay)
+
     # Oxirgi tugmalarni qo'shish (agar kerak bo'lsa)
     if reply_markup:
         try:
             bot.edit_message_reply_markup(
                 chat_id=chat_id,
                 message_id=message_id,
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
             )
         except Exception:
             pass
@@ -565,5 +573,3 @@ def _get_or_create_user(chat_id: int, tg_user: dict) -> User:
         )
 
     return user
-
-
