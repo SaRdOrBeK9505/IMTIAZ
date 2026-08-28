@@ -322,3 +322,47 @@ def service_selection_text(lang: str = 'uz') -> str:
         "Quyidagi tugmalardan birini bosing va men sizga bron yoki konsultatsiya "
         "bo'yicha yordam beraman."
     )
+
+
+def services_reply_keyboard(lang: str = 'uz') -> dict:
+    """Xizmatlar uchun reply keyboard (doimiy klaviatura)."""
+    if lang == 'ru':
+        return {
+            'keyboard': [
+                ['✈️ Путешествия', '🍽️ Столики'],
+                ['🚗 Помощь в дороге', '❤️ Медицина'],
+                ['🛡️ Страхование', '💼 Семейный офис'],
+                ['🎭 Отдых', '🏷️ Мои скидки'],
+            ],
+            'resize_keyboard': True,
+            'one_time_keyboard': False,
+        }
+    elif lang == 'en':
+        return {
+            'keyboard': [
+                ['✈️ Travel', '🍽️ Dining'],
+                ['🚗 Roadside Assist', '❤️ Medical'],
+                ['🛡️ Insurance', '💼 Family Office'],
+                ['🎭 Leisure', '🏷️ My Discounts'],
+            ],
+            'resize_keyboard': True,
+            'one_time_keyboard': False,
+        }
+    # default uz
+    return {
+        'keyboard': [
+            ['✈️ Sayohatlar', '🍽️ Stol band qilish'],
+            ['🚗 Yo\'lda yordam', '❤️ Tibbiyot'],
+            ['🛡️ Sug\'urta', '💼 Oilaviy ofis'],
+            ['🎭 Dam olish', '🏷️ Mening chegirmalarim'],
+        ],
+        'resize_keyboard': True,
+        'one_time_keyboard': False,
+    }
+
+
+def hide_keyboard() -> dict:
+    """Klaviaturani yashirish."""
+    return {
+        'remove_keyboard': True,
+    }

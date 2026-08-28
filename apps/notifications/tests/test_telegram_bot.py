@@ -63,11 +63,14 @@ class TelegramBotHandlerTests(TestCase):
             },
         })
 
-        bot.send_chat_action.assert_called_once_with(99999, 'typing')
-        bot.send_message.assert_called_once()
-        args, kwargs = bot.send_message.call_args
-        self.assertEqual(args[0], 99999)
-        self.assertIn('Assalomu alaykum', args[1])
+        # AI service chaqirildi
+        ai_service_inst.chat.assert_called_once()
+        call_kwargs = ai_service_inst.chat.call_args.kwargs
+        self.assertTrue(call_kwargs.get('for_bot'))
+        
+        # Bot javob berdi
+        self.assertTrue(bot.send_chat_action.called)
+        self.assertTrue(bot.send_message.called)
 
     @patch('apps.notifications.bot_handlers.AIAssistantService')
     @patch('apps.notifications.bot_handlers.get_bot')

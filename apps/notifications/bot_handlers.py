@@ -21,9 +21,11 @@ from .bot_content import (
     CB_SERVICE_LEISURE,
     CB_SERVICE_DISCOUNTS,
     SECTION_TEXTS,
+    hide_keyboard,
     main_menu_keyboard,
     section_keyboard,
     services_menu_keyboard,
+    services_reply_keyboard,
     service_selection_text,
     welcome_text,
 )
@@ -57,6 +59,40 @@ def _handle_message(message: dict) -> None:
 
     if text.startswith('/start'):
         _handle_start(message)
+        return
+
+    # Reply keyboard tugmalari (xizmatlar)
+    service_mapping = {
+        '✈️ Sayohatlar': CB_SERVICE_TRAVEL,
+        '🍽️ Stol band qilish': CB_SERVICE_RESTAURANT,
+        '🚗 Yo\'lda yordam': CB_SERVICE_ROADSIDE,
+        '❤️ Tibbiyot': CB_SERVICE_MEDICAL,
+        '🛡️ Sug\'urta': CB_SERVICE_INSURANCE,
+        '💼 Oilaviy ofis': CB_SERVICE_FAMILY_OFFICE,
+        '🎭 Dam olish': CB_SERVICE_LEISURE,
+        '🏷️ Mening chegirmalarim': CB_SERVICE_DISCOUNTS,
+        '✈️ Путешествия': CB_SERVICE_TRAVEL,
+        '🍽️ Столики': CB_SERVICE_RESTAURANT,
+        '🚗 Помощь в дороге': CB_SERVICE_ROADSIDE,
+        '❤️ Медицина': CB_SERVICE_MEDICAL,
+        '🛡️ Страхование': CB_SERVICE_INSURANCE,
+        '💼 Семейный офис': CB_SERVICE_FAMILY_OFFICE,
+        '🎭 Отдых': CB_SERVICE_LEISURE,
+        '🏷️ Мои скидки': CB_SERVICE_DISCOUNTS,
+        '✈️ Travel': CB_SERVICE_TRAVEL,
+        '🍽️ Dining': CB_SERVICE_RESTAURANT,
+        '🚗 Roadside Assist': CB_SERVICE_ROADSIDE,
+        '❤️ Medical': CB_SERVICE_MEDICAL,
+        '🛡️ Insurance': CB_SERVICE_INSURANCE,
+        '💼 Family Office': CB_SERVICE_FAMILY_OFFICE,
+        '🎭 Leisure': CB_SERVICE_LEISURE,
+        '🏷️ My Discounts': CB_SERVICE_DISCOUNTS,
+    }
+
+    if text in service_mapping:
+        # Reply keyboard tugmasi bosildi - callback sifatida qayta ishlash
+        callback_data = service_mapping[text]
+        _handle_service_callback(bot, chat_id, None, callback_data, lang, tg_user)
         return
 
     if not text:
@@ -174,6 +210,8 @@ def _handle_callback(callback: dict) -> None:
             text=welcome_text(first_name=first_name, lang=lang),
             reply_markup=main_menu_keyboard(lang=lang),
         )
+        # Reply keyboardni yashirish
+        bot.send_message(chat_id, '👇', reply_markup=hide_keyboard())
         return
 
     if data == CB_SERVICES:
@@ -182,6 +220,12 @@ def _handle_callback(callback: dict) -> None:
             message_id=message_id,
             text=service_selection_text(lang=lang),
             reply_markup=services_menu_keyboard(lang=lang),
+        )
+        # Reply keyboardni ko'rsatish
+        bot.send_message(
+            chat_id,
+            '👇 Quyidagi klaviaturadan xizmatingizni tanlang:',
+            reply_markup=services_reply_keyboard(lang=lang)
         )
         return
 
@@ -199,7 +243,7 @@ def _handle_callback(callback: dict) -> None:
     _handle_service_callback(bot, chat_id, message_id, data, lang, tg_user)
 
 
-def _handle_service_callback(bot, chat_id: int, message_id: int, data: str, lang: str, tg_user: dict) -> None:
+def _handle_service_callback(bot, chat_id: int, message_id: int | None, data: str, lang: str, tg_user: dict) -> None:
     """Xizmat tanlanganda lead yig'ish jarayonini boshlaydi."""
     service_prompts = {
         CB_SERVICE_TRAVEL: {
@@ -276,63 +320,86 @@ def _handle_service_callback(bot, chat_id: int, message_id: int, data: str, lang
     result = ai_service.chat(user=user, message=full_message, for_bot=True)
     reply_content = result.get('content') or ''
     
-    # Xabarni yangilash
-    bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=message_id,
-        text=prompt_text,
-        parse_mode='HTML',
-    )
+    # Agar message_id bo'lsa, xabarni yangilish (inline callback)
+    if message_id:
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=prompt_text,
+            parse_mode='HTML',
+        )
+    else:
+        # Reply keyboard - yangi xabar yuborish
+        bot.send_message(chat_id, prompt_text, parse_mode='HTML')
     
     # AI javobini sekinroq, bo'lib-bo'lib yuborish
     _send_streaming_response(bot, chat_id, reply_content, lang=lang)
 
 
-def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz') -> None:
-    """Javobni sekinroq, bo'lib-bo'lib yuborish."""
+def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz', reply_markup: dict | None = None) -> None:
+    """Javobni yozayotgan paytda o'zgartirib chiqish (Mira AI effekti - tokenlar kabi)."""
     import time
     import re
     
-    if not text or len(text) < 50:
-        # Qisqa javobni to'g'ridan-to'g'ri yuborish
-        bot.send_message(chat_id, text)
+    if not text:
+        return
+    
+    if len(text) < 30:
+        # Juda qisqa javobni to'g'ridan-to'g'ri yuborish
+        bot.send_message(chat_id, text, reply_markup=reply_markup)
         return
     
     # Typing indicator ko'rsatish
     bot.send_chat_action(chat_id, 'typing')
-    time.sleep(0.8)  # 0.8 sekund kutish
+    time.sleep(0.5)
     
-    # Matnni gaplarga bo'lish (yaxshiroq regex)
-    # . ! ? va yangi qatorlarga asoslangan bo'lish
-    sentences = re.split(r'(?<=[.!?])\s+|\n', text)
-    sentences = [s.strip() for s in sentences if s.strip()]
+    # Birinchi xabarni yuborish (bo'sh yoki birinchi belgi)
+    message = bot.send_message(chat_id, '...')
+    message_id = message.get('message_id')
     
-    # Agar gaplar juda ko'p bo'lsa, ularni guruhlarga bo'lish
-    if len(sentences) > 5:
-        # Har bir guruhda 2-3 ta gap
-        grouped = []
-        current_group = []
-        for sentence in sentences:
-            current_group.append(sentence)
-            if len(current_group) >= 2:
-                grouped.append(' '.join(current_group))
-                current_group = []
-        if current_group:
-            grouped.append(' '.join(current_group))
-        sentences = grouped
+    if not message_id:
+        # Agar message_id olinmasa, oddiy yuborish
+        bot.send_message(chat_id, text, reply_markup=reply_markup)
+        return
     
-    # Gaplarni bo'lib yuborish
-    for i, sentence in enumerate(sentences):
-        if sentence:
-            # Typing indicatorni qayta ko'rsatish
-            bot.send_chat_action(chat_id, 'typing')
-            
-            bot.send_message(chat_id, sentence)
-            
-            # Har bir gapdan keyin kutish vaqiti (gap uzunligiga qarab)
-            # Qisqa gap: 0.5s, Uzun gap: 1.2s
-            delay = 0.5 + min(len(sentence) / 150, 0.7)
-            time.sleep(delay)
+    # Matnni so'zlar/guruhlarga bo'lish (tokenlar kabi)
+    # So'zlar, belgilar va spacelarni guruhlash
+    words = re.findall(r'\S+|\s+', text)
+    
+    current_text = ''
+    
+    for word in words:
+        current_text += word
+        
+        # Typing indicatorni davom ettirish
+        bot.send_chat_action(chat_id, 'typing')
+        
+        # Xabarni yangilash
+        try:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=current_text
+            )
+        except Exception:
+            # Agar edit qilib bo'lmasa, davom etamiz
+            pass
+        
+        # Kichik kutish (yozish tezligi - so'z uzunligiga qarab)
+        # Qisqa so'z: 0.05s, Uzun so'z: 0.15s
+        delay = 0.05 + min(len(word) / 50, 0.1)
+        time.sleep(delay)
+    
+    # Oxirgi tugmalarni qo'shish (agar kerak bo'lsa)
+    if reply_markup:
+        try:
+            bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=reply_markup
+            )
+        except Exception:
+            pass
 
 
 def _handle_lead_status_callback(callback: dict) -> bool:
