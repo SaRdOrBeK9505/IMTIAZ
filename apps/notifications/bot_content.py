@@ -53,8 +53,8 @@ def welcome_text(first_name: str = '', lang: str = 'uz') -> str:
             "🗺️ Выберите туры и экскурсии\n"
             "🚗 Пользуйтесь помощью в дороге\n\n"
             "Наш AI-помощник поможет вам с выбором и бронированием в реальном времени.\n\n"
-            "👇 Выберите одну из кнопок ниже, чтобы начать\n"
-            "⚡ Популярные услуги доступны кнопками внизу экрана"
+            "👇 Выберите нужную услугу ниже\n"
+            "⚡ Путешествия, столики, помощь в дороге и медицина — кнопками внизу экрана"
         )
     elif lang == 'en':
         return (
@@ -66,8 +66,8 @@ def welcome_text(first_name: str = '', lang: str = 'uz') -> str:
             "🗺️ Choose tours and excursions\n"
             "🚗 Access roadside assistance\n\n"
             "Our AI assistant will help you select and book in real time.\n\n"
-            "👇 Select one of the options below to start\n"
-            "⚡ Popular services are also available via the buttons at the bottom of the screen"
+            "👇 Choose a service below\n"
+            "⚡ Travel, dining, roadside assist and medical are available via the buttons at the bottom of the screen"
         )
     # default uz
     return (
@@ -80,8 +80,8 @@ def welcome_text(first_name: str = '', lang: str = 'uz') -> str:
         "🗺️ Turlar va ekskursiyalarni tanlang\n"
         "🚗 Yo'lda yordam xizmatidan foydalaning\n\n"
         "AI-yordamchimiz sizga tanlov va bron qilishda real vaqtda yordam beradi.\n\n"
-        "👇 Boshlash uchun quyidagi tugmalardan birini tanlang\n"
-        "⚡ Ommabop xizmatlar ekran ostidagi tugmalarda ham mavjud"
+        "👇 Kerakli xizmatni tanlang\n"
+        "⚡ Sayohatlar, stol band qilish, yo'lda yordam va tibbiyot — ekran ostidagi tugmalarda"
     )
 
 
@@ -190,21 +190,34 @@ SECTION_TEXTS = {
 
 
 def main_menu_keyboard(lang: str = 'uz', start_param: str = 'ai_chat') -> dict:
-    """Start xabari ostidagi 2x2 grid inline tugmalar."""
-    ai_btn_text = "🤖 IMTIAZ AI"
-    services_btn_text = "🧭 Xizmatlar" if lang == 'uz' else ("🧭 Сервисы" if lang == 'ru' else "🧭 Services")
-    about_btn_text = "ℹ️ Biz haqimizda" if lang == 'uz' else ("ℹ️ О нас" if lang == 'ru' else "ℹ️ About us")
-    help_btn_text = "💬 Yordam" if lang == 'uz' else ("💬 Помощь" if lang == 'ru' else "💬 Help")
+    """
+    Start xabari ostidagi asosiy 2x2 grid inline tugmalar.
+
+    MUHIM (2026-08-29 o'zgarish): oldingi "🤖 IMTIAZ AI / 🧭 Xizmatlar /
+    ℹ️ Biz haqimizda / 💬 Yordam" tugmalari butunlay OLIB TASHLANDI va o'rniga
+    to'g'ridan-to'g'ri 4 ta xizmat qo'yildi: 🛡️ Sug'urta, 💼 Oilaviy ofis,
+    🎭 Dam olish, 🏷️ Chegirmalar. Qolgan 4 ta xizmat (✈️ Sayohatlar,
+    🍽️ Stol band qilish, 🚗 Yo'lda yordam, ❤️ Tibbiyot) endi pastki reply
+    keyboard orqali beriladi (bot_handlers._handle_start, ikkinchi xabar).
+
+    Eslatma: "start_param" parametri endi shu funksiya ichida ishlatilmaydi
+    (AI Mini App tugmasi olib tashlangani uchun), lekin chaqiruvchi kodlar
+    bilan moslik uchun signature saqlab qolindi.
+    """
+    insurance_text      = "🛡️ Sug'urta" if lang == 'uz' else ("🛡️ Страхование" if lang == 'ru' else "🛡️ Insurance")
+    family_office_text  = "💼 Oilaviy ofis" if lang == 'uz' else ("💼 Семейный офис" if lang == 'ru' else "💼 Family Office")
+    leisure_text        = "🎭 Dam olish" if lang == 'uz' else ("🎭 Отдых" if lang == 'ru' else "🎭 Leisure")
+    discounts_text      = "🏷️ Chegirmalar" if lang == 'uz' else ("🏷️ Скидки" if lang == 'ru' else "🏷️ Discounts")
 
     return {
         'inline_keyboard': [
             [
-                {'text': ai_btn_text, 'web_app': {'url': mini_app_ai_url(start_param)}},
-                {'text': services_btn_text, 'callback_data': CB_SERVICES},
+                {'text': insurance_text, 'callback_data': CB_SERVICE_INSURANCE},
+                {'text': family_office_text, 'callback_data': CB_SERVICE_FAMILY_OFFICE},
             ],
             [
-                {'text': about_btn_text, 'callback_data': CB_ABOUT},
-                {'text': help_btn_text, 'callback_data': CB_HELP},
+                {'text': leisure_text, 'callback_data': CB_SERVICE_LEISURE},
+                {'text': discounts_text, 'callback_data': CB_SERVICE_DISCOUNTS},
             ],
         ],
     }
