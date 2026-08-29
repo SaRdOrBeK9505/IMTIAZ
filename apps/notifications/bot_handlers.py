@@ -23,9 +23,10 @@ from .bot_content import (
     SECTION_TEXTS,
     hide_keyboard,
     main_menu_keyboard,
+    quick_services_hint_text,
+    quick_services_reply_keyboard,
     section_keyboard,
     services_menu_keyboard,
-    # REMOVED: services_reply_keyboard (deprecated - use services_menu_keyboard instead)
     service_selection_text,
     welcome_text,
 )
@@ -173,6 +174,17 @@ def _handle_start(message: dict) -> None:
         chat_id,
         welcome_text(first_name=first_name, lang=lang),
         reply_markup=main_menu_keyboard(lang=lang, start_param=start_param),
+    )
+
+    # MUHIM: Telegram bitta xabarda inline VA reply keyboard'ni birga
+    # qo'llashga ruxsat bermaydi (reply_markup faqat bittasi bo'lishi mumkin).
+    # Shu sabab, eng ko'p ishlatiladigan 4 ta xizmatni (Sayohatlar, Stol band
+    # qilish, Yo'lda yordam, Tibbiyot) pastki doimiy klaviaturada ko'rsatish
+    # uchun alohida, qisqa ikkinchi xabar yuboramiz.
+    bot.send_message(
+        chat_id,
+        quick_services_hint_text(lang=lang),
+        reply_markup=quick_services_reply_keyboard(lang=lang),
     )
 
 

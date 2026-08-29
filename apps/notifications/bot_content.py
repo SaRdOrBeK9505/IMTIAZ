@@ -1,6 +1,8 @@
 """
 Telegram bot matnlari va klaviaturalar (multilingual UZ/RU/EN).
-TAKMILLASHTIRISH: Reply keyboard o'chirildi, butun menyu INLINE tugmalarda.
+Asosiy menyu va bo'limlar — INLINE tugmalar. Eng ko'p ishlatiladigan
+4 ta xizmat (Sayohatlar, Stol band qilish, Yo'lda yordam, Tibbiyot) —
+/start bosilgandan keyin pastki REPLY keyboard orqali tezkor taqdim etiladi.
 """
 
 from __future__ import annotations
@@ -51,7 +53,8 @@ def welcome_text(first_name: str = '', lang: str = 'uz') -> str:
             "🗺️ Выберите туры и экскурсии\n"
             "🚗 Пользуйтесь помощью в дороге\n\n"
             "Наш AI-помощник поможет вам с выбором и бронированием в реальном времени.\n\n"
-            "👇 Выберите одну из кнопок ниже, чтобы начать"
+            "👇 Выберите одну из кнопок ниже, чтобы начать\n"
+            "⚡ Популярные услуги доступны кнопками внизу экрана"
         )
     elif lang == 'en':
         return (
@@ -63,7 +66,8 @@ def welcome_text(first_name: str = '', lang: str = 'uz') -> str:
             "🗺️ Choose tours and excursions\n"
             "🚗 Access roadside assistance\n\n"
             "Our AI assistant will help you select and book in real time.\n\n"
-            "👇 Select one of the options below to start"
+            "👇 Select one of the options below to start\n"
+            "⚡ Popular services are also available via the buttons at the bottom of the screen"
         )
     # default uz
     return (
@@ -76,7 +80,8 @@ def welcome_text(first_name: str = '', lang: str = 'uz') -> str:
         "🗺️ Turlar va ekskursiyalarni tanlang\n"
         "🚗 Yo'lda yordam xizmatidan foydalaning\n\n"
         "AI-yordamchimiz sizga tanlov va bron qilishda real vaqtda yordam beradi.\n\n"
-        "👇 Boshlash uchun quyidagi tugmalardan birini tanlang"
+        "👇 Boshlash uchun quyidagi tugmalardan birini tanlang\n"
+        "⚡ Ommabop xizmatlar ekran ostidagi tugmalarda ham mavjud"
     )
 
 
@@ -232,20 +237,17 @@ def section_keyboard(lang: str = 'uz', start_param: str = 'ai_chat') -> dict:
 
 def services_menu_keyboard(lang: str = 'uz') -> dict:
     """
-    ✅ TAKMILLASHTIRISH: Xizmatlar menyusi - 2x4 grid INLINE tugmalar.
-    Reply keyboard emas, faqat INLINE tugmalar ishlatiladi.
+    "Xizmatlar" tugmasi bosilganda chiqadigan ro'yxat.
+
+    MUHIM: Endi bu yerda faqat QOLGAN 4 ta xizmat ko'rsatiladi
+    (Sug'urta, Oilaviy ofis, Dam olish, Chegirmalar). Birinchi 4 ta
+    (Sayohatlar, Stol band qilish, Yo'lda yordam, Tibbiyot) endi
+    /start bosilganda pastki reply keyboard orqali tezkor taqdim
+    etiladi — shu sabab bu yerda takrorlanmaydi.
     """
     if lang == 'ru':
         return {
             'inline_keyboard': [
-                [
-                    {'text': '✈️ Путешествия', 'callback_data': CB_SERVICE_TRAVEL},
-                    {'text': '🍽️ Столики', 'callback_data': CB_SERVICE_RESTAURANT},
-                ],
-                [
-                    {'text': '🚗 Помощь в дороге', 'callback_data': CB_SERVICE_ROADSIDE},
-                    {'text': '❤️ Медицина', 'callback_data': CB_SERVICE_MEDICAL},
-                ],
                 [
                     {'text': '🛡️ Страхование', 'callback_data': CB_SERVICE_INSURANCE},
                     {'text': '💼 Семейный офис', 'callback_data': CB_SERVICE_FAMILY_OFFICE},
@@ -263,14 +265,6 @@ def services_menu_keyboard(lang: str = 'uz') -> dict:
         return {
             'inline_keyboard': [
                 [
-                    {'text': '✈️ Travel', 'callback_data': CB_SERVICE_TRAVEL},
-                    {'text': '🍽️ Dining', 'callback_data': CB_SERVICE_RESTAURANT},
-                ],
-                [
-                    {'text': '🚗 Roadside Assist', 'callback_data': CB_SERVICE_ROADSIDE},
-                    {'text': '❤️ Medical', 'callback_data': CB_SERVICE_MEDICAL},
-                ],
-                [
                     {'text': '🛡️ Insurance', 'callback_data': CB_SERVICE_INSURANCE},
                     {'text': '💼 Family Office', 'callback_data': CB_SERVICE_FAMILY_OFFICE},
                 ],
@@ -287,14 +281,6 @@ def services_menu_keyboard(lang: str = 'uz') -> dict:
     return {
         'inline_keyboard': [
             [
-                {'text': '✈️ Sayohatlar', 'callback_data': CB_SERVICE_TRAVEL},
-                {'text': '🍽️ Stol band qilish', 'callback_data': CB_SERVICE_RESTAURANT},
-            ],
-            [
-                {'text': '🚗 Yo\'lda yordam', 'callback_data': CB_SERVICE_ROADSIDE},
-                {'text': '❤️ Tibbiyot', 'callback_data': CB_SERVICE_MEDICAL},
-            ],
-            [
                 {'text': '🛡️ Sug\'urta', 'callback_data': CB_SERVICE_INSURANCE},
                 {'text': '💼 Oilaviy ofis', 'callback_data': CB_SERVICE_FAMILY_OFFICE},
             ],
@@ -309,22 +295,74 @@ def services_menu_keyboard(lang: str = 'uz') -> dict:
     }
 
 
+def quick_services_reply_keyboard(lang: str = 'uz') -> dict:
+    """
+    /start bosilgandan keyin chiqadigan PASTKI (doimiy) reply keyboard.
+    Eng ko'p ishlatiladigan 4 ta xizmatni bitta bosishda ochadi — foydalanuvchi
+    "Xizmatlar" tugmasini bosib, keyin yana tanlashi shart emas.
+
+    Bu klaviaturadagi tugma matnlari SERVICE_TEXT_MAPPING (bot_handlers.py) bilan
+    bir xil bo'lishi SHART — aks holda foydalanuvchi tugmani bossa, bot buni oddiy
+    matn xabari deb qabul qilib, AI'ga yuborib yuboradi.
+    """
+    if lang == 'ru':
+        return {
+            'keyboard': [
+                ['✈️ Путешествия', '🍽️ Столики'],
+                ['🚗 Помощь в дороге', '❤️ Медицина'],
+            ],
+            'resize_keyboard': True,
+            'is_persistent': True,
+        }
+    elif lang == 'en':
+        return {
+            'keyboard': [
+                ['✈️ Travel', '🍽️ Dining'],
+                ['🚗 Roadside Assist', '❤️ Medical'],
+            ],
+            'resize_keyboard': True,
+            'is_persistent': True,
+        }
+    # default uz
+    return {
+        'keyboard': [
+            ['✈️ Sayohatlar', '🍽️ Stol band qilish'],
+            ['🚗 Yo\'lda yordam', '❤️ Tibbiyot'],
+        ],
+        'resize_keyboard': True,
+        'is_persistent': True,
+    }
+
+
+def quick_services_hint_text(lang: str = 'uz') -> str:
+    """Reply keyboard bilan birga yuboriladigan qisqa matn (Telegram talabi: reply_markup uchun ham matn kerak)."""
+    if lang == 'ru':
+        return "⚡ Быстрый доступ к популярным услугам — кнопки внизу."
+    elif lang == 'en':
+        return "⚡ Quick access to popular services — buttons below."
+    return "⚡ Ommabop xizmatlarga tezkor kirish — pastdagi tugmalar orqali."
+
+
 def service_selection_text(lang: str = 'uz') -> str:
-    """Xizmat tanlash sahifasi matni."""
+    """Xizmat tanlash sahifasi matni. Eslatma: ✈️🍽️🚗❤️ pastdagi tezkor tugmalarda mavjud."""
     if lang == 'ru':
         return (
-            "<b>🧭 Выберите интересующую вас услугу:</b>\n\n"
-            "Нажмите на кнопку ниже, и я помогу вам с бронированием или консультацией."
+            "<b>🧭 Дополнительные услуги:</b>\n\n"
+            "Нажмите на кнопку ниже, и я помогу вам с бронированием или консультацией.\n\n"
+            "💡 Путешествия, столики, помощь в дороге и медицина — доступны кнопками внизу экрана."
         )
     elif lang == 'en':
         return (
-            "<b>🧭 Select a service you're interested in:</b>\n\n"
-            "Tap a button below and I'll help you with booking or consultation."
+            "<b>🧭 More services:</b>\n\n"
+            "Tap a button below and I'll help you with booking or consultation.\n\n"
+            "💡 Travel, dining, roadside assist and medical are available via the buttons at the bottom of the screen."
         )
     return (
-        "<b>🧭 Qiziqqan xizmatingizni tanlang:</b>\n\n"
+        "<b>🧭 Qo'shimcha xizmatlar:</b>\n\n"
         "Quyidagi tugmalardan birini bosing va men sizga bron yoki konsultatsiya "
-        "bo'yicha yordam beraman."
+        "bo'yicha yordam beraman.\n\n"
+        "💡 Sayohatlar, stol band qilish, yo'lda yordam va tibbiyot — ekran ostidagi "
+        "tezkor tugmalarda mavjud."
     )
 
 
@@ -336,14 +374,11 @@ def hide_keyboard() -> dict:
 
 
 # ============================================================================
-# 🗑️ DEPRECATED: services_reply_keyboard ❌
+# ℹ️ ESLATMA: reply keyboard qayta tiklandi (2026-08-29)
 # ============================================================================
-# ESLATMA: services_reply_keyboard() funksiyasi ENDI ISHLATILMAYDI!
-# Barcha xizmatlar INLINE tugmalarda ko'rsatiladi (services_menu_keyboard).
-#
-# Agar handlers.py'da `services_reply_keyboard` ishlatilgan bo'lsa,
-# uni `services_menu_keyboard` bilan almashtiring:
-#
-#   ESKI: reply_markup=services_reply_keyboard(lang=lang)
-#   YANGI: reply_markup=services_menu_keyboard(lang=lang)
+# Avval "services_reply_keyboard" olib tashlangan va hammasi inline'ga
+# o'tkazilgan edi. Endi mahsulot talabiga ko'ra pastki reply keyboard
+# qayta qo'shildi — lekin faqat 4 ta ENG KO'P ishlatiladigan xizmat uchun
+# (quyidagi quick_services_reply_keyboard funksiyasi). Qolgan 4 tasi hali
+# ham "Xizmatlar" inline tugmasi orqali ochiladi (services_menu_keyboard).
 # ============================================================================
