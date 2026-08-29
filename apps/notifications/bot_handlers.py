@@ -378,24 +378,19 @@ def _send_live_streaming_response(
     reply_markup: dict | None = None,
 ) -> dict | None:
     """
-    HAQIQIY (haqiqiy vaqtli) streaming — producer/consumer naqshi bilan.
+    STREAMING OLIB TASHLANDI — AI javobi to'liq kutib olinadi, so'ng Telegram'ga
+    BITTA yaxlit xabar qilib yuboriladi (bosqichma-bosqich tahrirlash yo'q).
 
-    MUAMMO: OpenAI ba'zan javobni juda tez (bir necha soniyada butunlay)
-    qaytaradi. Avvalgi versiyada throttle (EDIT_INTERVAL) davomida deyarli
-    barcha chunk'lar kelib ulguradi va natijada foydalanuvchi "yozilish"ni
-    emas, bitta katta matn "dump"ini ko'radi — chunki reveal tezligi
-    to'g'ridan-to'g'ri tarmoq/AI tezligiga bog'liq edi.
-
-    YECHIM: ikkita mustaqil oqim.
-      1) PRODUCER (fon thread) — event_stream'ni IMKON QADAR TEZ o'qiydi va
-         kelgan matnni umumiy `state['full_text']` bufer'iga qo'shib boradi.
-         Tarmoq/AI qanchalik tez bo'lmasin, bu yerda hech qanday sun'iy
-         kechikish yo'q.
-      2) CONSUMER (shu funksiyaning asosiy oqimi) — bufer'dagi matnni
-         o'ZINING belgilagan doimiy tezligida (TYPING_CPS — belgi/soniya)
-         Telegram xabariga chiqarib boradi. Reveal tezligi endi AI tezligiga
-         EMAS, balki shu konstantaga bog'liq — shuning uchun animatsiya
-         har doim bir xil, tabiiy "yozilish" tuyg'usini beradi.
+    Nega: bosqichma-bosqich "edit_message_text" bilan animatsiya qilish bir
+    qancha muammolarni keltirib chiqargan edi (so'zlarning bo'linishi, Telegram
+    flood-limitiga tegib qolish, tarmoq sekinligi tufayli animatsiyaning
+    ma'nosiz bo'lib qolishi). Shu sabab bu yerda faqat:
+      1) event_stream'dan barcha 'chunk'larni yig'ib boramiz (Telegram'ga
+         hech narsa yubormasdan);
+      2) foydalanuvchiga "yozyapti..." holatini davriy ravishda yangilab
+         turamiz, shunda u botning "muzlab qolmagani"ni ko'radi;
+      3) stream tugagach (yoki xato bersa), yig'ilgan matnni bitta (yoki,
+         agar 4000 belgidan oshsa, bir nechta) xabar qilib yuboramiz.
 
     `event_stream` — AIAssistantService.chat_stream() natijasi (generator),
     quyidagi event turlarini beradi:
@@ -404,246 +399,53 @@ def _send_live_streaming_response(
         {'type': 'done', 'content': ..., 'requires_confirmation': ..., ...}
         {'type': 'error', 'message': '...'}
 
-    Qaytaradi: oxirgi 'done' yoki 'error' eventining dict'i — chaqiruvchi kod
-    shu orqali `requires_confirmation` yoki xatoni tekshiradi.
+    Qaytaradi: oxirgi 'done' yoki 'error' eventining dict'i.
     """
-    import threading
     import time
 
-    MAX_MSG_LEN = 4000        # Telegram 4096 limitidan xavfsiz masofa
-    EDIT_INTERVAL = 0.8        # Telegram'ning o'zi ~1 edit/soniya/chatdan tezini qabul
-                               # qilmaydi (429 qaytaradi). Bundan pastga tushirish
-                               # tezlikni OSHIRMAYDI, faqat behuda so'rovlarni ko'paytiradi.
-
-    def _safe_boundary(text: str) -> int:
-        """
-        MUHIM: so'z HECH QACHON o'rtadan kesilmasligi kerak (masalan "platforma"
-        -> "plat" keyin "forma" bo'lib chiqmasligi kerak). Buning uchun matnning
-        oxiridan orqaga qarab BIRINCHI bo'shliq (probel/qator ko'chirish)
-        belgisigacha bo'lgan uzunlikni qaytaramiz — bu "xavfsiz chegara".
-        Undan keyingi qism hali TO'LIQ kelmagan so'z bo'lishi mumkin, shuning
-        uchun stream tugamaguncha bu chegaradan OSHIB ketish mumkin emas.
-        Agar hali birorta ham bo'shliq bo'lmasa (masalan hali bitta uzun so'z
-        kelayotgan bo'lsa), 0 qaytariladi — ya'ni hali hech narsa ko'rsatilmaydi.
-        """
-        for i in range(len(text) - 1, -1, -1):
-            if text[i].isspace():
-                return i + 1
-        return 0
-
-    # --- Producer va consumer o'rtasida ulashiladigan holat ---
-    state_lock = threading.Lock()
-    state = {
-        'full_text': '',       # AI'dan hozirgacha kelgan TO'LIQ (xom) matn
-        'done': False,         # stream producer tomonidan tugatildimi
-        'final_event': None,   # oxirgi 'done'/'error' eventi
-        'producer_error': None,
-    }
-
-    def _producer():
-        """Fon oqimi: event_stream'ni tezda so'rib, bufer'ga yozadi."""
-        try:
-            for event in event_stream:
-                etype = event.get('type')
-                if etype == 'chunk':
-                    text = event.get('text') or ''
-                    if text:
-                        with state_lock:
-                            state['full_text'] += text
-                elif etype in ('done', 'error'):
-                    with state_lock:
-                        state['final_event'] = event
-                # tool_processing/tool_start/tool_end — hozircha alohida
-                # holat sifatida saqlanmaydi, consumer o'zining "typing..."
-                # indikatorini mustaqil boshqaradi.
-        except Exception as exc:
-            logger.exception('AI stream producer xatosi: chat_id=%s, %s', chat_id, exc)
-            with state_lock:
-                state['producer_error'] = exc
-        finally:
-            with state_lock:
-                state['done'] = True
-
-    producer_thread = threading.Thread(target=_producer, daemon=True)
-    stream_start_ts = time.monotonic()
-    producer_thread.start()
+    full_text = ''
+    final_event: dict | None = None
+    last_typing_action = time.monotonic()
 
     try:
         bot.send_chat_action(chat_id, 'typing')
     except Exception:
         pass
 
-    message_id: int | None = None
-    revealed_len = 0          # full_text ichida hozirgacha Telegram'ga "ochilgan" uzunlik (belgi)
-    block_start = 0            # joriy Telegram xabari full_text ichida qayerdan boshlanadi
-    last_edit_time = 0.0
-    last_typing_action = time.monotonic()
-    first_chunk_logged = False
-    edit_count = 0
-    edit_total_time = 0.0
+    try:
+        for event in event_stream:
+            etype = event.get('type')
 
-    def _finalize_block(text: str) -> None:
-        """Joriy xabarni to'liq matn bilan yakunlab, yangi blokka o'tish uchun."""
-        if message_id and text:
-            try:
-                bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text)
-            except Exception:
-                pass
+            if etype == 'chunk':
+                text = event.get('text') or ''
+                if text:
+                    full_text += text
 
-    while True:
-        with state_lock:
-            full_text = state['full_text']
-            is_done = state['done']
+            elif etype in ('done', 'error'):
+                final_event = event
 
-        # Stream tugagan bo'lsa — endi hech narsani kutishning hojati yo'q,
-        # qolgan hammasini (oxirgi so'zi bilan birga) chiqarish mumkin.
-        # Tugamagan bo'lsa — faqat OXIRGI TO'LIQ bo'shliqqacha bo'lgan qism
-        # "xavfsiz" — undan keyingisi hali kelayotgan so'z bo'lishi mumkin.
-        safe_len = len(full_text) if is_done else _safe_boundary(full_text)
-
-        if not first_chunk_logged and full_text:
-            first_chunk_logged = True
-            logger.info(
-                'STREAM TIMING: birinchi chunk %.2f soniyada keldi (chat_id=%s)',
-                time.monotonic() - stream_start_ts, chat_id,
-            )
-
-        # MUHIM: endi sun'iy "necha belgi/soniya" cheklovi YO'Q. Har safar
-        # matnda mavjud bo'lgan BARCHA xavfsiz (to'liq so'zlardan iborat)
-        # qismi ko'rsatiladi — tezlik endi faqat AI qanchalik tez yozishiga
-        # va quyidagi EDIT_INTERVAL (Telegram flood-limitiga mos chastota)ga
-        # bog'liq, bizning sun'iy tormozimizga emas.
-        target_len = safe_len
-
-        # Hali ochiladigan yangi (TO'LIQ) matn yo'q va stream ham tugamagan —
-        # faqat "yozyapti..." holatini yangilab, qisqa kutamiz.
-        if target_len == revealed_len and not is_done:
+            # Har 4 soniyada bir "yozyapti..." holatini yangilab turamiz —
+            # shunda foydalanuvchi bot javob tayyorlanayotganini ko'radi.
             now = time.monotonic()
-            if now - last_typing_action > 3.0:
-                try:
-                    bot.send_chat_action(chat_id, 'typing')
-                except Exception:
-                    pass
-                last_typing_action = now
-            time.sleep(0.15)
-            continue
-
-        if target_len > revealed_len:
-            revealed_len = target_len
-            block_text = full_text[block_start:revealed_len]
-
-            # Joriy blok Telegram limitidan oshsa — yakunlab, yangisini boshlaymiz.
-            # Bo'lish nuqtasini ham iloji boricha so'z chegarasiga moslashtiramiz
-            # (aks holda 4000-belgi chegarasi so'zni o'rtadan kesib yuborishi mumkin).
-            if len(block_text) > MAX_MSG_LEN:
-                hard_cut = block_start + MAX_MSG_LEN
-                nearest_space = full_text.rfind(' ', block_start, hard_cut)
-                cut = nearest_space + 1 if nearest_space > block_start else hard_cut
-                _finalize_block(full_text[block_start:cut])
-                block_start = cut
-                message_id = None
-                block_text = full_text[block_start:revealed_len]
-
-            if message_id is None:
-                if block_text:
-                    _t0 = time.monotonic()
-                    msg = bot.send_message(chat_id, block_text)
-                    logger.info(
-                        'STREAM TIMING: send_message %.2f soniya oldi, umumiy %.2f soniyada (chat_id=%s)',
-                        time.monotonic() - _t0, time.monotonic() - stream_start_ts, chat_id,
-                    )
-                    message_id = msg.get('message_id') if isinstance(msg, dict) else msg
-                    last_edit_time = time.monotonic()
-            else:
-                now = time.monotonic()
-                if now - last_edit_time >= EDIT_INTERVAL:
-                    try:
-                        _t0 = time.monotonic()
-                        bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=block_text)
-                        _dt = time.monotonic() - _t0
-                        edit_count += 1
-                        edit_total_time += _dt
-                        if _dt > 1.0:
-                            logger.warning(
-                                'STREAM TIMING: edit_message_text SEKIN — %.2f soniya (chat_id=%s)',
-                                _dt, chat_id,
-                            )
-                    except Exception:
-                        # 429 yoki "message is not modified" bo'lishi mumkin — davom etamiz
-                        pass
-                    last_edit_time = now
-
-            now = time.monotonic()
-            if now - last_typing_action > 4.5:
+            if now - last_typing_action > 4.0:
                 try:
                     bot.send_chat_action(chat_id, 'typing')
                 except Exception:
                     pass
                 last_typing_action = now
 
-        if is_done and revealed_len >= len(full_text):
-            logger.info(
-                'STREAM TIMING: yakun — umumiy %.2f soniya, %d ta edit, o\'rtacha edit %.2f soniya (chat_id=%s)',
-                time.monotonic() - stream_start_ts, edit_count,
-                (edit_total_time / edit_count) if edit_count else 0.0, chat_id,
-            )
-            break
+    except Exception as exc:
+        logger.exception('AI stream jarayonida uzilish: chat_id=%s, %s', chat_id, exc)
+        final_event = {'type': 'error', 'message': str(exc)}
 
-        time.sleep(max(0.0, EDIT_INTERVAL - 0.05))
+    # Agar biror chunk kelmagan bo'lsa-yu, 'done' eventida tayyor 'content'
+    # bo'lsa (provider chat_stream'ni to'liq qo'llab-quvvatlamasa) — o'shani
+    # ishlatamiz.
+    if not full_text and final_event and final_event.get('type') == 'done':
+        full_text = final_event.get('content') or ''
 
-    producer_thread.join(timeout=5.0)
-
-    with state_lock:
-        full_text = state['full_text']
-        final_event = state['final_event']
-        producer_error = state['producer_error']
-
-    # Xavfsizlik uchun — oxirgi blokni albatta to'liq holatda chiqaramiz.
-    final_block_text = full_text[block_start:]
-    if message_id and final_block_text:
-        try:
-            bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=final_block_text)
-        except Exception:
-            pass
-        if reply_markup:
-            try:
-                bot.edit_message_reply_markup(
-                    chat_id=chat_id, message_id=message_id, reply_markup=reply_markup,
-                )
-            except Exception:
-                pass
-
-    # MUHIM: agar stream XATO bilan tugagan bo'lsa-yu, foydalanuvchiga
-    # allaqachon qisman matn ko'rsatilgan bo'lsa (masalan "...va m" kabi
-    # so'z o'rtasida uzilib qolgan) — o'sha xabarni shunday "muzlagan"
-    # holda qoldirmaymiz, chunki bu formatlash xatosidek ko'rinadi. Buning
-    # o'rniga xabarga aniq ogohlantirish qo'shib qo'yamiz, shunda
-    # foydalanuvchi bu tasodifiy uzilish ekanini tushunadi.
-    with state_lock:
-        stream_errored = state['final_event'] is not None and state['final_event'].get('type') == 'error'
-        stream_errored = stream_errored or state['producer_error'] is not None
-    if message_id and full_text.strip() and stream_errored:
-        note = "\n\n⚠️ <i>Ulanish uzilib qoldi, javob to'liq bo'lmagan bo'lishi mumkin. Iltimos, savolingizni qayta yuboring.</i>"
-        try:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=final_block_text + note,
-                parse_mode='HTML',
-            )
-        except Exception:
-            logger.exception('Xato ogohlantirish xabarini qo\'shishda muammo: chat_id=%s', chat_id)
-
-    if producer_error and not final_event:
-        final_event = {'type': 'error', 'message': str(producer_error)}
-
-    # Agar hech qanday 'chunk' kelmagan bo'lsa (provider chat_stream'ni
-    # qo'llab-quvvatlamaydi va faqat yakuniy 'done' kelgan bo'lsa) — done
-    # ichidagi 'content'ni to'g'ridan-to'g'ri yuboramiz.
-    if message_id is None and final_event and final_event.get('type') == 'done':
-        content = final_event.get('content') or ''
-        if content:
-            _send_split_message(bot, chat_id, content, reply_markup=reply_markup)
+    if full_text.strip():
+        _send_split_message(bot, chat_id, full_text, reply_markup=reply_markup)
 
     return final_event
 
