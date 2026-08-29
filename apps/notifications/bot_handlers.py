@@ -25,7 +25,7 @@ from .bot_content import (
     main_menu_keyboard,
     section_keyboard,
     services_menu_keyboard,
-    services_reply_keyboard,
+    # REMOVED: services_reply_keyboard (deprecated - use services_menu_keyboard instead)
     service_selection_text,
     welcome_text,
 )
@@ -124,7 +124,7 @@ def _handle_message(message: dict) -> None:
                 note = "\n\n📌 <i>Ushbu amallarni tasdiqlash uchun Mini App ga o'ting:</i>"
             reply_content += note
 
-        # AI javobini bo'lib-bo'lib yuborish (streaming effekti)
+        # AI javobini bo'lib-bo'lib yuborish (Mira AI streaming effekti)
         _send_streaming_response(bot, chat_id, reply_content, lang=lang)
 
     except Exception as e:
@@ -343,37 +343,37 @@ def _handle_service_callback(bot, chat_id: int, message_id: int | None, data: st
         else:
             reply_content = "Kechirasiz, so'rovingizni qayta ishlashda xatolik yuz berdi. Iltimos, bir ozdan so'ng qayta urinib ko'ring."
 
-    # AI javobini bo'lib-bo'lib yuborish
+    # AI javobini Mira AI uslubida streaming qilib yuborish
     _send_streaming_response(bot, chat_id, reply_content, lang=lang)
 
 
 def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz', reply_markup: dict | None = None) -> None:
-    """Javobni yozayotgan paytda o'zgartirib chiqish (Mira AI effekti - tokenlar kabi).
+    """
+    Javobni Mira AI uslubida harf-harf sekin chiqarish.
 
-    Tezlik oldingi versiyaga nisbatan ~2x oshirilgan: boshlang'ich kutish va
-    har bir so'zdan keyingi kutish vaqtlari yarmiga tushirilgan, shuningdek
-    har bir so'zdan keyin emas, har 2 ta "token"dan keyin xabar yangilanadi —
-    bu Telegram API'ga yuboriladigan edit_message_text so'rovlari sonini
-    kamaytirib, real vaqtdagi tezlikni yanada oshiradi.
+    TAKMILLASHTIRISH:
+    - Oldingi: So'zlar bitta-bitta chiqardi (word-level)
+    - Yangi: Harflar bitta-bitta chiqadi (character-level) ✨
+    - Tezlik: 15-27ms har harf (tinish belgisi/bo'sh joy = tezroq)
     """
     import time
-    import re
 
     if not text:
         return
 
-    if len(text) < 30:
-        # Juda qisqa javobni to'g'ridan-to'g'ri yuborish
+    # Juda qisqa javobni to'g'ridan-to'g'ri yuborish
+    if len(text) < 50:
         bot.send_message(chat_id, text, reply_markup=reply_markup)
         return
 
     # Typing indicator ko'rsatish
     bot.send_chat_action(chat_id, 'typing')
-    time.sleep(0.25)  # oldingi 0.5s ning yarmi
+    time.sleep(0.3)  # AI javobini tayyorlash ko'rsatishi
 
-    # Birinchi xabarni yuborish (bo'sh yoki birinchi belgi)
+    # Birinchi xabarni yuborish
     message = bot.send_message(chat_id, '...')
-    # Bot.send_message() int yoki dict qaytarishi mumkin
+
+    # message_id olib olish (turli API versiyalari uchun)
     if isinstance(message, dict):
         message_id = message.get('message_id')
     elif isinstance(message, int):
@@ -386,25 +386,30 @@ def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz', rep
         bot.send_message(chat_id, text, reply_markup=reply_markup)
         return
 
-    # Matnni so'zlar/guruhlarga bo'lish (tokenlar kabi)
-    words = re.findall(r'\S+|\s+', text)
-
+    # Matnni harflarga bo'lish (CHARACTER-LEVEL streaming)
+    characters = list(text)
     current_text = ''
-    UPDATE_EVERY = 2  # har 2 ta bo'lakdan keyin edit qilish - API chaqiruvlari 2x kamayadi
+
+    # STREAMING PARAMETRLARI
+    chars_per_update = 1  # har 1 harfda yangilash (aslida character-level)
+    base_delay = 0.025   # 25ms = optimal tezlik
 
     last_typing_action = time.monotonic()
 
-    for i, word in enumerate(words):
-        current_text += word
+    for i, char in enumerate(characters):
+        current_text += char
 
-        is_last = (i == len(words) - 1)
-        should_update = is_last or (i % UPDATE_EVERY == UPDATE_EVERY - 1)
+        is_last = (i == len(characters) - 1)
+        should_update = is_last or ((i + 1) % chars_per_update == 0)
 
-        # Typing indicatorni haddan tashqari tez-tez yubormaslik uchun cheklaymiz
+        # Typing indicatorni har 4-5 sekunddan keyin qayta yuborish
         now = time.monotonic()
-        if now - last_typing_action > 4:
-            bot.send_chat_action(chat_id, 'typing')
-            last_typing_action = now
+        if now - last_typing_action > 4.5:
+            try:
+                bot.send_chat_action(chat_id, 'typing')
+                last_typing_action = now
+            except:
+                pass
 
         if should_update:
             try:
@@ -414,11 +419,17 @@ def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz', rep
                     text=current_text,
                 )
             except Exception:
-                # Agar edit qilib bo'lmasa (masalan matn o'zgarmagan), davom etamiz
+                # Agar edit qilib bo'lmasa, davom etamiz
                 pass
 
-            # Kichik kutish (yozish tezligi) - oldingisidan 2x tezroq
-            delay = 0.025 + min(len(word) / 100, 0.05)
+            # Harf-harf kutish (bo'sh joy/tinish belgisi = tezroq)
+            if char in ' .,;:!?\n':
+                delay = base_delay * 0.6  # 15ms - bo'sh joy, tezroq
+            elif char.isupper():
+                delay = base_delay * 1.1  # 27ms - bosh harf, sekinroq
+            else:
+                delay = base_delay  # 25ms - normal harf
+
             time.sleep(delay)
 
     # Oxirgi tugmalarni qo'shish (agar kerak bo'lsa)

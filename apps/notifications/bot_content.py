@@ -1,5 +1,6 @@
 """
 Telegram bot matnlari va klaviaturalar (multilingual UZ/RU/EN).
+TAKMILLASHTIRISH: Reply keyboard o'chirildi, butun menyu INLINE tugmalarda.
 """
 
 from __future__ import annotations
@@ -230,7 +231,10 @@ def section_keyboard(lang: str = 'uz', start_param: str = 'ai_chat') -> dict:
 
 
 def services_menu_keyboard(lang: str = 'uz') -> dict:
-    """Xizmatlar menyusi - 2x4 grid inline tugmalar."""
+    """
+    ✅ TAKMILLASHTIRISH: Xizmatlar menyusi - 2x4 grid INLINE tugmalar.
+    Reply keyboard emas, faqat INLINE tugmalar ishlatiladi.
+    """
     if lang == 'ru':
         return {
             'inline_keyboard': [
@@ -324,45 +328,22 @@ def service_selection_text(lang: str = 'uz') -> str:
     )
 
 
-def services_reply_keyboard(lang: str = 'uz') -> dict:
-    """Xizmatlar uchun reply keyboard (doimiy klaviatura)."""
-    if lang == 'ru':
-        return {
-            'keyboard': [
-                ['✈️ Путешествия', '🍽️ Столики'],
-                ['🚗 Помощь в дороге', '❤️ Медицина'],
-                ['🛡️ Страхование', '💼 Семейный офис'],
-                ['🎭 Отдых', '🏷️ Мои скидки'],
-            ],
-            'resize_keyboard': True,
-            'one_time_keyboard': False,
-        }
-    elif lang == 'en':
-        return {
-            'keyboard': [
-                ['✈️ Travel', '🍽️ Dining'],
-                ['🚗 Roadside Assist', '❤️ Medical'],
-                ['🛡️ Insurance', '💼 Family Office'],
-                ['🎭 Leisure', '🏷️ My Discounts'],
-            ],
-            'resize_keyboard': True,
-            'one_time_keyboard': False,
-        }
-    # default uz
-    return {
-        'keyboard': [
-            ['✈️ Sayohatlar', '🍽️ Stol band qilish'],
-            ['🚗 Yo\'lda yordam', '❤️ Tibbiyot'],
-            ['🛡️ Sug\'urta', '💼 Oilaviy ofis'],
-            ['🎭 Dam olish', '🏷️ Mening chegirmalarim'],
-        ],
-        'resize_keyboard': True,
-        'one_time_keyboard': False,
-    }
-
-
 def hide_keyboard() -> dict:
     """Klaviaturani yashirish."""
     return {
         'remove_keyboard': True,
     }
+
+
+# ============================================================================
+# 🗑️ DEPRECATED: services_reply_keyboard ❌
+# ============================================================================
+# ESLATMA: services_reply_keyboard() funksiyasi ENDI ISHLATILMAYDI!
+# Barcha xizmatlar INLINE tugmalarda ko'rsatiladi (services_menu_keyboard).
+#
+# Agar handlers.py'da `services_reply_keyboard` ishlatilgan bo'lsa,
+# uni `services_menu_keyboard` bilan almashtiring:
+#
+#   ESKI: reply_markup=services_reply_keyboard(lang=lang)
+#   YANGI: reply_markup=services_menu_keyboard(lang=lang)
+# ============================================================================
