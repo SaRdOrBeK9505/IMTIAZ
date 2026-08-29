@@ -349,12 +349,21 @@ def _handle_service_callback(bot, chat_id: int, message_id: int | None, data: st
 
 def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz', reply_markup: dict | None = None) -> None:
     """
-    Javobni Mira AI uslubida harf-harf sekin chiqarish.
+    Javobni Mira AI uslubida bosqichma-bosqich chiqarish.
 
-    TAKMILLASHTIRISH:
-    - Oldingi: So'zlar bitta-bitta chiqardi (word-level)
-    - Yangi: Harflar bitta-bitta chiqadi (character-level) ✨
-    - Tezlik: 15-27ms har harf (tinish belgisi/bo'sh joy = tezroq)
+    TUZATISH (avvalgi bug):
+    - Eski versiya HAR HARF uchun edit_message_text chaqirardi (~40-60 so'rov/sek).
+      Telegram editMessageText uchun bitta xabarga taxminan 1 so'rov/sekund
+      chegarasi bor -> bu darhol 429 (Too Many Requests) ga olib kelardi va
+      time.sleep() bilan birga butun so'rov o'nlab soniyalarga bloklanib qolardi.
+    - Bu esa TelegramWebhookView'ni juda uzoq ushlab turardi -> Telegram javobni
+      kutolmay o'sha update'ni QAYTA yuborardi -> bot foydalanuvchiga bir xabarni
+      bir necha marta "takrorlagandek" ko'rinardi (masalan uchinchi "salom"dan
+      keyingi holat).
+    - Yangi versiya: matn so'z-so'z yig'iladi, lekin Telegram'ga edit so'rovi
+      FAQAT ~0.7 soniyada bir marta yuboriladi (vaqt bo'yicha throttle).
+      Natijada bor-yo'g'i bir necha o'nlab so'rov ketadi, rate-limit va
+      bloklanish muammosi yo'qoladi, animatsiya effekti esa saqlanadi.
     """
     import time
 
@@ -368,7 +377,6 @@ def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz', rep
 
     # Typing indicator ko'rsatish
     bot.send_chat_action(chat_id, 'typing')
-    time.sleep(0.3)  # AI javobini tayyorlash ko'rsatishi
 
     # Birinchi xabarni yuborish
     message = bot.send_message(chat_id, '...')
@@ -386,32 +394,33 @@ def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz', rep
         bot.send_message(chat_id, text, reply_markup=reply_markup)
         return
 
-    # Matnni harflarga bo'lish (CHARACTER-LEVEL streaming)
-    characters = list(text)
+    # Telegram editMessageText uchun xavfsiz oraliq (sekundlarda).
+    # ~1 so'rov/sekund chegarasidan pastroq tutish uchun 0.7s tanlandi.
+    EDIT_INTERVAL = 0.7
+
+    words = text.split(' ')
     current_text = ''
 
-    # STREAMING PARAMETRLARI
-    chars_per_update = 1  # har 1 harfda yangilash (aslida character-level)
-    base_delay = 0.025   # 25ms = optimal tezlik
+    last_edit_time = time.monotonic()
+    last_typing_action = last_edit_time
 
-    last_typing_action = time.monotonic()
+    for i, word in enumerate(words):
+        current_text += (word if i == 0 else ' ' + word)
+        is_last = (i == len(words) - 1)
 
-    for i, char in enumerate(characters):
-        current_text += char
-
-        is_last = (i == len(characters) - 1)
-        should_update = is_last or ((i + 1) % chars_per_update == 0)
+        now = time.monotonic()
 
         # Typing indicatorni har 4-5 sekunddan keyin qayta yuborish
-        now = time.monotonic()
         if now - last_typing_action > 4.5:
             try:
                 bot.send_chat_action(chat_id, 'typing')
-                last_typing_action = now
-            except:
+            except Exception:
                 pass
+            last_typing_action = now
 
-        if should_update:
+        # Faqat EDIT_INTERVAL o'tgandan keyin YOKI oxirgi so'zda edit qilamiz —
+        # bu Telegram rate-limit'ini buzmaydi va webhook'ni uzoq bloklamaydi.
+        if is_last or (now - last_edit_time >= EDIT_INTERVAL):
             try:
                 bot.edit_message_text(
                     chat_id=chat_id,
@@ -419,18 +428,9 @@ def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz', rep
                     text=current_text,
                 )
             except Exception:
-                # Agar edit qilib bo'lmasa, davom etamiz
+                # 429 yoki "message is not modified" bo'lishi mumkin — davom etamiz
                 pass
-
-            # Harf-harf kutish (bo'sh joy/tinish belgisi = tezroq)
-            if char in ' .,;:!?\n':
-                delay = base_delay * 0.6  # 15ms - bo'sh joy, tezroq
-            elif char.isupper():
-                delay = base_delay * 1.1  # 27ms - bosh harf, sekinroq
-            else:
-                delay = base_delay  # 25ms - normal harf
-
-            time.sleep(delay)
+            last_edit_time = now
 
     # Oxirgi tugmalarni qo'shish (agar kerak bo'lsa)
     if reply_markup:

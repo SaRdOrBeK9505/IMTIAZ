@@ -274,6 +274,35 @@ def cleanup_old_notifications() -> int:
     return deleted
 
 
+# ─── Telegram webhook ─────────────────────────────────────────────────────────
+
+@shared_task(
+    bind=True,
+    max_retries=2,
+    default_retry_delay=5,
+    name='notifications.process_telegram_update',
+)
+def process_telegram_update(self, update: dict) -> None:
+    """
+    Telegram update'ini FONDA qayta ishlaydi.
+
+    MUHIM: bu task TelegramWebhookView'dan chaqiriladi. Sabab — AI javobi
+    kutish + harf/so'z-so'z streaming bir necha soniya (ba'zan o'nlab soniya)
+    davom etishi mumkin. Agar bu ish webhook so'rovi ICHIDA (sinxron) bajarilsa,
+    Telegram javobni kutolmay timeout bo'ladi va O'SHA UPDATE'NI QAYTA YUBORADI —
+    natijada bot foydalanuvchiga xuddi bir xabarni ikki-uch marta yuborgandek,
+    "takrorlayotgandek" ko'rinadi. Endi webhook update'ni shu yerga topshirib
+    darhol 200 OK qaytaradi, og'ir ish esa Celery worker'da, alohida bajariladi.
+    """
+    from .bot_handlers import handle_update
+
+    try:
+        handle_update(update)
+    except Exception as exc:
+        logger.exception('Telegram update qayta ishlashda xato (celery task)')
+        raise self.retry(exc=exc)
+
+
 # ─── Yordamchi funksiya ───────────────────────────────────────────────────────
 
 def notify_user(

@@ -133,10 +133,15 @@ class TelegramWebhookView(APIView):
         if not isinstance(update, dict):
             return Response({'ok': True})
 
+        # MUHIM: handle_update'ni bu yerda SINXRON chaqirmaymiz.
+        # AI javobi + streaming bir necha soniya cho'zilishi mumkin, va agar
+        # Telegram webhook javobini vaqtida ololmasa, update'ni QAYTA yuboradi —
+        # bu xabarlarning "takrorlanib" ko'rinishiga sabab bo'ladi. Shuning uchun
+        # og'ir ishni Celery navbatiga topshirib, darhol 200 OK qaytaramiz.
         try:
-            from .bot_handlers import handle_update
-            handle_update(update)
+            from .tasks import process_telegram_update
+            process_telegram_update.delay(update)
         except Exception:
-            logger.exception('Telegram update qayta ishlashda xato')
+            logger.exception('Telegram update navbatga qo\'yishda xato')
 
         return Response({'ok': True})
