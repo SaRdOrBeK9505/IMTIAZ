@@ -407,21 +407,29 @@ def _send_live_streaming_response(
     Qaytaradi: oxirgi 'done' yoki 'error' eventining dict'i — chaqiruvchi kod
     shu orqali `requires_confirmation` yoki xatoni tekshiradi.
     """
-    import re
     import threading
     import time
 
     MAX_MSG_LEN = 4000        # Telegram 4096 limitidan xavfsiz masofa
     EDIT_INTERVAL = 0.9        # editMessageText so'rovlari orasidagi minimal oraliq
-    # MUHIM: reveal endi BELGI emas, SO'Z darajasida ishlaydi. Belgi darajasida
-    # kesish so'zni yarmida bo'lib yuborishi mumkin edi (masalan "salomat" ->
-    # "salo" -> "salom" -> "salomat" — g'alati miltillash). So'z chegarasida
-    # ochish esa aynan Claude/ChatGPT interfeysidagi kabi tabiiy ko'rinadi.
-    TYPING_WPS = 5             # taxminan necha SO'Z/soniya tezlikda "yoziladi"
-    WORDS_PER_STEP = max(1, round(TYPING_WPS * EDIT_INTERVAL))
-    # Har so'zni bo'sh joyi (yoki qator ko'chirish) bilan birga ushlab qolamiz,
-    # shunda formatlash (bo'shliqlar, \n) yo'qolmaydi.
-    _WORD_RE = re.compile(r'\S+\s*', re.UNICODE)
+    TYPING_CPS = 24            # taxminan tezlik — belgi/soniya (faqat animatsiya sur'ati uchun)
+    REVEAL_STEP = max(8, int(TYPING_CPS * EDIT_INTERVAL))
+
+    def _safe_boundary(text: str) -> int:
+        """
+        MUHIM: so'z HECH QACHON o'rtadan kesilmasligi kerak (masalan "platforma"
+        -> "plat" keyin "forma" bo'lib chiqmasligi kerak). Buning uchun matnning
+        oxiridan orqaga qarab BIRINCHI bo'shliq (probel/qator ko'chirish)
+        belgisigacha bo'lgan uzunlikni qaytaramiz — bu "xavfsiz chegara".
+        Undan keyingi qism hali TO'LIQ kelmagan so'z bo'lishi mumkin, shuning
+        uchun stream tugamaguncha bu chegaradan OSHIB ketish mumkin emas.
+        Agar hali birorta ham bo'shliq bo'lmasa (masalan hali bitta uzun so'z
+        kelayotgan bo'lsa), 0 qaytariladi — ya'ni hali hech narsa ko'rsatilmaydi.
+        """
+        for i in range(len(text) - 1, -1, -1):
+            if text[i].isspace():
+                return i + 1
+        return 0
 
     # --- Producer va consumer o'rtasida ulashiladigan holat ---
     state_lock = threading.Lock()
@@ -466,7 +474,6 @@ def _send_live_streaming_response(
 
     message_id: int | None = None
     revealed_len = 0          # full_text ichida hozirgacha Telegram'ga "ochilgan" uzunlik (belgi)
-    revealed_words = 0         # nechta TO'LIQ so'z ochilgani
     block_start = 0            # joriy Telegram xabari full_text ichida qayerdan boshlanadi
     last_edit_time = 0.0
     last_typing_action = time.monotonic()
@@ -484,21 +491,16 @@ def _send_live_streaming_response(
             full_text = state['full_text']
             is_done = state['done']
 
-        # Matnni SO'ZLARGA bo'lamiz (har biri o'ziga tegishli bo'shliq/qator
-        # ko'chirish bilan birga). Agar stream hali tugamagan bo'lsa va matn
-        # bo'shliq bilan tugamasa — oxirgi so'z hali TO'LIQ kelmagan bo'lishi
-        # mumkin (masalan "salo" keyin "mat" keladi), shuni "to'liqmas" deb
-        # hisoblab, hozircha ko'rsatmaymiz — aks holda so'z yarmida "miltillab"
-        # ko'rinadi.
-        words = _WORD_RE.findall(full_text)
-        if words and not is_done and not full_text[-1].isspace():
-            words = words[:-1]
+        # Stream tugagan bo'lsa — endi hech narsani kutishning hojati yo'q,
+        # qolgan hammasini (oxirgi so'zi bilan birga) chiqarish mumkin.
+        # Tugamagan bo'lsa — faqat OXIRGI TO'LIQ bo'shliqqacha bo'lgan qism
+        # "xavfsiz" — undan keyingisi hali kelayotgan so'z bo'lishi mumkin.
+        safe_len = len(full_text) if is_done else _safe_boundary(full_text)
+        target_len = min(safe_len, revealed_len + REVEAL_STEP)
 
-        target_words = min(len(words), revealed_words + WORDS_PER_STEP)
-
-        # Hali ochiladigan to'liq so'z yo'q va stream ham tugamagan —
+        # Hali ochiladigan yangi (TO'LIQ) matn yo'q va stream ham tugamagan —
         # faqat "yozyapti..." holatini yangilab, qisqa kutamiz.
-        if target_words == revealed_words and not is_done:
+        if target_len == revealed_len and not is_done:
             now = time.monotonic()
             if now - last_typing_action > 3.0:
                 try:
@@ -509,14 +511,17 @@ def _send_live_streaming_response(
             time.sleep(0.15)
             continue
 
-        if target_words > revealed_words:
-            revealed_words = target_words
-            revealed_len = sum(len(w) for w in words[:revealed_words])
+        if target_len > revealed_len:
+            revealed_len = target_len
             block_text = full_text[block_start:revealed_len]
 
             # Joriy blok Telegram limitidan oshsa — yakunlab, yangisini boshlaymiz.
+            # Bo'lish nuqtasini ham iloji boricha so'z chegarasiga moslashtiramiz
+            # (aks holda 4000-belgi chegarasi so'zni o'rtadan kesib yuborishi mumkin).
             if len(block_text) > MAX_MSG_LEN:
-                cut = block_start + MAX_MSG_LEN
+                hard_cut = block_start + MAX_MSG_LEN
+                nearest_space = full_text.rfind(' ', block_start, hard_cut)
+                cut = nearest_space + 1 if nearest_space > block_start else hard_cut
                 _finalize_block(full_text[block_start:cut])
                 block_start = cut
                 message_id = None
@@ -571,6 +576,27 @@ def _send_live_streaming_response(
                 )
             except Exception:
                 pass
+
+    # MUHIM: agar stream XATO bilan tugagan bo'lsa-yu, foydalanuvchiga
+    # allaqachon qisman matn ko'rsatilgan bo'lsa (masalan "...va m" kabi
+    # so'z o'rtasida uzilib qolgan) — o'sha xabarni shunday "muzlagan"
+    # holda qoldirmaymiz, chunki bu formatlash xatosidek ko'rinadi. Buning
+    # o'rniga xabarga aniq ogohlantirish qo'shib qo'yamiz, shunda
+    # foydalanuvchi bu tasodifiy uzilish ekanini tushunadi.
+    with state_lock:
+        stream_errored = state['final_event'] is not None and state['final_event'].get('type') == 'error'
+        stream_errored = stream_errored or state['producer_error'] is not None
+    if message_id and full_text.strip() and stream_errored:
+        note = "\n\n⚠️ <i>Ulanish uzilib qoldi, javob to'liq bo'lmagan bo'lishi mumkin. Iltimos, savolingizni qayta yuboring.</i>"
+        try:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=final_block_text + note,
+                parse_mode='HTML',
+            )
+        except Exception:
+            logger.exception('Xato ogohlantirish xabarini qo\'shishda muammo: chat_id=%s', chat_id)
 
     if producer_error and not final_event:
         final_event = {'type': 'error', 'message': str(producer_error)}
