@@ -363,7 +363,7 @@ def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz', rep
     """
     Javobni Mira AI uslubida bosqichma-bosqich chiqarish.
 
-    TUZATISH (avvalgi bug):
+    TUZATISH #1 (avvalgi bug):
     - Eski versiya HAR HARF uchun edit_message_text chaqirardi (~40-60 so'rov/sek).
       Telegram editMessageText uchun bitta xabarga taxminan 1 so'rov/sekund
       chegarasi bor -> bu darhol 429 (Too Many Requests) ga olib kelardi va
@@ -376,6 +376,16 @@ def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz', rep
       FAQAT ~0.7 soniyada bir marta yuboriladi (vaqt bo'yicha throttle).
       Natijada bor-yo'g'i bir necha o'nlab so'rov ketadi, rate-limit va
       bloklanish muammosi yo'qoladi, animatsiya effekti esa saqlanadi.
+
+    TUZATISH #2 (bu versiyada qo'shildi):
+    - AI javobi 4096 belgidan (Telegram xabar limiti) uzun bo'lsa, oldingi versiya
+      edit_message_text'ga uzun matn yuborib xatolikka uchrardi va streaming
+      "..." holatida to'xtab qolardi (except: pass uni yutib yuborardi, lekin
+      foydalanuvchi hech qachon to'liq javobni ko'rmasdi).
+    - Endi matn avval MAX_MSG_LEN bo'yicha bloklarga bo'linadi. Har bir blok
+      o'z alohida xabarida so'z-so'z streaming qilib chiqariladi, ketma-ket.
+      Tugmalar (reply_markup) faqat ENG OXIRGI blokning oxirgi xabariga
+      qo'shiladi.
     """
     import time
 
@@ -387,73 +397,82 @@ def _send_streaming_response(bot, chat_id: int, text: str, lang: str = 'uz', rep
         bot.send_message(chat_id, text, reply_markup=reply_markup)
         return
 
-    # Typing indicator ko'rsatish
     bot.send_chat_action(chat_id, 'typing')
 
-    # Birinchi xabarni yuborish
-    message = bot.send_message(chat_id, '...')
-
-    # message_id olib olish (turli API versiyalari uchun)
-    if isinstance(message, dict):
-        message_id = message.get('message_id')
-    elif isinstance(message, int):
-        message_id = message
-    else:
-        message_id = None
-
-    if not message_id:
-        # Agar message_id olinmasa, oddiy yuborish
-        bot.send_message(chat_id, text, reply_markup=reply_markup)
-        return
-
+    # Telegram xabar limiti (4096) dan xavfsiz masofada bo'lish uchun 4000 belgi
+    MAX_MSG_LEN = 4000
     # Telegram editMessageText uchun xavfsiz oraliq (sekundlarda).
     # ~1 so'rov/sekund chegarasidan pastroq tutish uchun 0.7s tanlandi.
     EDIT_INTERVAL = 0.7
 
-    words = text.split(' ')
-    current_text = ''
+    chunks = [text[i:i + MAX_MSG_LEN] for i in range(0, len(text), MAX_MSG_LEN)]
 
-    last_edit_time = time.monotonic()
-    last_typing_action = last_edit_time
+    last_typing_action = time.monotonic()
 
-    for i, word in enumerate(words):
-        current_text += (word if i == 0 else ' ' + word)
-        is_last = (i == len(words) - 1)
+    for chunk_index, chunk_text in enumerate(chunks):
+        is_last_chunk = (chunk_index == len(chunks) - 1)
 
-        now = time.monotonic()
+        # Har bir blok uchun alohida "..." xabari boshlanadi
+        message = bot.send_message(chat_id, '...')
 
-        # Typing indicatorni har 4-5 sekunddan keyin qayta yuborish
-        if now - last_typing_action > 4.5:
+        if isinstance(message, dict):
+            message_id = message.get('message_id')
+        elif isinstance(message, int):
+            message_id = message
+        else:
+            message_id = None
+
+        if not message_id:
+            # message_id olinmasa, shu blokni oddiy yuborib, keyingi blokka o'tamiz
+            bot.send_message(
+                chat_id,
+                chunk_text,
+                reply_markup=reply_markup if is_last_chunk else None,
+            )
+            continue
+
+        words = chunk_text.split(' ')
+        current_text = ''
+        last_edit_time = time.monotonic()
+
+        for i, word in enumerate(words):
+            current_text += (word if i == 0 else ' ' + word)
+            is_last_word = (i == len(words) - 1)
+
+            now = time.monotonic()
+
+            # Typing indicatorni har 4-5 sekunddan keyin qayta yuborish
+            if now - last_typing_action > 4.5:
+                try:
+                    bot.send_chat_action(chat_id, 'typing')
+                except Exception:
+                    pass
+                last_typing_action = now
+
+            # Faqat EDIT_INTERVAL o'tgandan keyin YOKI oxirgi so'zda edit qilamiz —
+            # bu Telegram rate-limit'ini buzmaydi va webhook'ni uzoq bloklamaydi.
+            if is_last_word or (now - last_edit_time >= EDIT_INTERVAL):
+                try:
+                    bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=current_text,
+                    )
+                except Exception:
+                    # 429 yoki "message is not modified" bo'lishi mumkin — davom etamiz
+                    pass
+                last_edit_time = now
+
+        # Tugmalarni faqat eng oxirgi blokning oxirgi xabariga qo'shamiz
+        if is_last_chunk and reply_markup:
             try:
-                bot.send_chat_action(chat_id, 'typing')
-            except Exception:
-                pass
-            last_typing_action = now
-
-        # Faqat EDIT_INTERVAL o'tgandan keyin YOKI oxirgi so'zda edit qilamiz —
-        # bu Telegram rate-limit'ini buzmaydi va webhook'ni uzoq bloklamaydi.
-        if is_last or (now - last_edit_time >= EDIT_INTERVAL):
-            try:
-                bot.edit_message_text(
+                bot.edit_message_reply_markup(
                     chat_id=chat_id,
                     message_id=message_id,
-                    text=current_text,
+                    reply_markup=reply_markup,
                 )
             except Exception:
-                # 429 yoki "message is not modified" bo'lishi mumkin — davom etamiz
                 pass
-            last_edit_time = now
-
-    # Oxirgi tugmalarni qo'shish (agar kerak bo'lsa)
-    if reply_markup:
-        try:
-            bot.edit_message_reply_markup(
-                chat_id=chat_id,
-                message_id=message_id,
-                reply_markup=reply_markup,
-            )
-        except Exception:
-            pass
 
 
 def _handle_lead_status_callback(callback: dict) -> bool:
