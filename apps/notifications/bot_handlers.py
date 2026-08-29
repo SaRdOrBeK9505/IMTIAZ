@@ -465,6 +465,7 @@ def _send_live_streaming_response(
                 state['done'] = True
 
     producer_thread = threading.Thread(target=_producer, daemon=True)
+    stream_start_ts = time.monotonic()
     producer_thread.start()
 
     try:
@@ -477,6 +478,9 @@ def _send_live_streaming_response(
     block_start = 0            # joriy Telegram xabari full_text ichida qayerdan boshlanadi
     last_edit_time = 0.0
     last_typing_action = time.monotonic()
+    first_chunk_logged = False
+    edit_count = 0
+    edit_total_time = 0.0
 
     def _finalize_block(text: str) -> None:
         """Joriy xabarni to'liq matn bilan yakunlab, yangi blokka o'tish uchun."""
@@ -496,7 +500,20 @@ def _send_live_streaming_response(
         # Tugamagan bo'lsa — faqat OXIRGI TO'LIQ bo'shliqqacha bo'lgan qism
         # "xavfsiz" — undan keyingisi hali kelayotgan so'z bo'lishi mumkin.
         safe_len = len(full_text) if is_done else _safe_boundary(full_text)
-        target_len = min(safe_len, revealed_len + REVEAL_STEP)
+
+        if not first_chunk_logged and full_text:
+            first_chunk_logged = True
+            logger.info(
+                'STREAM TIMING: birinchi chunk %.2f soniyada keldi (chat_id=%s)',
+                time.monotonic() - stream_start_ts, chat_id,
+            )
+
+        # MUHIM: endi sun'iy "necha belgi/soniya" cheklovi YO'Q. Har safar
+        # matnda mavjud bo'lgan BARCHA xavfsiz (to'liq so'zlardan iborat)
+        # qismi ko'rsatiladi — tezlik endi faqat AI qanchalik tez yozishiga
+        # va quyidagi EDIT_INTERVAL (Telegram flood-limitiga mos chastota)ga
+        # bog'liq, bizning sun'iy tormozimizga emas.
+        target_len = safe_len
 
         # Hali ochiladigan yangi (TO'LIQ) matn yo'q va stream ham tugamagan —
         # faqat "yozyapti..." holatini yangilab, qisqa kutamiz.
@@ -529,14 +546,28 @@ def _send_live_streaming_response(
 
             if message_id is None:
                 if block_text:
+                    _t0 = time.monotonic()
                     msg = bot.send_message(chat_id, block_text)
+                    logger.info(
+                        'STREAM TIMING: send_message %.2f soniya oldi, umumiy %.2f soniyada (chat_id=%s)',
+                        time.monotonic() - _t0, time.monotonic() - stream_start_ts, chat_id,
+                    )
                     message_id = msg.get('message_id') if isinstance(msg, dict) else msg
                     last_edit_time = time.monotonic()
             else:
                 now = time.monotonic()
                 if now - last_edit_time >= EDIT_INTERVAL:
                     try:
+                        _t0 = time.monotonic()
                         bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=block_text)
+                        _dt = time.monotonic() - _t0
+                        edit_count += 1
+                        edit_total_time += _dt
+                        if _dt > 1.0:
+                            logger.warning(
+                                'STREAM TIMING: edit_message_text SEKIN — %.2f soniya (chat_id=%s)',
+                                _dt, chat_id,
+                            )
                     except Exception:
                         # 429 yoki "message is not modified" bo'lishi mumkin — davom etamiz
                         pass
@@ -551,6 +582,11 @@ def _send_live_streaming_response(
                 last_typing_action = now
 
         if is_done and revealed_len >= len(full_text):
+            logger.info(
+                'STREAM TIMING: yakun — umumiy %.2f soniya, %d ta edit, o\'rtacha edit %.2f soniya (chat_id=%s)',
+                time.monotonic() - stream_start_ts, edit_count,
+                (edit_total_time / edit_count) if edit_count else 0.0, chat_id,
+            )
             break
 
         time.sleep(max(0.0, EDIT_INTERVAL - 0.05))
