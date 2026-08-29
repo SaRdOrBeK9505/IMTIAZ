@@ -313,23 +313,21 @@ def _handle_service_callback(bot, chat_id: int, message_id: int | None, data: st
 
     prompt_text = prompt_data.get(lang, prompt_data.get('uz', ''))
 
-    # Avval prompt matnini ko'rsatamiz va ESKI inline tugmalarni tozalaymiz.
+    # ESKI inline tugmalarni tozalaymiz (agar message_id bo'lsa).
     # MUHIM: edit_message_text ga reply_markup aniq berilmasa, Telegram oldingi
     # xabardagi inline_keyboard'ni (8 ta xizmat tugmasi) saqlab qoladi — shuning
     # uchun bo'sh reply_markup={'inline_keyboard': []} yuboramiz.
+    # Prompt textni alohida yubormaymiz - AI javobi yetarli bo'ladi.
+    # Faqat inline keyboard'ni tozalaymiz, matnni o'zgartirmaymiz.
     if message_id:
         try:
-            bot.edit_message_text(
+            bot.edit_message_reply_markup(
                 chat_id=chat_id,
                 message_id=message_id,
-                text=prompt_text,
-                parse_mode='HTML',
                 reply_markup={'inline_keyboard': []},
             )
         except Exception:
-            logger.exception('Xizmat prompt matnini tahrirlashda xatolik: chat_id=%s', chat_id)
-    else:
-        bot.send_message(chat_id, prompt_text, parse_mode='HTML')
+            logger.exception('Inline keyboardni tozalashda xatolik: chat_id=%s', chat_id)
 
     bot.send_chat_action(chat_id, 'typing')
 
