@@ -411,8 +411,11 @@ def _send_live_streaming_response(
     import time
 
     MAX_MSG_LEN = 4000        # Telegram 4096 limitidan xavfsiz masofa
-    EDIT_INTERVAL = 0.4        # editMessageText so'rovlari orasidagi minimal oraliq
-    TYPING_CPS = 100           # taxminan tezlik — belgi/soniya (faqat animatsiya sur'ati uchun)
+    EDIT_INTERVAL = 1.0        # Telegram'ning o'zi ~1 edit/soniya/chatdan tezini qabul
+                               # qilmaydi (429 qaytaradi) — buni pasaytirish tezlikni
+                               # OSHIRMAYDI, faqat behuda so'rovlarni ko'paytiradi.
+    TYPING_CPS = 100           # tezlikni shu orqali oshiring — har edit'da ko'proq
+                               # belgi chiqadi, shuning uchun sakrashlar kattaroq bo'ladi
     REVEAL_STEP = max(8, int(TYPING_CPS * EDIT_INTERVAL))
 
     def _safe_boundary(text: str) -> int:
