@@ -134,9 +134,7 @@ def _handle_message(message: dict) -> None:
         # MUHIM: ai_service.chat() o'rniga chat_stream() ishlatiladi — bu AI'dan
         # matnni TAYYOR BO'LGANDAN KEYIN emas, balki u GENERATSIYA QILINAYOTGAN
         # paytda, chunk-chunk (real vaqtda) beradi. Shu sabab Telegram xabari
-        # haqiqiy Mira/Claude uslubidagi streaming bilan yangilanadi — sun'iy
-        # time.sleep() kerak emas, chunki tabiiy generatsiya kechikishining o'zi
-        # animatsiyani hosil qiladi.
+        # haqiqiy Mira/Claude uslubidagi streaming bilan yangilanadi.
         event_stream = ai_service.chat_stream(user=user, message=text, for_bot=True)
         result = _send_live_streaming_response(bot, chat_id, event_stream)
 
@@ -355,10 +353,6 @@ def _handle_service_callback(bot, chat_id: int, message_id: int | None, data: st
     # MUHIM: AI chaqiruvi try/except ichiga olindi. Avval bu yerda himoya yo'q edi —
     # AIAssistantService xatolik bersa, jarayon jim tugab, foydalanuvchi hech qanday
     # javob olmasdi (aynan "Xizmatlar" bosilgach reply chiqmasligi shundan edi).
-    #
-    # chat() o'rniga chat_stream() ishlatiladi — natijada javob AI tomonidan
-    # generatsiya qilinayotgan paytda, haqiqiy vaqtda Telegram xabariga chiqadi
-    # (Mira/Claude uslubidagi haqiqiy streaming, sun'iy kechikishsiz).
     try:
         ai_service = AIAssistantService()
         event_stream = ai_service.chat_stream(user=user, message=full_message, for_bot=True)
@@ -384,130 +378,170 @@ def _send_live_streaming_response(
     reply_markup: dict | None = None,
 ) -> dict | None:
     """
-    HAQIQIY (haqiqiy vaqtli) streaming — Mira AI / Claude uslubida.
+    HAQIQIY (haqiqiy vaqtli) streaming — producer/consumer naqshi bilan.
 
-    Bu funksiya avvalgi "soxta streaming"ni almashtiradi. Avvalgi versiyada
-    AI'dan javob TO'LIQ tayyor holda kelardi (ai_service.chat() — bloklovchi
-    chaqiruv), keyin tayyor matn sun'iy ravishda so'zlarga bo'lib, sun'iy
-    time.sleep() bilan "yozilayotgandek" ko'rsatishga harakat qilinardi.
-    Bu — aldov effekt, va uni to'g'ri sozlash qiyin (yoki juda tez —
-    animatsiya umuman ko'rinmaydi, yoki sun'iy sekin — foydalanuvchini
-    keraksiz kutishga majbur qiladi).
+    MUAMMO: OpenAI ba'zan javobni juda tez (bir necha soniyada butunlay)
+    qaytaradi. Avvalgi versiyada throttle (EDIT_INTERVAL) davomida deyarli
+    barcha chunk'lar kelib ulguradi va natijada foydalanuvchi "yozilish"ni
+    emas, bitta katta matn "dump"ini ko'radi — chunki reveal tezligi
+    to'g'ridan-to'g'ri tarmoq/AI tezligiga bog'liq edi.
 
-    Haqiqiy Mira/Claude qanday ishlaydi: AI javobni token-token GENERATSIYA
-    qiladi, va har bir token tayyor bo'lishi bilan darhol chiqariladi. Matn
-    "sekin ochiladi", chunki u ANIQ SHU PAYTDA yaratilyapti — bu tabiiy
-    kechikish, hech qanday sun'iy sleep() shart emas.
+    YECHIM: ikkita mustaqil oqim.
+      1) PRODUCER (fon thread) — event_stream'ni IMKON QADAR TEZ o'qiydi va
+         kelgan matnni umumiy `state['full_text']` bufer'iga qo'shib boradi.
+         Tarmoq/AI qanchalik tez bo'lmasin, bu yerda hech qanday sun'iy
+         kechikish yo'q.
+      2) CONSUMER (shu funksiyaning asosiy oqimi) — bufer'dagi matnni
+         o'ZINING belgilagan doimiy tezligida (TYPING_CPS — belgi/soniya)
+         Telegram xabariga chiqarib boradi. Reveal tezligi endi AI tezligiga
+         EMAS, balki shu konstantaga bog'liq — shuning uchun animatsiya
+         har doim bir xil, tabiiy "yozilish" tuyg'usini beradi.
 
-    `event_stream` — AIAssistantService.chat_stream() natijasi (generator).
-    U quyidagi event turlarini beradi (apps/ai_assistant/services.py va
-    apps/ai_assistant/views.py'dagi SSE endpoint bilan bir xil kontrakt):
-        {'type': 'chunk', 'text': '...'}                         — yangi matn bo'lagi
-        {'type': 'tool_processing' | 'tool_start' | 'tool_end', ...} — AI tool chaqiryapti
-        {'type': 'done', 'content': ..., 'requires_confirmation': ..., ...} — yakun
-        {'type': 'error', 'message': '...'}                       — xato
+    `event_stream` — AIAssistantService.chat_stream() natijasi (generator),
+    quyidagi event turlarini beradi:
+        {'type': 'chunk', 'text': '...'}
+        {'type': 'tool_processing' | 'tool_start' | 'tool_end', ...}
+        {'type': 'done', 'content': ..., 'requires_confirmation': ..., ...}
+        {'type': 'error', 'message': '...'}
 
     Qaytaradi: oxirgi 'done' yoki 'error' eventining dict'i — chaqiruvchi kod
     shu orqali `requires_confirmation` yoki xatoni tekshiradi.
     """
+    import threading
     import time
 
-    # Telegram xabar limiti (4096) dan xavfsiz masofada bo'lish uchun 4000 belgi
-    MAX_MSG_LEN = 4000
-    # Telegram editMessageText uchun xavfsiz oraliq (sekundlarda) —
-    # ~1 so'rov/sekund chegarasidan pastroq tutish uchun 0.6s tanlandi.
-    EDIT_INTERVAL = 0.6
+    MAX_MSG_LEN = 4000        # Telegram 4096 limitidan xavfsiz masofa
+    EDIT_INTERVAL = 0.6        # editMessageText so'rovlari orasidagi minimal oraliq
+    TYPING_CPS = 28            # "inson kabi" yozish tezligi — belgi/soniya (sozlanadigan)
+    REVEAL_STEP = max(1, int(TYPING_CPS * EDIT_INTERVAL))
 
-    message_id: int | None = None
-    block_text = ''
-    last_edit_time = 0.0
-    last_typing_action = time.monotonic()
-    final_event: dict | None = None
+    # --- Producer va consumer o'rtasida ulashiladigan holat ---
+    state_lock = threading.Lock()
+    state = {
+        'full_text': '',       # AI'dan hozirgacha kelgan TO'LIQ (xom) matn
+        'done': False,         # stream producer tomonidan tugatildimi
+        'final_event': None,   # oxirgi 'done'/'error' eventi
+        'producer_error': None,
+    }
+
+    def _producer():
+        """Fon oqimi: event_stream'ni tezda so'rib, bufer'ga yozadi."""
+        try:
+            for event in event_stream:
+                etype = event.get('type')
+                if etype == 'chunk':
+                    text = event.get('text') or ''
+                    if text:
+                        with state_lock:
+                            state['full_text'] += text
+                elif etype in ('done', 'error'):
+                    with state_lock:
+                        state['final_event'] = event
+                # tool_processing/tool_start/tool_end — hozircha alohida
+                # holat sifatida saqlanmaydi, consumer o'zining "typing..."
+                # indikatorini mustaqil boshqaradi.
+        except Exception as exc:
+            logger.exception('AI stream producer xatosi: chat_id=%s, %s', chat_id, exc)
+            with state_lock:
+                state['producer_error'] = exc
+        finally:
+            with state_lock:
+                state['done'] = True
+
+    producer_thread = threading.Thread(target=_producer, daemon=True)
+    producer_thread.start()
 
     try:
         bot.send_chat_action(chat_id, 'typing')
     except Exception:
         pass
 
-    try:
-        for event in event_stream:
-            etype = event.get('type')
+    message_id: int | None = None
+    revealed_len = 0     # full_text ichida hozirgacha Telegram'ga "ochilgan" uzunlik
+    block_start = 0       # joriy Telegram xabari full_text ichida qayerdan boshlanadi
+    last_edit_time = 0.0
+    last_typing_action = time.monotonic()
 
-            if etype in ('tool_processing', 'tool_start', 'tool_end'):
-                # AI hozircha tool (masalan qidiruv) chaqiryapti — matn hali
-                # yo'q, faqat "yozyapti..." holatini ko'rsatib turamiz.
-                now = time.monotonic()
-                if now - last_typing_action > 3.0:
-                    try:
-                        bot.send_chat_action(chat_id, 'typing')
-                    except Exception:
-                        pass
-                    last_typing_action = now
-                continue
+    def _finalize_block(text: str) -> None:
+        """Joriy xabarni to'liq matn bilan yakunlab, yangi blokka o'tish uchun."""
+        if message_id and text:
+            try:
+                bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text)
+            except Exception:
+                pass
 
-            if etype == 'chunk':
-                text = event.get('text') or ''
-                if not text:
-                    continue
+    while True:
+        with state_lock:
+            full_text = state['full_text']
+            is_done = state['done']
 
-                now = time.monotonic()
-                if now - last_typing_action > 4.5:
-                    try:
-                        bot.send_chat_action(chat_id, 'typing')
-                    except Exception:
-                        pass
-                    last_typing_action = now
+        target_len = min(len(full_text), revealed_len + REVEAL_STEP)
 
-                # Joriy blok Telegram limitidan oshib ketsa — uni yakunlab,
-                # yangi xabarda davom ettiramiz.
-                if block_text and len(block_text) + len(text) > MAX_MSG_LEN:
-                    if message_id:
-                        try:
-                            bot.edit_message_text(
-                                chat_id=chat_id, message_id=message_id, text=block_text,
-                            )
-                        except Exception:
-                            pass
-                    message_id = None
-                    block_text = ''
+        # Hali ochiladigan yangi matn yo'q va stream ham tugamagan —
+        # faqat "yozyapti..." holatini yangilab, qisqa kutamiz.
+        if target_len == revealed_len and not is_done:
+            now = time.monotonic()
+            if now - last_typing_action > 3.0:
+                try:
+                    bot.send_chat_action(chat_id, 'typing')
+                except Exception:
+                    pass
+                last_typing_action = now
+            time.sleep(0.15)
+            continue
 
-                block_text += text
+        if target_len > revealed_len:
+            revealed_len = target_len
+            block_text = full_text[block_start:revealed_len]
 
-                if message_id is None:
-                    # Birinchi chunk kelishi bilan darhol xabar yaratamiz —
-                    # foydalanuvchi javobni imkon qadar tezroq ko'ra boshlaydi.
+            # Joriy blok Telegram limitidan oshsa — yakunlab, yangisini boshlaymiz.
+            if len(block_text) > MAX_MSG_LEN:
+                cut = block_start + MAX_MSG_LEN
+                _finalize_block(full_text[block_start:cut])
+                block_start = cut
+                message_id = None
+                block_text = full_text[block_start:revealed_len]
+
+            if message_id is None:
+                if block_text:
                     msg = bot.send_message(chat_id, block_text)
                     message_id = msg.get('message_id') if isinstance(msg, dict) else msg
                     last_edit_time = time.monotonic()
-                    continue
-
+            else:
                 now = time.monotonic()
                 if now - last_edit_time >= EDIT_INTERVAL:
                     try:
-                        bot.edit_message_text(
-                            chat_id=chat_id, message_id=message_id, text=block_text,
-                        )
+                        bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=block_text)
                     except Exception:
                         # 429 yoki "message is not modified" bo'lishi mumkin — davom etamiz
                         pass
                     last_edit_time = now
 
-            elif etype in ('done', 'error'):
-                final_event = event
+            now = time.monotonic()
+            if now - last_typing_action > 4.5:
+                try:
+                    bot.send_chat_action(chat_id, 'typing')
+                except Exception:
+                    pass
+                last_typing_action = now
 
-    except Exception as exc:
-        # AI stream o'rtasida uzilib qolsa (tarmoq xatosi va h.k.) — hozirgacha
-        # ko'rsatilgan qisman matn ekranda qoladi, xato haqida chaqiruvchiga
-        # xabar beramiz.
-        logger.exception('AI stream jarayonida uzilish: chat_id=%s, %s', chat_id, exc)
-        final_event = {'type': 'error', 'message': str(exc)}
+        if is_done and revealed_len >= len(full_text):
+            break
 
-    # Stream tugagach, joriy blokning eng oxirgi holatini albatta chiqarib
-    # qo'yamiz (throttle oralig'idan qat'i nazar) — aks holda oxirgi 1-2 so'z
-    # ko'rinmay qolishi mumkin.
-    if message_id and block_text:
+        time.sleep(max(0.0, EDIT_INTERVAL - 0.05))
+
+    producer_thread.join(timeout=5.0)
+
+    with state_lock:
+        full_text = state['full_text']
+        final_event = state['final_event']
+        producer_error = state['producer_error']
+
+    # Xavfsizlik uchun — oxirgi blokni albatta to'liq holatda chiqaramiz.
+    final_block_text = full_text[block_start:]
+    if message_id and final_block_text:
         try:
-            bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=block_text)
+            bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=final_block_text)
         except Exception:
             pass
         if reply_markup:
@@ -518,7 +552,10 @@ def _send_live_streaming_response(
             except Exception:
                 pass
 
-    # Agar hech qanday 'chunk' kelmagan bo'lsa (masalan provider chat_stream'ni
+    if producer_error and not final_event:
+        final_event = {'type': 'error', 'message': str(producer_error)}
+
+    # Agar hech qanday 'chunk' kelmagan bo'lsa (provider chat_stream'ni
     # qo'llab-quvvatlamaydi va faqat yakuniy 'done' kelgan bo'lsa) — done
     # ichidagi 'content'ni to'g'ridan-to'g'ri yuboramiz.
     if message_id is None and final_event and final_event.get('type') == 'done':
