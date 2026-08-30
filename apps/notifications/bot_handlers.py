@@ -405,10 +405,15 @@ def _send_live_streaming_response(
     final_event: dict | None = None
     last_typing_action = time.monotonic()
 
-    try:
-        bot.send_chat_action(chat_id, 'typing')
-    except Exception:
-        pass
+    # Import streaming utilities (Mira bot kabi)
+    from .bot_streaming_utils import StreamingMessage, TypingIndicator
+
+    # Streaming message manager - real-time updates 📝
+    stream_msg = StreamingMessage(bot, chat_id)
+    stream_msg.send_initial_message()
+
+    # Typing indicator - har 4-5 sekundda ⏱️
+    typing_indicator = TypingIndicator(bot, chat_id)
 
     try:
         for event in event_stream:
@@ -418,19 +423,22 @@ def _send_live_streaming_response(
                 text = event.get('text') or ''
                 if text:
                     full_text += text
+                    # Real-time message yangilash 📝
+                    stream_msg.buffer_chunk(text)
+                    # Typing indicator yuborish
+                    typing_indicator.send_if_needed()
+
+            elif etype == 'tool_processing':
+                # Tool chaqirilayotgan bo'lsa ⚙️
+                tool_calls = event.get('tool_calls', [])
+                tool_names = ', '.join([tc.get('name', '?') for tc in tool_calls])
+                status_text = f"\n\n⚙️ Amalni bajarmoqda: {tool_names}"
+                stream_msg.buffer_chunk(status_text)
+                full_text += status_text
+                typing_indicator.send_if_needed()
 
             elif etype in ('done', 'error'):
                 final_event = event
-
-            # Har 4 soniyada bir "yozyapti..." holatini yangilab turamiz —
-            # shunda foydalanuvchi bot javob tayyorlanayotganini ko'radi.
-            now = time.monotonic()
-            if now - last_typing_action > 4.0:
-                try:
-                    bot.send_chat_action(chat_id, 'typing')
-                except Exception:
-                    pass
-                last_typing_action = now
 
     except Exception as exc:
         logger.exception('AI stream jarayonida uzilish: chat_id=%s, %s', chat_id, exc)
@@ -442,8 +450,14 @@ def _send_live_streaming_response(
     if not full_text and final_event and final_event.get('type') == 'done':
         full_text = final_event.get('content') or ''
 
+    # Oxirgi yangilash va finalize
     if full_text.strip():
-        _send_split_message(bot, chat_id, full_text, reply_markup=reply_markup)
+        stream_msg.finalize()  # Message-ni finalize qilish
+    else:
+        # Agar text bo'lmasa, xatolik deylik
+        if final_event and final_event.get('type') == 'error':
+            error_text = final_event.get('message', 'Noma\'lum xatolik')
+            bot.send_message(chat_id, f"❌ Xatolik: {error_text}", parse_mode='HTML')
 
     return final_event
 
