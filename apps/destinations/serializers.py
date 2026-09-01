@@ -1,6 +1,8 @@
 """Destination serializers."""
 
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
+from typing import List, Dict
 from .models import Country, Destination, DestinationImage
 
 
@@ -76,7 +78,8 @@ class CountryWithDestinationsSerializer(serializers.ModelSerializer):
             'popular_destinations'
         ]
     
-    def get_popular_destinations(self, obj):
+    @extend_schema_field(DestinationListSerializer(many=True))
+    def get_popular_destinations(self, obj: Country) -> List[Dict]:
         """Get popular destinations for this country."""
         destinations = obj.destinations.filter(is_popular=True, is_active=True)[:5]
         return DestinationListSerializer(destinations, many=True).data

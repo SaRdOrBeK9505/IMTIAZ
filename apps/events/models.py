@@ -153,16 +153,30 @@ class EventRegistration(BaseModel):
         super().save(*args, **kwargs)
     
     def confirm(self):
-        """Confirm registration and update event capacity."""
+        """Confirm registration and update event capacity with race condition protection."""
         if self.status != self.Status.PENDING:
             raise ValueError('Faqat kutilayotgan ro\'yxatlarni tasdiqlash mumkin')
         
-        self.status = self.Status.CONFIRMED
-        self.save(update_fields=['status', 'updated_at'])
+        from django.db import transaction
         
-        # Update event capacity
-        self.event.available_tickets -= self.ticket_count
-        self.event.save(update_fields=['available_tickets', 'updated_at'])
+        with transaction.atomic():
+            # Lock the event row to prevent race conditions
+            event = Event.objects.select_for_update().get(id=self.event.id)
+            
+            # Double-check capacity after acquiring lock
+            if event.available_tickets < self.ticket_count:
+                raise ValueError(
+                    f'Yetarli chipta yo\'q. Qolgan: {event.available_tickets}, '
+                    f'So\'ralgan: {self.ticket_count}'
+                )
+            
+            # Update registration status
+            self.status = self.Status.CONFIRMED
+            self.save(update_fields=['status', 'updated_at'])
+            
+            # Update event capacity
+            event.available_tickets -= self.ticket_count
+            event.save(update_fields=['available_tickets', 'updated_at'])
     
     def cancel(self):
         """Cancel registration and restore event capacity."""

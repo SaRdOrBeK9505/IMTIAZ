@@ -28,12 +28,13 @@ class EventSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     @extend_schema_field(serializers.DictField())
-    def get_venue(self, obj) -> dict:
+    def get_venue(self, obj: Event) -> dict:
         if obj.branch:
             return {'name': obj.branch.name, 'address': obj.branch.address}
         return {'name': obj.venue_name, 'address': obj.venue_address}
     
-    def get_registration_count(self, obj):
+    @extend_schema_field(serializers.IntegerField())
+    def get_registration_count(self, obj: Event) -> int:
         """Get total confirmed registrations."""
         return obj.registrations.filter(status=EventRegistration.Status.CONFIRMED).count()
 

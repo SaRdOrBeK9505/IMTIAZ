@@ -13,6 +13,7 @@ from .models import BonusCategory, UserBonus
 from .serializers import (
     BonusCategorySerializer,
     BonusQRScanSerializer,
+    BonusValidationResponseSerializer,
     UserBonusSerializer,
 )
 from .services import QRCodeService
@@ -140,6 +141,85 @@ class GenerateQRCodeView(APIView):
                 {'error': 'Bonus topilmadi'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+
+@extend_schema(
+    tags=[_USER_TAG],
+    summary='Bonusni oldindan tekshirish (pre-check)',
+    description='Bonus muddati tugaganmi yoki ishlatilganmi - checkout oldin tekshirish.',
+    responses={
+        200: BonusValidationResponseSerializer,
+        400: BonusValidationResponseSerializer,
+        404: ErrorResponseSerializer,
+    },
+)
+class ValidateBonusView(APIView):
+    """GET /api/bonuses/{id}/validate/ — Pre-check bonus validity before checkout."""
+    
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, pk):
+        """Check if bonus is valid without marking it as used."""
+        try:
+            user_bonus = UserBonus.objects.get(pk=pk, user=request.user)
+            
+            # Check if already used
+            if user_bonus.is_used:
+                return Response({
+                    'valid': False,
+                    'error': 'Bu bonus allaqachon ishlatilgan',
+                    'used_at': user_bonus.used_at.isoformat() if user_bonus.used_at else None,
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Check if bonus category is valid
+            category = user_bonus.bonus_category
+            if not category.is_valid():
+                reason = self._get_invalid_reason(category)
+                return Response({
+                    'valid': False,
+                    'error': reason,
+                    'category_valid': category.is_valid(),
+                    'category_active': category.is_active,
+                    'valid_until': category.valid_until.isoformat() if category.valid_until else None,
+                    'usage_count': category.usage_count,
+                    'max_usage_count': category.max_usage_count,
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Bonus is valid
+            return Response({
+                'valid': True,
+                'message': 'Bonus amal qiladi',
+                'bonus': {
+                    'id': user_bonus.id,
+                    'category': category.name,
+                    'service_type': category.service_type,
+                    'discount_percentage': category.discount_percentage,
+                    'discount_amount': str(category.discount_amount) if category.discount_amount else None,
+                    'min_purchase': str(category.min_purchase),
+                    'valid_until': category.valid_until.isoformat() if category.valid_until else None,
+                }
+            })
+            
+        except UserBonus.DoesNotExist:
+            return Response(
+                {'valid': False, 'error': 'Bonus topilmadi'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+    
+    def _get_invalid_reason(self, category) -> str:
+        """Get detailed reason why bonus is invalid."""
+        from django.utils import timezone
+        now = timezone.now().date()
+        
+        if not category.is_active:
+            return 'Bonus kategoriyasi faol emas'
+        if category.valid_from and now < category.valid_from:
+            return f'Bonus {category.valid_from.strftime("%d.%m.%Y")} dan boshlab amal qiladi'
+        if category.valid_until and now > category.valid_until:
+            return 'Bonus muddati tugagan'
+        if category.max_usage_count and category.usage_count >= category.max_usage_count:
+            return 'Bonus ishlatish limiti tugagan'
+        return 'Bonus amal qilmaydi'
 
 
 @extend_schema(

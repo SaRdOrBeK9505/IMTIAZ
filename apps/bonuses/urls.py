@@ -9,6 +9,7 @@ from .views import (
     GenerateQRCodeView,
     ScanBonusQRView,
     UserBonusListView,
+    ValidateBonusView,
 )
 
 router = DefaultRouter()
@@ -23,4 +24,5 @@ urlpatterns = [
     path('', UserBonusListView.as_view(), name='user-bonuses'),
     path('by-category/<str:service_type>/', BonusByCategoryView.as_view(), name='bonuses-by-category'),
     path('<uuid:pk>/qr/', GenerateQRCodeView.as_view(), name='bonus-generate-qr'),
+    path('<uuid:pk>/validate/', ValidateBonusView.as_view(), name='bonus-validate'),
 ]

@@ -91,8 +91,11 @@ class EventRegistrationListView(generics.ListAPIView):
     
     permission_classes = [IsAuthenticated]
     serializer_class = EventRegistrationSerializer
+    queryset = EventRegistration.objects.none()  # For swagger schema
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return EventRegistration.objects.none()
         return EventRegistration.objects.filter(user=self.request.user).select_related('event')
     
     @extend_schema(
@@ -170,10 +173,17 @@ class CreateEventRegistrationView(APIView):
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
 
-class CancelEventRegistrationView(APIView):
+class CancelEventRegistrationView(generics.GenericAPIView):
     """POST /api/events/registrations/{id}/cancel/ — Cancel registration."""
     
     permission_classes = [IsAuthenticated]
+    serializer_class = EventRegistrationSerializer  # For schema generation
+    queryset = EventRegistration.objects.none()  # For swagger schema
+    
+    def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return EventRegistration.objects.none()
+        return EventRegistration.objects.filter(user=self.request.user).select_related('event')
     
     @extend_schema(
         tags=[_TAG],

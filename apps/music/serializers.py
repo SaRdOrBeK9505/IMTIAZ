@@ -1,6 +1,7 @@
 """Background Music serializers."""
 
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from django.core.validators import MinValueValidator, MaxValueValidator
 from .models import BackgroundMusic
 
@@ -21,7 +22,8 @@ class BackgroundMusicSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'file_size', 'duration_seconds', 'created_at', 'updated_at']
     
-    def get_file_size_mb(self, obj):
+    @extend_schema_field(serializers.FloatField(allow_null=True))
+    def get_file_size_mb(self, obj: BackgroundMusic) -> float | None:
         """Convert file size to MB."""
         if obj.file_size:
             return round(obj.file_size / (1024 * 1024), 2)

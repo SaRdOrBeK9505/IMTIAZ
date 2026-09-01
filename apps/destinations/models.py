@@ -1,9 +1,17 @@
 """Destination Management — countries, destinations, and images."""
 
+import os
+from io import BytesIO
 from django.db import models
 from django.core.validators import FileExtensionValidator
+from django.core.files.base import ContentFile
+from PIL import Image
 
 from apps.core.models import BaseModel
+
+# Thumbnail settings
+THUMBNAIL_SIZE = (300, 200)  # Width, Height
+THUMBNAIL_QUALITY = 85
 
 
 class Country(BaseModel):
@@ -61,6 +69,11 @@ class Destination(BaseModel):
         null=True, blank=True,
         validators=[FileExtensionValidator(allowed_extensions=['jpg', 'jpeg', 'png', 'webp'])]
     )
+    featured_image_thumbnail = models.ImageField(
+        upload_to='destinations/featured/thumbnails/',
+        null=True, blank=True,
+        help_text='Auto-generated thumbnail'
+    )
     order = models.PositiveIntegerField(default=0)
     
     class Meta:
@@ -82,6 +95,50 @@ class Destination(BaseModel):
         self.review_count += 1
         self.rating = total_score / self.review_count
         self.save(update_fields=['rating', 'review_count', 'updated_at'])
+    
+    def generate_thumbnail(self):
+        """Generate thumbnail for featured image."""
+        if not self.featured_image:
+            return
+        
+        try:
+            # Open the image
+            img = Image.open(self.featured_image)
+            
+            # Convert to RGB if necessary (for JPEG)
+            if img.mode in ('RGBA', 'P'):
+                img = img.convert('RGB')
+            
+            # Create thumbnail
+            img.thumbnail(THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
+            
+            # Save to BytesIO
+            thumb_io = BytesIO()
+            img.save(thumb_io, format='JPEG', quality=THUMBNAIL_QUALITY)
+            thumb_io.seek(0)
+            
+            # Generate filename
+            filename = f"thumb_{os.path.basename(self.featured_image.name)}"
+            if not filename.lower().endswith('.jpg'):
+                filename = f"{filename.rsplit('.', 1)[0]}.jpg"
+            
+            # Save thumbnail
+            self.featured_image_thumbnail.save(
+                filename,
+                ContentFile(thumb_io.getvalue()),
+                save=False
+            )
+        except Exception as e:
+            # Log error but don't fail the save
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f'Failed to generate thumbnail for destination {self.id}: {e}')
+    
+    def save(self, *args, **kwargs):
+        # Generate thumbnail on save if featured image is new
+        if self.featured_image and (not self.featured_image_thumbnail or self._state.adding):
+            self.generate_thumbnail()
+        super().save(*args, **kwargs)
 
 
 class DestinationImage(BaseModel):
@@ -91,6 +148,11 @@ class DestinationImage(BaseModel):
     image = models.ImageField(
         upload_to='destinations/images/',
         validators=[FileExtensionValidator(allowed_extensions=['jpg', 'jpeg', 'png', 'webp'])]
+    )
+    thumbnail = models.ImageField(
+        upload_to='destinations/images/thumbnails/',
+        null=True, blank=True,
+        help_text='Auto-generated thumbnail'
     )
     caption = models.CharField(max_length=255, blank=True)
     caption_uz = models.CharField(max_length=255, blank=True, help_text='Uzbek caption')
@@ -108,7 +170,49 @@ class DestinationImage(BaseModel):
     def __str__(self):
         return f'{self.destination.name} - {self.caption or "Image"}'
     
+    def generate_thumbnail(self):
+        """Generate thumbnail for image."""
+        if not self.image:
+            return
+        
+        try:
+            # Open the image
+            img = Image.open(self.image)
+            
+            # Convert to RGB if necessary (for JPEG)
+            if img.mode in ('RGBA', 'P'):
+                img = img.convert('RGB')
+            
+            # Create thumbnail
+            img.thumbnail(THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
+            
+            # Save to BytesIO
+            thumb_io = BytesIO()
+            img.save(thumb_io, format='JPEG', quality=THUMBNAIL_QUALITY)
+            thumb_io.seek(0)
+            
+            # Generate filename
+            filename = f"thumb_{os.path.basename(self.image.name)}"
+            if not filename.lower().endswith('.jpg'):
+                filename = f"{filename.rsplit('.', 1)[0]}.jpg"
+            
+            # Save thumbnail
+            self.thumbnail.save(
+                filename,
+                ContentFile(thumb_io.getvalue()),
+                save=False
+            )
+        except Exception as e:
+            # Log error but don't fail the save
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f'Failed to generate thumbnail for destination image {self.id}: {e}')
+    
     def save(self, *args, **kwargs):
+        # Generate thumbnail on save if image is new
+        if self.image and (not self.thumbnail or self._state.adding):
+            self.generate_thumbnail()
+        
         # Ensure only one primary image per destination
         if self.is_primary:
             DestinationImage.objects.filter(

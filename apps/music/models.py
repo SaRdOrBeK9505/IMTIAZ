@@ -1,8 +1,10 @@
 """Background Music Management — audio files for restaurants/events."""
 
+import os
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator, MinValueValidator, MaxValueValidator
+from django.conf import settings
 
 from apps.core.models import BaseModel
 
@@ -18,6 +20,10 @@ class BackgroundMusic(BaseModel):
         JAZZ = 'jazz', 'Jazz'
         POP = 'pop', 'Pop'
         AMBIENT = 'ambient', 'Ambient'
+    
+    # Storage quota settings (in bytes)
+    MAX_STORAGE_QUOTA = getattr(settings, 'MUSIC_STORAGE_QUOTA', 5 * 1024 * 1024 * 1024)  # 5GB default
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB per file
     
     title = models.CharField(max_length=255)
     artist = models.CharField(max_length=255, blank=True)
@@ -67,13 +73,54 @@ class BackgroundMusic(BaseModel):
     def __str__(self):
         return f'{self.title} - {self.artist or "Unknown"}'
     
+    @classmethod
+    def get_total_storage_used(cls):
+        """Calculate total storage used by all music files."""
+        total = cls.objects.aggregate(total=models.Sum('file_size'))['total'] or 0
+        return total
+    
+    @classmethod
+    def get_storage_quota(cls):
+        """Get the storage quota limit."""
+        return cls.MAX_STORAGE_QUOTA
+    
+    @classmethod
+    def get_storage_available(cls):
+        """Calculate remaining storage available."""
+        used = cls.get_total_storage_used()
+        return max(0, cls.get_storage_quota() - used)
+    
+    @classmethod
+    def get_storage_percentage(cls):
+        """Get storage usage percentage."""
+        quota = cls.get_storage_quota()
+        used = cls.get_total_storage_used()
+        return (used / quota * 100) if quota > 0 else 0
+    
     def clean(self):
         """Validate file size and ensure only one active track."""
         # Validate file size (50MB limit)
         if self.audio_file:
-            if self.audio_file.size > 50 * 1024 * 1024:  # 50MB
-                raise ValidationError('Audio file size must not exceed 50MB')
-            self.file_size = self.audio_file.size
+            file_size = self.audio_file.size
+            if file_size > self.MAX_FILE_SIZE:
+                raise ValidationError(f'Audio file size must not exceed {self.MAX_FILE_SIZE / (1024*1024):.0f}MB')
+            
+            # Check storage quota
+            current_used = self.__class__.get_total_storage_used()
+            if self.id:
+                # If updating, subtract old file size
+                old_file = self.__class__.objects.filter(id=self.id).first()
+                if old_file and old_file.file_size:
+                    current_used -= old_file.file_size
+            
+            if current_used + file_size > self.MAX_STORAGE_QUOTA:
+                available = self.__class__.get_storage_available()
+                raise ValidationError(
+                    f'Not enough storage space. Available: {available / (1024*1024):.1f}MB, '
+                    f'Required: {file_size / (1024*1024):.1f}MB'
+                )
+            
+            self.file_size = file_size
         
         # Ensure only one active track
         if self.is_active:
@@ -84,6 +131,13 @@ class BackgroundMusic(BaseModel):
     def save(self, *args, **kwargs):
         self.clean()
         super().save(*args, **kwargs)
+    
+    def delete(self, *args, **kwargs):
+        """Delete file from storage when model is deleted."""
+        if self.audio_file:
+            if os.path.exists(self.audio_file.path):
+                os.remove(self.audio_file.path)
+        super().delete(*args, **kwargs)
     
     def activate(self):
         """Activate this track and deactivate all others."""

@@ -1,6 +1,8 @@
 """Restaurant vertikaliga xos modellar."""
 
 from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 from django.conf import settings
 from django.utils import timezone
 
@@ -38,12 +40,16 @@ class RestaurantStaff(BaseModel):
 class RestaurantBookingLead(BaseModel):
     """Restoran bron leadlari — mijoz so'rovlari va ularni qabul qilish/rad etish."""
     
+    # Lead expiry settings (in hours)
+    LEAD_EXPIRY_HOURS = 24  # Leads expire after 24 hours if not accepted
+    
     class Status(models.TextChoices):
         PENDING = 'pending', 'Kutilmoqda'
         ACCEPTED = 'accepted', 'Qabul qilingan'
         REJECTED = 'rejected', 'Rad etilgan'
         CUSTOMER_NEGOTIATING = 'customer_negotiating', 'Mijoz bilan muzokara'
         CONFIRMED = 'confirmed', 'Tasdiqlangan'
+        EXPIRED = 'expired', 'Muddati tugagan'
     
     restaurant = models.ForeignKey(
         Branch, on_delete=models.CASCADE, related_name='booking_leads'
@@ -115,6 +121,27 @@ class RestaurantBookingLead(BaseModel):
         self.actual_time = new_time
         self.status = self.Status.CONFIRMED
         self.save(update_fields=['actual_time', 'status', 'updated_at'])
+    
+    def expire(self):
+        """Mark lead as expired."""
+        if self.status != self.Status.PENDING:
+            raise ValueError(f"Lead status {self.status} bo'lganda expire qilib bo'lmaydi")
+        
+        self.status = self.Status.EXPIRED
+        self.save(update_fields=['status', 'updated_at'])
+    
+    @classmethod
+    def expire_old_leads(cls):
+        """Expire pending leads older than LEAD_EXPIRY_HOURS."""
+        from datetime import timedelta
+        expiry_threshold = timezone.now() - timedelta(hours=cls.LEAD_EXPIRY_HOURS)
+        
+        expired_count = cls.objects.filter(
+            status=cls.Status.PENDING,
+            created_at__lt=expiry_threshold
+        ).update(status=cls.Status.EXPIRED)
+        
+        return expired_count
 
 
 class MenuCategory(BaseModel):
@@ -171,3 +198,47 @@ class FeaturedItem(BaseModel):
 
     def __str__(self):
         return self.custom_title or (self.menu_item.name if self.menu_item else str(self.id))
+
+
+@receiver(post_save, sender=RestaurantBookingLead)
+def create_inquiry_from_lead(sender, instance, created, **kwargs):
+    """AI yaratgan lead bo'lsa, UserInquiry ham yaratish."""
+    if not created:
+        return
+    
+    # Faqat AI yaratgan leadlar uchun
+    if not instance.is_ai_generated:
+        return
+    
+    # User topishga harakat qilish (customer_phone orqali)
+    try:
+        from apps.users.models import User
+        from apps.support.models import UserInquiry
+        
+        user = User.objects.filter(phone=instance.customer_phone).first()
+        
+        if user:
+            # UserInquiry yaratish
+            UserInquiry.objects.create(
+                user=user,
+                category=UserInquiry.Category.BOOKING,
+                priority=UserInquiry.Priority.MEDIUM,
+                subject=f"Restoron bron so'rovi - {instance.restaurant.name}",
+                message=f"""
+Mijoz: {instance.customer_name}
+Telefon: {instance.customer_phone}
+Restoran: {instance.restaurant.name}
+Kishilar soni: {instance.party_size}
+Tanlangan vaqt: {instance.preferred_time}
+Restoran turi: {instance.get_restaurant_type_display()}
+Maxsus so'rovlar: {instance.special_requests or 'Yo\'q'}
+
+Bu so'rov AI tomonidan yaratilgan.
+                """.strip(),
+                status=UserInquiry.Status.OPEN
+            )
+    except Exception as e:
+        # Signal xatoliklari lead yaratishga to'sqinlik qilmasligi kerak
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f'Lead {instance.id} uchun UserInquiry yaratib bo\'lmadi: {e}')

@@ -1,6 +1,7 @@
 """Bonuses app serializers."""
 
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from .models import BonusCategory, UserBonus
 
 
@@ -19,7 +20,8 @@ class BonusCategorySerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'usage_count', 'created_at', 'updated_at']
     
-    def get_is_valid(self, obj):
+    @extend_schema_field(bool)
+    def get_is_valid(self, obj: BonusCategory) -> bool:
         return obj.is_valid()
     
     def validate(self, data):
@@ -58,7 +60,8 @@ class UserBonusSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'qr_code', 'qr_code_image', 'is_used', 'used_at', 'created_at', 'updated_at']
     
-    def get_is_valid(self, obj):
+    @extend_schema_field(bool)
+    def get_is_valid(self, obj: UserBonus) -> bool:
         return obj.bonus_category.is_valid() and not obj.is_used
 
 
@@ -72,3 +75,18 @@ class BonusQRScanSerializer(serializers.Serializer):
         if ':' not in value:
             raise serializers.ValidationError("Noto'g'ri QR kod formati")
         return value
+
+
+class BonusValidationResponseSerializer(serializers.Serializer):
+    """Response serializer for bonus validation."""
+    
+    valid = serializers.BooleanField()
+    message = serializers.CharField(allow_null=True)
+    bonus = serializers.DictField(allow_null=True)
+    error = serializers.CharField(allow_null=True)
+    category_valid = serializers.BooleanField(allow_null=True)
+    category_active = serializers.BooleanField(allow_null=True)
+    valid_until = serializers.DateTimeField(allow_null=True)
+    usage_count = serializers.IntegerField(allow_null=True)
+    max_usage_count = serializers.IntegerField(allow_null=True)
+    used_at = serializers.DateTimeField(allow_null=True)

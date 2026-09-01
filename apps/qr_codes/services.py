@@ -17,8 +17,12 @@ from typing import Optional
 from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
+from django.core.cache import cache
 
 logger = logging.getLogger(__name__)
+
+# Cache settings
+QR_CACHE_TIMEOUT = getattr(settings, 'QR_CACHE_TIMEOUT', 300)  # 5 minutes default
 
 
 # ─── QRGeneratorService ───────────────────────────────────────────────────────
@@ -73,6 +77,22 @@ class QRScanService:
     """QR kod validatsiya va chegirma hisoblash."""
 
     @staticmethod
+    def _get_cache_key(code: str, user_id: int | None = None) -> str:
+        """Generate cache key for QR validation."""
+        cache_key = f"qr_validate:{code.strip().upper()}"
+        if user_id:
+            cache_key += f":user_{user_id}"
+        return cache_key
+
+    @staticmethod
+    def clear_cache(code: str, user_id: int | None = None) -> None:
+        """Clear cached validation results for a QR code."""
+        cache_key = QRScanService._get_cache_key(code, user_id)
+        cache.delete(cache_key)
+        # Also clear the generic cache (without user_id)
+        cache.delete(f"qr_validate:{code.strip().upper()}")
+
+    @staticmethod
     def validate_and_get_info(code: str, *, user=None, order_amount: Optional[Decimal] = None) -> dict:
         """
         QR kodni tekshiradi va chegirma ma'lumotlarini qaytaradi.
@@ -90,14 +110,31 @@ class QRScanService:
         """
         from .models import QRCode, QRCodeRedemption
 
+        # Generate cache key
+        user_id = user.id if user and user.is_authenticated else None
+        cache_key = QRScanService._get_cache_key(code, user_id)
+        
+        # Try to get from cache
+        cached_result = cache.get(cache_key)
+        if cached_result:
+            # Recalculate discount based on current order_amount
+            if cached_result.get('qr_code'):
+                qr = QRCode.objects.get(id=cached_result['qr_code']['id'])
+                cached_result['discount_amount'] = Decimal(str(qr.calculate_discount(float(order_amount or 0))))
+            return cached_result
+
         try:
             qr = QRCode.objects.select_related('organization', 'branch').get(code=code.strip().upper())
         except QRCode.DoesNotExist:
-            return {'is_valid': False, 'message': 'QR kod topilmadi.', 'qr_code': None}
+            result = {'is_valid': False, 'message': 'QR kod topilmadi.', 'qr_code': None}
+            cache.set(cache_key, result, QR_CACHE_TIMEOUT)
+            return result
 
         if not qr.is_valid:
             reason = _get_invalid_reason(qr)
-            return {'is_valid': False, 'message': reason, 'qr_code': qr}
+            result = {'is_valid': False, 'message': reason, 'qr_code': qr}
+            cache.set(cache_key, result, QR_CACHE_TIMEOUT)
+            return result
 
         # Foydalanuvchi cheklovini tekshirish
         if user and user.is_authenticated:
@@ -105,11 +142,13 @@ class QRScanService:
                 qr_code=qr, user=user, status='applied'
             ).count()
             if user_count >= qr.max_uses_per_user:
-                return {
+                result = {
                     'is_valid': False,
                     'message': f'Siz bu QR kodni {qr.max_uses_per_user} marta ishlatdingiz.',
                     'qr_code': qr,
                 }
+                cache.set(cache_key, result, QR_CACHE_TIMEOUT)
+                return result
         else:
             user_count = 0
 
@@ -121,7 +160,7 @@ class QRScanService:
         if qr.max_total_uses is not None:
             remaining = max(qr.max_total_uses - qr.total_used_count, 0)
 
-        return {
+        result = {
             'is_valid':        True,
             'qr_code':         qr,
             'discount_amount': discount,
@@ -132,6 +171,19 @@ class QRScanService:
             'organization_name':   qr.organization.name,
             'valid_until':         qr.valid_until.isoformat() if qr.valid_until else None,
         }
+        
+        # Cache the result (exclude the actual qr object to avoid serialization issues)
+        cache_data = result.copy()
+        cache_data['qr_code'] = {
+            'id': qr.id,
+            'code': qr.code,
+            'title': qr.title,
+            'qr_type': qr.qr_type,
+            'discount_value': str(qr.discount_value),
+        }
+        cache.set(cache_key, cache_data, QR_CACHE_TIMEOUT)
+        
+        return result
 
 
 def _get_invalid_reason(qr) -> str:
@@ -226,6 +278,9 @@ class QRRedemptionService:
         QRCode.objects.filter(id=qr.id).update(
             total_used_count=qr.total_used_count + 1
         )
+
+        # Clear cache for this QR code
+        QRScanService.clear_cache(code, user_id=user.id if user and user.is_authenticated else None)
 
         logger.info(
             "QR redeemed: code=%s, user=%s, discount=%s, staff=%s",
