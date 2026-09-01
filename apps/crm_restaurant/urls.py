@@ -38,6 +38,12 @@ from .views import (
     RestaurantOrganizationView,
     RestaurantTableViewSet,
 )
+from .lead_views import (
+    RestaurantBookingLeadAcceptView,
+    RestaurantBookingLeadRejectView,
+    RestaurantBookingLeadUpdateTimeView,
+    RestaurantBookingLeadViewSet,
+)
 
 router = DefaultRouter()
 router.register('tables', RestaurantTableViewSet, basename='restaurant-tables')
@@ -68,8 +74,13 @@ urlpatterns = [
     path('bookings/<uuid:pk>/confirm/', RestaurantBookingConfirmView.as_view(), name='restaurant-booking-confirm'),
     path('bookings/<uuid:pk>/cancel/', RestaurantBookingCancelView.as_view(), name='restaurant-booking-cancel'),
 
-    # Lead pipeline
-    path('leads/', include('apps.crm_core.lead_urls')),
+    # Restaurant Lead CRM (accept/reject/update-time) - specific actions first
+    path('leads/<uuid:pk>/accept/', RestaurantBookingLeadAcceptView.as_view(), name='restaurant-lead-accept'),
+    path('leads/<uuid:pk>/reject/', RestaurantBookingLeadRejectView.as_view(), name='restaurant-lead-reject'),
+    path('leads/<uuid:pk>/update-time/', RestaurantBookingLeadUpdateTimeView.as_view(), name='restaurant-lead-update-time'),
+    # Restaurant Lead CRUD
+    path('leads/', RestaurantBookingLeadViewSet.as_view({'get': 'list', 'post': 'create'}), name='restaurant-leads-list'),
+    path('leads/<uuid:pk>/', RestaurantBookingLeadViewSet.as_view({'get': 'retrieve', 'patch': 'partial_update', 'delete': 'destroy'}), name='restaurant-leads-detail'),
 
     # Stollar (router dan oldin — grouped/availability/status/slots)
     path('tables/slots/generate/', RestaurantTableSlotGenerateView.as_view(), name='restaurant-table-slots-generate'),

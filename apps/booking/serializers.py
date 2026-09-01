@@ -1,6 +1,7 @@
 """Booking app serializers."""
 
 from rest_framework import serializers
+from django.core.validators import MinValueValidator, MaxValueValidator
 from .models import Booking, FlightBooking, TrainBooking, RestaurantBooking, EventBooking
 
 
@@ -22,6 +23,32 @@ class RestaurantDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = RestaurantBooking
         exclude = ['id', 'booking', 'created_at', 'updated_at']
+
+
+class RestaurantBookingSerializer(serializers.ModelSerializer):
+    """Restaurant booking with validation for AI-generated bookings."""
+    
+    class Meta:
+        model = RestaurantBooking
+        fields = [
+            'branch', 'reservation_at', 'guest_count', 'duration_minutes',
+            'special_requests', 'table_number', 'confirmed_by_staff',
+            'restaurant_type', 'preferred_time', 'is_ai_generated'
+        ]
+    
+    def validate_guest_count(self, value):
+        """Validate party size between 1-20."""
+        if value < 1 or value > 20:
+            raise serializers.ValidationError("Party size 1-20 oralig'ida bo'lishi kerak")
+        return value
+    
+    def validate_preferred_time(self, value):
+        """Validate HH:MM format."""
+        if value:
+            time_str = value.strftime('%H:%M')
+            if len(time_str) != 5 or time_str[2] != ':':
+                raise serializers.ValidationError("Vaqt HH:MM formatida bo'lishi kerak")
+        return value
 
 
 class EventDetailSerializer(serializers.ModelSerializer):

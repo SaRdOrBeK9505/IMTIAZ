@@ -128,11 +128,23 @@ def localized_field(obj, field: str, lang: str) -> str:
 
 # ─── 2. Tarjima kalitidan matn olish ──────────────────────────────────────────
 
-def t(key: str, lang: str, **kwargs) -> str:
+def t(key: str, lang: str, ai_name: str | None = None, **kwargs) -> str:
     """Tarjima kalitidan matn olish."""
     lang = normalize_language(lang)
     catalog = _MESSAGES.get(key, {})
     template = catalog.get(lang) or catalog.get('uz') or key
+    
+    # Add ai_name to kwargs if not provided
+    if ai_name is None:
+        try:
+            from apps.settings_app.models import AppSetting
+            ai_name = AppSetting.get_ai_assistant_name()
+        except Exception:
+            ai_name = 'Bike'
+    
+    if 'ai_name' not in kwargs:
+        kwargs['ai_name'] = ai_name
+    
     if kwargs:
         try:
             return template.format(**kwargs)
@@ -142,11 +154,21 @@ def t(key: str, lang: str, **kwargs) -> str:
 
 
 def booking_title_restaurant(lang: str, date: str, time: str, guests: int) -> str:
-    return t('booking_title_restaurant', lang, date=date, time=time, guests=guests)
+    try:
+        from apps.settings_app.models import AppSetting
+        ai_name = AppSetting.get_ai_assistant_name()
+    except Exception:
+        ai_name = 'Bike'
+    return t('booking_title_restaurant', lang, ai_name=ai_name, date=date, time=time, guests=guests)
 
 
 def booking_title_flight(lang: str, origin: str, destination: str) -> str:
-    return t('booking_title_flight', lang, origin=origin, destination=destination)
+    try:
+        from apps.settings_app.models import AppSetting
+        ai_name = AppSetting.get_ai_assistant_name()
+    except Exception:
+        ai_name = 'Bike'
+    return t('booking_title_flight', lang, ai_name=ai_name, origin=origin, destination=destination)
 
 
 def status_label(status: str, lang: str) -> str:
@@ -393,6 +415,13 @@ def build_system_prompt(
     from datetime import timedelta
     from django.utils import timezone
 
+    # Get dynamic AI assistant name
+    try:
+        from apps.settings_app.models import AppSetting
+        ai_name = AppSetting.get_ai_assistant_name()
+    except Exception:
+        ai_name = 'Bike'  # Fallback to default
+
     lang = normalize_language(lang)
     lang_name = LANGUAGE_NAMES[lang]
     today = timezone.now().date()
@@ -405,6 +434,10 @@ def build_system_prompt(
         today=today.isoformat(),
         tomorrow=tomorrow.isoformat(),
     )
+    
+    # Replace hardcoded "Bika" with dynamic name
+    base = base.replace('Bika', ai_name)
+    
     if session_summary:
         base += f"\n\nSuhbat xotirasi (bajarilgan harakatlar va saqlangan obyektlar):\n{session_summary}\n"
     if user_profile_summary:
@@ -470,7 +503,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
     'ai_welcome': {
         'uz': (
             'Assalomu alaykum! 👋\n\n'
-            'Men Bike — IMTIAZ platformasining shaxsiy sayohat va xizmat yordamchisiman.\n'
+            'Men {ai_name} — IMTIAZ platformasining shaxsiy sayohat va xizmat yordamchisiman.\n'
             'Men orqali:\n\n'
             '✈️ Aviachipta va mehmonxona bron qilishingiz\n'
             '🍽️ Restoranda stol band qilishingiz\n'
@@ -479,7 +512,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
         ),
         'ru': (
             'Здравствуйте! 👋\n\n'
-            'Я Bike — персональный помощник IMTIAZ по путешествиям и сервисам.\n'
+            'Я {ai_name} — персональный помощник IMTIAZ по путешествиям и сервисам.\n'
             'С моей помощью вы можете:\n\n'
             '✈️ Забронировать авиабилет и отель\n'
             '🍽️ Забронировать столик в ресторане\n'
@@ -488,7 +521,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
         ),
         'en': (
             'Hello! 👋\n\n'
-            'I am Bike — IMTIAZ\'s personal travel and concierge assistant.\n'
+            'I am {ai_name} — IMTIAZ\'s personal travel and concierge assistant.\n'
             'Through me, you can:\n\n'
             '✈️ Book flights and hotels\n'
             '🍽️ Reserve a restaurant table\n'

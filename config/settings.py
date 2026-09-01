@@ -70,6 +70,11 @@ LOCAL_APPS = [
     'apps.integrations',
     'apps.tours',       # Tur sayohat tizimi
     'apps.qr_codes',    # QR kod chegirma tizimi
+    'apps.bonuses',     # Bonus/rewards tizimi
+    'apps.music',       # Fon musiqasi boshqaruvi
+    'apps.destinations', # Manzillar boshqaruvi
+    'apps.support',     # Foydalanuvchi so'rovlari tizimi
+    'apps.settings_app', # Ilova sozlamalari
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -246,6 +251,9 @@ SIMPLE_JWT = {
     # (global AUDIENCE ishlatilmaydi — har panel o'z classida tekshiradi)
     'TOKEN_OBTAIN_SERIALIZER':  'rest_framework_simplejwt.serializers.TokenObtainPairSerializer',
 }
+
+# ─── QR CODE SETTINGS ────────────────────────────────────────────────────────────
+QR_SECRET = env('QR_SECRET', default='imtiaz-secret-key-change-in-production')
 
 # ─── JAZZMIN — Admin panel ────────────────────────────────────────────────────
 JAZZMIN_SETTINGS = {

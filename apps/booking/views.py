@@ -1,14 +1,16 @@
 """Booking app views."""
 
 from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework import generics, filters
+from rest_framework import generics, filters, status
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
 
 from apps.core.openapi_schemas import ErrorResponseSerializer
 
-from .models import Booking
-from .serializers import BookingSerializer
+from .models import Booking, RestaurantBooking
+from .serializers import BookingSerializer, RestaurantBookingSerializer
 
 _TAG = 'Bookings'
 
@@ -69,3 +71,57 @@ class BookingDetailView(generics.RetrieveAPIView):
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
+
+
+class CreateRestaurantBookingFromAIView(APIView):
+    """POST /api/booking/restaurant/create-from-ai/ — AI orqali restoran bron yaratish."""
+    
+    permission_classes = [IsAuthenticated]
+    
+    @extend_schema(
+        tags=[_TAG],
+        summary='AI orqali restoran bron yaratish',
+        description='AI tomonidan yig\'ilgan strukturalangan ma\'lumotlar asosida bron yaratish.',
+        request=RestaurantBookingSerializer,
+        responses={
+            201: BookingSerializer,
+            400: ErrorResponseSerializer,
+        },
+    )
+    def post(self, request):
+        serializer = RestaurantBookingSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        # Create base Booking
+        booking_data = {
+            'user': request.user,
+            'service_type': 'restaurant',
+            'status': 'pending',
+            'title': f"Restoran bron - {serializer.validated_data.get('branch')}",
+            'description': serializer.validated_data.get('special_requests', ''),
+            'created_by_ai': True,
+        }
+        
+        booking = Booking.objects.create(**booking_data)
+        
+        # Create RestaurantBooking
+        restaurant_booking = RestaurantBooking.objects.create(
+            booking=booking,
+            **serializer.validated_data
+        )
+        
+        # Send Telegram notification to restaurant staff
+        from apps.notifications.tasks import send_telegram_notification
+        send_telegram_notification.delay(
+            chat_id=serializer.validated_data.get('branch').phone if serializer.validated_data.get('branch') else None,
+            message=f"🍽️ Yangi restoran bron so'rovi!\n"
+                   f"Mijoz: {request.user.get_full_name()}\n"
+                   f"Vaqt: {serializer.validated_data.get('preferred_time')}\n"
+                   f"Kishilar: {serializer.validated_data.get('guest_count')}\n"
+                   f"Tur: {serializer.validated_data.get('restaurant_type')}"
+        )
+        
+        return Response(
+            BookingSerializer(booking).data,
+            status=status.HTTP_201_CREATED
+        )

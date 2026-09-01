@@ -66,6 +66,21 @@ urlpatterns = [
         # Bildirishnomalar
         path('notifications/', include('apps.notifications.urls')),
 
+        # Bonus/Rewards system
+        path('bonuses/', include('apps.bonuses.urls')),
+
+        # Background Music (admin only)
+        path('music/', include('apps.music.urls')),
+
+        # Destinations (admin + client)
+        path('destinations/', include('apps.destinations.urls')),
+
+        # User Support/Inquiries
+        path('support/', include('apps.support.urls')),
+
+        # App Settings (admin + public)
+        path('settings/', include('apps.settings_app.urls')),
+
         # Integrations logs (admin only)
         path('integrations/', include('apps.integrations.urls')),
     ])),

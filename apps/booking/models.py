@@ -164,6 +164,27 @@ class RestaurantBooking(BaseModel):
     special_requests = models.TextField(blank=True)
     table_number = models.CharField(max_length=20, blank=True, null=True)
     confirmed_by_staff = models.BooleanField(default=False)
+    
+    # Prompt #1 enhancements
+    restaurant_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('casual', 'Casual'),
+            ('fine_dining', 'Fine Dining'),
+            ('fast_food', 'Fast Food'),
+            ('delivery', 'Delivery'),
+        ],
+        default='casual',
+        help_text='Restoran turi'
+    )
+    preferred_time = models.TimeField(
+        null=True, blank=True,
+        help_text='Tanlangan vaqt (HH:MM)'
+    )
+    is_ai_generated = models.BooleanField(
+        default=False,
+        help_text='AI orqali yaratlganmi'
+    )
 
     class Meta:
         verbose_name = 'Restoran broni'

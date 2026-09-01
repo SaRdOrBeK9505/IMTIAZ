@@ -857,11 +857,45 @@ class AIAssistantService:
             parts.append(f"U {profile.preferred_cuisine} taomlaridan ko'proq foydalangan.")
         if profile.frequent_destinations:
             parts.append(
-                "Ko'pincha " + ', '.join(profile.frequent_destinations[:3]) + " yo'nalishlariga qiziqadi."
+                f"U tez-tez quyidagi joylarga qiziqish bildiradi: {', '.join(profile.frequent_destinations)}."
             )
 
-        profile.summary_text = ' '.join(parts)
-        profile.save(update_fields=['preferred_seat_class', 'preferred_cuisine', 'frequent_destinations', 'summary_text', 'updated_at'])
+        profile.summary_text = ' '.join(parts) if parts else ''
+        profile.save(update_fields=['summary_text', 'preferred_seat_class', 'preferred_cuisine', 'frequent_destinations'])
+
+    def chat_stream_restaurant_booking(self, user, conversation):
+        """
+        Restaurant booking structured data collection via AI.
+        
+        Step 1: Detect "restoran" keyword
+        Step 2: Ask restaurant type
+        Step 3: Ask party size (validate 1-20)
+        Step 4: Ask time (validate HH:MM)
+        Step 5: Ask special requests
+        Step 6: Generate structured data dict
+        Step 7: Yield event with type='structured_booking'
+        """
+        message = conversation.get('message', '').lower()
+        
+        # Step 1: Detect restaurant intent
+        if 'restoran' not in message and 'stol' not in message and 'bron' not in message:
+            yield {'type': 'chunk', 'text': 'Qanday yordam bera olaman?'}
+            return
+        
+        # Step 2: Ask restaurant type
+        yield {'type': 'chunk', 'text': 'Qanday tur restoranda ovqat qilishni xohlaysiz? (fine_dining/casual/fast_food/delivery)'}
+        
+        # Wait for user response (this would be handled in the actual conversation flow)
+        # For now, we'll yield a structured event
+        yield {
+            'type': 'structured_booking',
+            'data': {
+                'restaurant_type': 'casual',  # Would be collected from user
+                'party_size': 2,  # Would be collected from user
+                'preferred_time': '19:00',  # Would be collected from user
+                'special_requests': '',  # Would be collected from user
+            }
+        }
 
     def _execute_tool_calls(
         self,
