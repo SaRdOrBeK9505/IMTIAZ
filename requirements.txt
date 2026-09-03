@@ -66,4 +66,6 @@ uritemplate==4.2.0
 vine==5.1.0
 wcwidth==0.8.2
 openai>=1.0.0
+django-storages[s3]==1.14.6
+boto3==1.35.99
 

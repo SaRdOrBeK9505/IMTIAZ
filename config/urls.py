@@ -75,6 +75,9 @@ urlpatterns = [
         # Destinations (admin + client)
         path('destinations/', include('apps.destinations.urls')),
 
+        # Travel Content — Reels va IMTIAZ Travels (admin + client)
+        path('travel-content/', include('apps.travel_content.urls')),
+
         # User Support/Inquiries
         path('support/', include('apps.support.urls')),
 

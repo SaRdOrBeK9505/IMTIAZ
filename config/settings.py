@@ -73,6 +73,7 @@ LOCAL_APPS = [
     'apps.bonuses',     # Bonus/rewards tizimi
     'apps.music',       # Fon musiqasi boshqaruvi
     'apps.destinations', # Manzillar boshqaruvi
+    'apps.travel_content', # Reels va kuratsiyalangan sayohat kontenti
     'apps.support',     # Foydalanuvchi so'rovlari tizimi
     'apps.settings_app', # Ilova sozlamalari
 ]
@@ -547,8 +548,36 @@ USE_TZ        = True
 # ─── STATIC / MEDIA ───────────────────────────────────────────────────────────
 STATIC_URL  = env('STATIC_URL',  default='/static/')
 STATIC_ROOT = BASE_DIR / env('STATIC_ROOT', default='staticfiles')
-MEDIA_URL   = env('MEDIA_URL',   default='/media/')
-MEDIA_ROOT  = BASE_DIR / env('MEDIA_ROOT',  default='media')
+
+USE_SPACES = env.bool('USE_SPACES', default=False)
+
+if USE_SPACES:
+    AWS_ACCESS_KEY_ID = env('DO_SPACES_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = env('DO_SPACES_SECRET_ACCESS_KEY')
+    AWS_STORAGE_BUCKET_NAME = env('DO_SPACES_BUCKET_NAME')
+    AWS_S3_ENDPOINT_URL = env('DO_SPACES_ENDPOINT_URL')          # masalan: https://fra1.digitaloceanspaces.com
+    AWS_S3_REGION_NAME = env('DO_SPACES_REGION', default='fra1')
+    AWS_S3_CUSTOM_DOMAIN = env(
+        'DO_SPACES_CUSTOM_DOMAIN',
+        default=f'{AWS_STORAGE_BUCKET_NAME}.{AWS_S3_REGION_NAME}.cdn.digitaloceanspaces.com',
+    )
+    AWS_DEFAULT_ACL = 'public-read'
+    AWS_S3_OBJECT_PARAMETERS = {'CacheControl': 'max-age=86400'}
+    AWS_S3_FILE_OVERWRITE = False
+    AWS_QUERYSTRING_AUTH = False
+
+    STORAGES = {
+        'default': {'BACKEND': 'apps.core.storages.MediaStorage'},
+        'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+    }
+    MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/media/'
+else:
+    STORAGES = {
+        'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+        'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+    }
+    MEDIA_URL  = env('MEDIA_URL',  default='/media/')
+    MEDIA_ROOT = BASE_DIR / env('MEDIA_ROOT', default='media')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
