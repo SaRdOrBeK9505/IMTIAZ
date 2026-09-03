@@ -1,9 +1,10 @@
 """Destination Management — countries, destinations, and images."""
 
 import os
+from decimal import Decimal
 from io import BytesIO
 from django.db import models
-from django.core.validators import FileExtensionValidator
+from django.core.validators import FileExtensionValidator, MinValueValidator, MaxValueValidator
 from django.core.files.base import ContentFile
 from PIL import Image
 
@@ -58,9 +59,9 @@ class Destination(BaseModel):
     description = models.TextField(blank=True)
     description_uz = models.TextField(blank=True, help_text='Uzbek description')
     category = models.CharField(max_length=20, choices=Category.choices, default=Category.CITY)
-    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-    rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.0, help_text='Average rating (0-5)')
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, validators=[MinValueValidator(Decimal('-90.00')), MaxValueValidator(Decimal('90.00'))])
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, validators=[MinValueValidator(Decimal('-180.00')), MaxValueValidator(Decimal('180.00'))])
+    rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.0, help_text='Average rating (0-5)', validators=[MinValueValidator(Decimal('0.00')), MaxValueValidator(Decimal('5.00'))])
     review_count = models.PositiveIntegerField(default=0)
     is_popular = models.BooleanField(default=False, help_text='Popular destination')
     is_active = models.BooleanField(default=True)

@@ -4,8 +4,10 @@ IMTIAZ yopiq klub modeli: ariza → tasdiqlash → tier.
 TZ 3.8 bo'limiga mos.
 """
 
+from decimal import Decimal
 from django.db import models
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from apps.core.models import BaseModel
 from apps.users.models import AIAutonomyLevel
 
@@ -18,7 +20,7 @@ class MembershipTier(BaseModel):
     name        = models.CharField(max_length=50, unique=True)
     slug        = models.SlugField(unique=True)
     description = models.TextField(blank=True)
-    monthly_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    monthly_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
 
     max_ai_autonomy_level = models.CharField(
         max_length=20,
@@ -27,6 +29,7 @@ class MembershipTier(BaseModel):
     )
     commission_discount_percent = models.DecimalField(
         max_digits=5, decimal_places=2, default=0,
+        validators=[MinValueValidator(Decimal('0.00'))],
         help_text='Booking narxidan chegirma foizi (%)',
     )
     exclusive_events_access = models.BooleanField(
@@ -64,7 +67,7 @@ class UserMembership(BaseModel):
     # Tezroq access uchun tier maydonlari cache sifatida
     max_ai_autonomy_level       = models.CharField(max_length=20, default='manual')
     exclusive_events_access     = models.BooleanField(default=False)
-    commission_discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    commission_discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
 
     class Meta:
         verbose_name        = "Foydalanuvchi a'zoligi"

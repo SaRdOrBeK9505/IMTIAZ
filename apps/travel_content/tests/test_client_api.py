@@ -4,9 +4,20 @@ from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 from rest_framework import status
+from PIL import Image
+import io
 
 from apps.travel_content.models import TravelReel, CuratedTrip
 from apps.destinations.models import Country, Destination
+
+
+def create_test_image():
+    """Create a valid test image using PIL."""
+    img = Image.new('RGB', (100, 100), color='red')
+    img_io = io.BytesIO()
+    img.save(img_io, format='JPEG')
+    img_io.seek(0)
+    return img_io.getvalue()
 
 
 class TravelContentClientAPITests(TestCase):
@@ -29,7 +40,7 @@ class TravelContentClientAPITests(TestCase):
             destination=self.destination,
             is_active=True,
             cover_image=SimpleUploadedFile(
-                'test.jpg', b'fake image data', content_type='image/jpeg'
+                'test.jpg', create_test_image(), content_type='image/jpeg'
             )
         )
         self.inactive_reel = TravelReel.objects.create(
@@ -38,7 +49,7 @@ class TravelContentClientAPITests(TestCase):
             destination=self.destination,
             is_active=False,
             cover_image=SimpleUploadedFile(
-                'test2.jpg', b'fake image data', content_type='image/jpeg'
+                'test2.jpg', create_test_image(), content_type='image/jpeg'
             )
         )
         
@@ -51,7 +62,7 @@ class TravelContentClientAPITests(TestCase):
             price_from=1000,
             is_active=True,
             cover_image=SimpleUploadedFile(
-                'test.jpg', b'fake image data', content_type='image/jpeg'
+                'test.jpg', create_test_image(), content_type='image/jpeg'
             ),
             video_file=SimpleUploadedFile(
                 'test.mp4', b'fake video data', content_type='video/mp4'
@@ -65,7 +76,7 @@ class TravelContentClientAPITests(TestCase):
             price_from=1000,
             is_active=False,
             cover_image=SimpleUploadedFile(
-                'test2.jpg', b'fake image data', content_type='image/jpeg'
+                'test2.jpg', create_test_image(), content_type='image/jpeg'
             ),
             video_file=SimpleUploadedFile(
                 'test2.mp4', b'fake video data', content_type='video/mp4'

@@ -16,10 +16,12 @@ Ishlash prinsipi:
 
 import secrets
 import string
+from decimal import Decimal
 
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
+from django.core.validators import MinValueValidator
 
 from apps.core.models import BaseModel
 

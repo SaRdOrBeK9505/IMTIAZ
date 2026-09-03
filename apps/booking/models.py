@@ -4,8 +4,10 @@ Parvoz, poyezd, restoran, tadbir — barchasi BaseBooking'dan meros oladi.
 TZ 3.3 bo'limiga mos.
 """
 
+from decimal import Decimal
 from django.db import models
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from apps.core.models import BaseModel
 from apps.booking.settlement import SettlementStatus, TransactionStep
 
@@ -51,9 +53,9 @@ class Booking(BaseModel):
     booking_date = models.DateTimeField(null=True, blank=True, help_text='Bron amalga oshiriladigan vaqt')
 
     # Narx
-    base_price = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    discount_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    final_price = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    base_price = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
+    discount_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
+    final_price = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
     currency = models.CharField(max_length=3, default='UZS')
 
     # Tashqi bron ID (aviakassa yoki boshqa tizimdan)
@@ -225,15 +227,15 @@ class FlightPayment(BaseModel):
     ikpu_provider_1    = models.CharField(max_length=32, blank=True)
     package_code_prov1 = models.CharField(max_length=32, blank=True)
     id_provider_1      = models.CharField(max_length=32, blank=True)
-    amount             = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    nds_provider_1     = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    amount             = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
+    nds_provider_1     = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
     ikpu_bookhara      = models.CharField(max_length=32, blank=True)
     package_code_bkh   = models.CharField(max_length=32, blank=True)
-    service_fee_bkh    = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    nds_bookhara       = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    profit             = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    discount           = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    total_amount       = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    service_fee_bkh    = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
+    nds_bookhara       = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
+    profit             = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
+    discount           = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
+    total_amount       = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
     # AlifPay OFD chek havolasi — webhook kelganda saqlanadi
     receipt_url        = models.URLField(blank=True)
 
@@ -365,12 +367,14 @@ class BookingSettlement(BaseModel):
         decimal_places=2,
         null=True,
         blank=True,
+        validators=[MinValueValidator(Decimal('0.00'))],
         help_text='Pre-flight da qulflangan Bookhara narxi (UZS)',
     )
     bookhara_deposit_at_preflight = models.DecimalField(
         max_digits=14,
         decimal_places=2,
         null=True,
+        validators=[MinValueValidator(Decimal('0.00'))],
         blank=True,
         help_text='Pre-flight vaqtidagi depozit balansi',
     )

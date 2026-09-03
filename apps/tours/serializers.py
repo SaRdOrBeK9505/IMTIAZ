@@ -16,6 +16,7 @@ CRM-facing:
     TouristInfoSerializer
 """
 
+from decimal import Decimal
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
@@ -61,7 +62,7 @@ class TourDestinationSerializer(serializers.ModelSerializer):
     images = TourDestinationImageSerializer(many=True, read_only=True)
     package_count = serializers.IntegerField(read_only=True, required=False)
     min_price = serializers.DecimalField(
-        max_digits=16, decimal_places=2, read_only=True, required=False, allow_null=True,
+        max_digits=16, decimal_places=2, read_only=True, required=False, allow_null=True, min_value=Decimal('0.01')
     )
 
     class Meta:
@@ -78,13 +79,13 @@ class TourDestinationListSerializer(serializers.ModelSerializer):
     images = TourDestinationImageSerializer(many=True, read_only=True)
     package_count = serializers.IntegerField(read_only=True, required=False)
     min_price = serializers.DecimalField(
-        max_digits=16, decimal_places=2, read_only=True, required=False, allow_null=True,
+        max_digits=16, decimal_places=2, read_only=True, required=False, allow_null=True, min_value=Decimal('0.01')
     )
     max_price = serializers.DecimalField(
-        max_digits=16, decimal_places=2, read_only=True, required=False, allow_null=True,
+        max_digits=16, decimal_places=2, read_only=True, required=False, allow_null=True, min_value=Decimal('0.01')
     )
     avg_rating = serializers.DecimalField(
-        max_digits=3, decimal_places=2, read_only=True, required=False, allow_null=True,
+        max_digits=3, decimal_places=2, read_only=True, required=False, allow_null=True, min_value=Decimal('0.00')
     )
     short_description = serializers.SerializerMethodField()
 
@@ -202,13 +203,13 @@ class TourDestinationDetailSerializer(serializers.ModelSerializer):
     images = TourDestinationImageSerializer(many=True, read_only=True)
     package_count = serializers.IntegerField(read_only=True, required=False)
     min_price = serializers.DecimalField(
-        max_digits=16, decimal_places=2, read_only=True, required=False, allow_null=True,
+        max_digits=16, decimal_places=2, read_only=True, required=False, allow_null=True, min_value=Decimal('0.01')
     )
     max_price = serializers.DecimalField(
-        max_digits=16, decimal_places=2, read_only=True, required=False, allow_null=True,
+        max_digits=16, decimal_places=2, read_only=True, required=False, allow_null=True, min_value=Decimal('0.01')
     )
     avg_rating = serializers.DecimalField(
-        max_digits=3, decimal_places=2, read_only=True, required=False, allow_null=True,
+        max_digits=3, decimal_places=2, read_only=True, required=False, allow_null=True, min_value=Decimal('0.00')
     )
     featured_packages = serializers.SerializerMethodField()
 
@@ -269,7 +270,7 @@ class TourPackageDetailSerializer(serializers.ModelSerializer):
 
 class TourAvailabilitySerializer(serializers.ModelSerializer):
     available_seats   = serializers.IntegerField(read_only=True)
-    effective_price   = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True)
+    effective_price   = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True, min_value=Decimal('0.01'))
     occupancy_percent = serializers.FloatField(read_only=True)
 
     class Meta:
@@ -339,7 +340,7 @@ class TourBookingDetailSerializer(serializers.ModelSerializer):
     return_date        = serializers.DateField(source='availability.return_date', read_only=True)
     booking_status     = serializers.CharField(source='booking.status', read_only=True)
     booking_id         = serializers.UUIDField(source='booking.id', read_only=True)
-    final_price        = serializers.DecimalField(source='booking.final_price', max_digits=16, decimal_places=2, read_only=True)
+    final_price        = serializers.DecimalField(source='booking.final_price', max_digits=16, decimal_places=2, read_only=True, min_value=Decimal('0.01'))
     currency           = serializers.CharField(source='booking.currency', read_only=True)
     created_at         = serializers.DateTimeField(source='booking.created_at', read_only=True)
     has_voucher        = serializers.BooleanField(source='voucher_generated', read_only=True)
@@ -572,7 +573,7 @@ class TourClientPurchaseSerializer(serializers.Serializer):
     departure_date   = serializers.DateField()
     return_date      = serializers.DateField(allow_null=True)
     tourist_count    = serializers.IntegerField()
-    final_price      = serializers.DecimalField(max_digits=16, decimal_places=2)
+    final_price      = serializers.DecimalField(max_digits=16, decimal_places=2, min_value=Decimal('0.01'))
     currency         = serializers.CharField()
     status           = serializers.CharField()
     status_label     = serializers.CharField()

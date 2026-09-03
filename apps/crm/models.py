@@ -5,8 +5,10 @@ BranchStaff ruxsatlari.
 TZ 3.6 bo'limiga mos.
 """
 
+from decimal import Decimal
 from django.db import models
 from django.conf import settings
+from django.core.validators import MinValueValidator, MaxValueValidator
 from apps.core.models import BaseModel
 
 
@@ -99,8 +101,8 @@ class Branch(BaseModel):
     address = models.TextField(blank=True)
     city = models.CharField(max_length=100, blank=True)
     country = models.CharField(max_length=100, default='Uzbekistan')
-    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, validators=[MinValueValidator(Decimal('-90.00')), MaxValueValidator(Decimal('90.00'))])
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, validators=[MinValueValidator(Decimal('-180.00')), MaxValueValidator(Decimal('180.00'))])
     phone = models.CharField(max_length=20, blank=True, null=True)
     email = models.EmailField(blank=True, null=True)
     working_hours = models.JSONField(
@@ -313,8 +315,8 @@ class StaffPerformanceSummary(BaseModel):
     table_bookings_cancelled = models.PositiveIntegerField(default=0)
 
     # Umumiy
-    total_revenue_managed    = models.DecimalField(max_digits=16, decimal_places=2, default=0)
-    avg_response_time_minutes = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    total_revenue_managed    = models.DecimalField(max_digits=16, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
+    avg_response_time_minutes = models.DecimalField(max_digits=8, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
     login_count              = models.PositiveIntegerField(default=0)
     total_actions            = models.PositiveIntegerField(default=0)
 

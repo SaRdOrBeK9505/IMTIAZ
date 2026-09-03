@@ -27,10 +27,12 @@ from __future__ import annotations
 import random
 import string
 from datetime import timedelta
+from decimal import Decimal
 
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
 from django.utils import timezone
+from django.core.validators import MinValueValidator
 
 from apps.core.models import BaseModel
 
@@ -126,11 +128,12 @@ class User(AbstractBaseUser, PermissionsMixin, BaseModel):
     )
     ai_auto_price_limit = models.DecimalField(
         max_digits=12, decimal_places=2, default=500_000,
+        validators=[MinValueValidator(Decimal('0.00'))],
         help_text="full_auto uchun maksimal avtomatik bron summasi (UZS)",
     )
 
     # ── Hamyon ────────────────────────────────────────────────────────────────
-    balance      = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    balance      = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
     bonus_points = models.PositiveIntegerField(default=0)
 
     # ── Django ────────────────────────────────────────────────────────────────
@@ -302,8 +305,8 @@ class WalletTransaction(BaseModel):
 
     user             = models.ForeignKey(User, on_delete=models.CASCADE, related_name='wallet_transactions')
     transaction_type = models.CharField(max_length=20, choices=TransactionType.choices)
-    amount           = models.DecimalField(max_digits=14, decimal_places=2)
-    balance_after    = models.DecimalField(max_digits=14, decimal_places=2)
+    amount           = models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal('0.00'))])
+    balance_after    = models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal('0.00'))])
     description      = models.CharField(max_length=255, blank=True)
     reference_id     = models.CharField(max_length=64, blank=True, null=True)
 

@@ -1,5 +1,6 @@
 """Travel Content — Reels-uslubidagi ilhom kartochkalari va IMTIAZ Travels kuratsiyalangan turlar."""
 
+from decimal import Decimal
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator, MinValueValidator
@@ -38,7 +39,6 @@ class TravelReel(BaseModel):
         upload_to='travel_content/reels/covers/',
         validators=[FileExtensionValidator(['jpg', 'jpeg', 'png', 'webp'])],
         help_text="MAJBURIY — kartochka/thumbnail rasmi (video post uchun ham kerak)",
-        blank=True, null=True,
     )
     video_file = models.FileField(
         upload_to='travel_content/reels/videos/',
@@ -103,11 +103,9 @@ class CuratedTrip(BaseModel):
         upload_to='travel_content/curated_trips/covers/',
         validators=[FileExtensionValidator(['jpg', 'jpeg', 'png', 'webp'])],
         help_text="Video ustida play tugmasi bilan ko'rinadigan asosiy rasm — MAJBURIY",
-        blank=True, null=True,
     )
     video_file = models.FileField(
         upload_to='travel_content/curated_trips/videos/',
-        null=True, blank=True,
         validators=[FileExtensionValidator(VIDEO_EXTENSIONS)],
         help_text="MAJBURIY — bu model uchun video har doim bo'lishi shart (image-only variant yo'q)",
     )
@@ -122,7 +120,7 @@ class CuratedTrip(BaseModel):
     group_size_min = models.PositiveSmallIntegerField(default=1)
     group_size_max = models.PositiveSmallIntegerField(default=2, help_text='Kartochkada ko\'rsatiladigan odam soni (masalan "2 kishi")')
 
-    price_from = models.DecimalField(max_digits=12, decimal_places=2)
+    price_from = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
     currency = models.CharField(max_length=3, default='USD')
     price_unit = models.CharField(max_length=10, choices=PriceUnit.choices, default=PriceUnit.PER_ROUTE)
 

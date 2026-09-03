@@ -13,8 +13,10 @@ TZ 3.5 bo'limiga mos.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from django.db import models
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from apps.core.models import BaseModel
 
 
@@ -90,12 +92,12 @@ class Payment(BaseModel):
         choices=PaymentStatus.choices,
         default=PaymentStatus.PENDING,
     )
-    amount   = models.DecimalField(max_digits=14, decimal_places=2)
+    amount   = models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
     currency = models.CharField(max_length=3, default='UZS')
 
     # Komissiya (to'lov oqimi aniqlanganida to'ldiriladi)
-    commission_amount  = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    commission_percent = models.DecimalField(max_digits=5,  decimal_places=2, default=0)
+    commission_amount  = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
+    commission_percent = models.DecimalField(max_digits=5,  decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
 
     # Tashqi provayder ma'lumotlari
     external_transaction_id = models.CharField(max_length=128, blank=True, null=True, db_index=True)
@@ -103,7 +105,7 @@ class Payment(BaseModel):
     provider_response       = models.JSONField(null=True, blank=True)
 
     # Qaytarish
-    refunded_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    refunded_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
     refund_reason   = models.TextField(blank=True)
 
     error_message = models.TextField(blank=True)

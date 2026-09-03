@@ -1,6 +1,7 @@
 """CRM app serializers — mavjud + yangi (RestaurantTable, Staff)."""
 
 from drf_spectacular.utils import extend_schema_field
+from decimal import Decimal
 from rest_framework import serializers
 from .models import (
     Organization, Branch, BranchStaff,
@@ -30,7 +31,7 @@ class DashboardSerializer(serializers.Serializer):
     total_bookings_today = serializers.IntegerField()
     pending_bookings = serializers.IntegerField()
     confirmed_bookings = serializers.IntegerField()
-    revenue_today = serializers.DecimalField(max_digits=14, decimal_places=2)
+    revenue_today = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal('0.00'))
     branch = BranchSerializer()
 
 

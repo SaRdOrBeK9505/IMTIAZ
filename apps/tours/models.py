@@ -15,6 +15,7 @@ Microservice-ready:
     Kelajakda bu app alohida service ga ko'chishi mumkin.
 """
 
+from decimal import Decimal
 from django.db import models
 from django.conf import settings
 from django.utils.text import slugify
@@ -206,7 +207,7 @@ class TourPackage(BaseModel):
     duration_nights = models.PositiveSmallIntegerField(default=0)
 
     # ── Narx ──────────────────────────────────────────────────────────────────
-    base_price      = models.DecimalField(max_digits=16, decimal_places=2)
+    base_price      = models.DecimalField(max_digits=16, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
     currency        = models.CharField(max_length=3, default='UZS')
     price_per       = models.CharField(max_length=10, choices=PricePer.choices, default=PricePer.PERSON)
     max_group_size  = models.PositiveSmallIntegerField(default=20)
@@ -253,7 +254,7 @@ class TourPackage(BaseModel):
 
     # ── Denormalized statistika (tez query) ───────────────────────────────────
     total_bookings = models.PositiveIntegerField(default=0)
-    avg_rating     = models.DecimalField(max_digits=3, decimal_places=2, default=0)
+    avg_rating     = models.DecimalField(max_digits=3, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0.00'))])
     review_count   = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -341,6 +342,7 @@ class TourAvailability(BaseModel):
     booked_seats   = models.PositiveSmallIntegerField(default=0)
     price_override = models.DecimalField(
         max_digits=16, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(Decimal('0.01'))],
         help_text='Asosiy narxdan farq qilsa shu maydon to\'ldiriladi'
     )
     status = models.CharField(
