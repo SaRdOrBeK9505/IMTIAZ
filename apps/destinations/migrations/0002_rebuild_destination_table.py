@@ -10,20 +10,24 @@ def rebuild_tables(apps, schema_editor):
 
     with schema_editor.connection.cursor() as c:
         if db == 'postgresql':
-            # FK larni oldin tushirish
+            # FK larni oldin tushirish — constraint nomlari VPS da farq qilishi mumkin
             c.execute("""
                 ALTER TABLE travel_content_travelreel
                     DROP CONSTRAINT IF EXISTS travel_content_travelreel_destination_id_fkey;
+                ALTER TABLE travel_content_travelreel
+                    DROP CONSTRAINT IF EXISTS travel_content_trave_destination_id_bec2b49e_fk_destinati;
             """)
             c.execute("""
                 ALTER TABLE travel_content_curatedtrip
                     DROP CONSTRAINT IF EXISTS travel_content_curatedtrip_destination_id_fkey;
+                ALTER TABLE travel_content_curatedtrip
+                    DROP CONSTRAINT IF EXISTS travel_content_curat_destination_id_149aa9f3_fk_destinati;
             """)
 
-        # Eski jadvallarni o'chirish
-        c.execute("DROP TABLE IF EXISTS destinations_destinationimage")
-        c.execute("DROP TABLE IF EXISTS destinations_destination")
-        c.execute("DROP TABLE IF EXISTS destinations_country")
+        # Eski jadvallarni o'chirish — CASCADE bilan (barcha FK lar ham tushadi)
+        c.execute("DROP TABLE IF EXISTS destinations_destinationimage CASCADE")
+        c.execute("DROP TABLE IF EXISTS destinations_destination CASCADE")
+        c.execute("DROP TABLE IF EXISTS destinations_country CASCADE")
 
         if db == 'sqlite':
             # SQLite uchun UUID extension yo'q — TEXT ishlatamiz

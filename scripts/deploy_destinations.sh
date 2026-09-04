@@ -1,14 +1,14 @@
 #!/bin/bash
 # VPS da destinations migratsiyasini tuzatish va yangilash
-# Faqat BIR MARTA ishlatiladi — keyingi deploylar uchun oddiy migrate yetarli
+# Faqat BIR MARTA ishlatiladi
 #
 # Ishlatish: bash scripts/deploy_destinations.sh
 
-set -e  # birorta xato bo'lsa to'xta
+set -e
 
 echo "=== Destinations migration fix ==="
 
-# 1. Migration tarixini tozalash (eski Country/Destination jadvallar bor DB da)
+# 1. Migration tarixini tozalash
 python manage.py shell << 'EOF'
 from django.db import connection
 with connection.cursor() as c:
@@ -18,7 +18,7 @@ with connection.cursor() as c:
     print("[1] travel_content migration records cleared")
 EOF
 
-# 2. destinations 0001 ni fake apply (jadvalni yaratmaydi, faqat rekord)
+# 2. destinations 0001 ni fake apply
 python manage.py migrate destinations 0001_initial_destination --fake
 echo "[2] destinations 0001 faked"
 
@@ -26,9 +26,9 @@ echo "[2] destinations 0001 faked"
 python manage.py migrate travel_content --fake
 echo "[3] travel_content faked"
 
-# 4. 0002 ni haqiqiy ishlatish — eski jadvallarni o'chirib yangi Destination jadvalini yaratadi
+# 4. 0002 ni haqiqiy ishlatish — CASCADE bilan eski jadvallarni o'chirib yangi yaratadi
 python manage.py migrate destinations
-echo "[4] destinations 0002 applied (table rebuilt)"
+echo "[4] destinations 0002 applied"
 
 # 5. Seed data
 python manage.py seed_destinations
