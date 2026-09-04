@@ -17,7 +17,7 @@ from .serializers import (
     UserInquirySerializer,
 )
 
-_USER_TAG = 'User — Support'
+_USER_TAG = 'Telegram Mini App — Support'
 _ADMIN_TAG = 'Admin — Support'
 
 

@@ -23,7 +23,7 @@ from apps.crm.serializers import (
 
 from .helpers import can_manage_staff, can_view_analytics, get_staff_profile, is_restaurant_owner
 
-_STAFF_TAG = 'CRM Restaurant — Staff Analytics'
+_STAFF_TAG = 'CRM — Restaurant Staff Analytics'
 
 
 class RestaurantStaffListView(generics.ListAPIView):

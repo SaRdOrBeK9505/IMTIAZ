@@ -39,10 +39,10 @@ from ..permissions import (
 
 logger = logging.getLogger(__name__)
 
-_PACKAGES_TAG = 'CRM Travel — Packages'
-_BOOKINGS_TAG = 'CRM Travel — Bookings'
-_ANALYTICS_TAG = 'CRM Travel — Analytics'
-_DASHBOARD_TAG = 'CRM Travel — Dashboard'
+_PACKAGES_TAG = 'CRM — Travel Packages'
+_BOOKINGS_TAG = 'CRM — Travel Bookings'
+_ANALYTICS_TAG = 'CRM — Travel Analytics'
+_DASHBOARD_TAG = 'CRM — Travel Dashboard'
 
 
 class TourCRMMixin:

@@ -11,7 +11,7 @@ from apps.core.openapi_schemas import ErrorResponseSerializer
 from .models import ExternalProviderLog
 from .serializers import ExternalProviderLogSerializer
 
-_TAG = 'Integrations'
+_TAG = 'Admin — Integrations'
 
 
 class ExternalProviderLogListView(generics.ListAPIView):

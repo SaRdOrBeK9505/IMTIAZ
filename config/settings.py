@@ -76,6 +76,7 @@ LOCAL_APPS = [
     'apps.travel_content', # Reels va kuratsiyalangan sayohat kontenti
     'apps.support',     # Foydalanuvchi so'rovlari tizimi
     'apps.settings_app', # Ilova sozlamalari
+    'apps.banners',     # Reklama bannerlari
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

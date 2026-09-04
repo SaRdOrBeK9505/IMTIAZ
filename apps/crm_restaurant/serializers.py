@@ -62,7 +62,16 @@ class FeaturedItemSerializer(serializers.ModelSerializer):
 
 
 class TableStatusUpdateSerializer(serializers.Serializer):
-    current_status = serializers.ChoiceField(choices=TableStatus.choices)
+    current_status = serializers.ChoiceField(choices=['bosh', 'band', 'band_mijoz'])
+    
+    def validate_current_status(self, value):
+        # Map UI status to backend status
+        status_mapping = {
+            'bosh': 'available',
+            'band': 'occupied',
+            'band_mijoz': 'reserved',
+        }
+        return status_mapping.get(value, 'available')
 
 
 class TableSlotGenerateSerializer(serializers.Serializer):
@@ -163,7 +172,6 @@ __all__ = [
     'MenuItemSerializer',
     'FeaturedItemSerializer',
     'RestaurantTableSerializer',
-    'RestaurantTableWriteSerializer',
     'TableStatusUpdateSerializer',
     'TableSlotGenerateSerializer',
     'TableSlotUpdateSerializer',

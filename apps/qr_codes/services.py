@@ -282,6 +282,24 @@ class QRRedemptionService:
         # Clear cache for this QR code
         QRScanService.clear_cache(code, user_id=user.id if user and user.is_authenticated else None)
 
+        # Send QR scan success notification
+        if user and user.is_authenticated:
+            from apps.notifications.tasks import notify_user
+            from apps.notifications.models import Notification
+            
+            notify_user(
+                user=user,
+                notification_type=Notification.NotificationType.QR_SCAN_SUCCESS,
+                title=f'QR kod skanlandi: {qr.title}',
+                body=f'{discount} UZS chegirma qo\'llandi. Yakuniy to\'lov: {final_amount} UZS',
+                metadata={
+                    'qr_code_id': str(qr.id),
+                    'qr_code_title': qr.title,
+                    'discount_applied': str(discount),
+                    'final_amount': str(final_amount),
+                }
+            )
+
         logger.info(
             "QR redeemed: code=%s, user=%s, discount=%s, staff=%s",
             code, user, discount, staff_user,

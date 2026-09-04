@@ -81,7 +81,7 @@ class RequestOTPView(PublicAPIView):
         },
         summary="Ro'yxatdan o'tish: OTP SMS yuborish (1-qadam)",
         description='Rate limit: 60 soniyada 1 ta SMS. `full_name` cache\'da 15 daqiqa saqlanadi.',
-        tags=['Register'],
+        tags=['Telegram Mini App — Auth'],
     )
     def post(self, request):
         serializer = RequestOTPSerializer(data=request.data)
@@ -141,7 +141,7 @@ class VerifyOTPView(PublicAPIView):
             400: ErrorResponseSerializer,
         },
         summary="Ro'yxatdan o'tish: OTP tasdiqlash (2-qadam)",
-        tags=['Register'],
+        tags=['Telegram Mini App — Auth'],
     )
     def post(self, request):
         serializer = VerifyOTPSerializer(data=request.data)
@@ -181,7 +181,7 @@ class CompleteRegistrationView(PublicAPIView):
         },
         summary="Ro'yxatdan o'tish: parol + Telegram bog'lash + JWT (3-4-qadam)",
         description='Muvaffaqiyatli ro\'yxatdan o\'tishdan keyin avtomatik login (JWT qaytariladi).',
-        tags=['Register'],
+        tags=['Telegram Mini App — Auth'],
     )
     def post(self, request):
         serializer = CompleteRegistrationSerializer(data=request.data)
@@ -197,7 +197,7 @@ class TokenRefreshView(SimpleJWTTokenRefreshView):
     permission_classes     = [AllowAny]
 
     @extend_schema(
-        tags=['Auth — Mobile', 'Auth — CRM', 'Auth — Admin'],
+        tags=['Telegram Mini App — Auth', 'CRM — Auth', 'Admin — Auth'],
         summary='JWT access token yangilash',
         description=(
             'Refresh token yuboriladi, yangi access (+ rotate bo\'lsa yangi refresh) qaytariladi. '
@@ -234,7 +234,7 @@ class LoginView(PublicAPIView):
         },
         summary='Kirish: phone + password (customer)',
         description='Telegram Mini App va mobile ilova. Token `aud=mobile`.',
-        tags=['Auth — Mobile'],
+        tags=['Telegram Mini App — Auth'],
     )
     def post(self, request):
         serializer = self.serializer_class(
@@ -276,7 +276,7 @@ class CRMLoginView(LoginView):
             'Frontend `user.role` asosida qaysi CRM panelga yo\'naltiradi.\n\n'
             'Access token muddati tugasa: `POST /api/auth/token/refresh/` (umumiy endpoint).'
         ),
-        tags=['Auth — CRM'],
+        tags=['CRM — Auth'],
     )
     def post(self, request):
         return super().post(request)
@@ -297,7 +297,7 @@ class AdminLoginView(LoginView):
         },
         summary='Admin kirish: phone + password',
         description='Ichki admin panel. Token `aud=admin`.',
-        tags=['Auth — Admin'],
+        tags=['Admin — Auth'],
     )
     def post(self, request):
         return super().post(request)
@@ -321,7 +321,7 @@ class LogoutView(APIView):
             400: ErrorResponseSerializer,
         },
         summary='Chiqish (refresh tokenni bekor qilish)',
-        tags=['Auth — Mobile'],
+        tags=['Telegram Mini App — Auth'],
     )
     def post(self, request):
         try:
@@ -342,7 +342,7 @@ class UserMeView(generics.RetrieveUpdateAPIView):
     http_method_names  = ['get', 'patch']
 
     @extend_schema(
-        tags=['Users'],
+        tags=['Telegram Mini App — Profile'],
         summary='Mening profilim',
         description='Mobile/Telegram foydalanuvchi profili. CRM userlar uchun ham ochiq.',
     )
@@ -350,7 +350,7 @@ class UserMeView(generics.RetrieveUpdateAPIView):
         return super().get(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Users'],
+        tags=['Telegram Mini App — Profile'],
         summary='Profilni yangilash',
         request=UserProfileSerializer,
         responses={200: UserProfileSerializer},
@@ -370,7 +370,7 @@ class AISettingsView(generics.UpdateAPIView):
     http_method_names  = ['patch']
 
     @extend_schema(
-        tags=['Users'],
+        tags=['Telegram Mini App — Profile'],
         summary='AI sozlamalarini yangilash',
         description='`ai_autonomy_level` va `ai_auto_price_limit` — tier cheklovi bilan.',
         request=AISettingsSerializer,

@@ -22,7 +22,7 @@ from apps.crm_core.mixins import LeadTrackingMixin
 
 from .helpers import log_staff_activity, require_restaurant_permission, resolve_branch
 
-_BOOKINGS_TAG = 'CRM Restaurant — Bookings'
+_BOOKINGS_TAG = 'CRM — Restaurant Bookings'
 
 
 class RestaurantBookingListCreateView(LeadTrackingMixin, generics.ListCreateAPIView):
@@ -91,7 +91,7 @@ class RestaurantBookingListCreateView(LeadTrackingMixin, generics.ListCreateAPIV
         from apps.users.models import UserRole
 
         User = get_user_model()
-        phone = data['customer_phone'].strip()
+        phone = data['phone'].strip()
         user, _ = User.objects.get_or_create(
             phone=phone,
             defaults={
@@ -115,15 +115,15 @@ class RestaurantBookingListCreateView(LeadTrackingMixin, generics.ListCreateAPIV
             service_type=ServiceType.RESTAURANT,
             status=BookingStatus.PENDING,
             title=f'Stol #{table_number}' if table_number else 'Restoran broni',
-            booking_date=data['reservation_at'],
+            booking_date=data['date_time'],
         )
         rb = RestaurantBooking.objects.create(
             booking=booking,
             branch=branch,
-            reservation_at=data['reservation_at'],
-            guest_count=data['guest_count'],
+            reservation_at=data['date_time'],
+            guest_count=data['guests_count'],
             duration_minutes=data['duration_minutes'],
-            special_requests=data.get('special_requests', ''),
+            special_requests=data.get('note', ''),
             table_number=table_number or None,
         )
 

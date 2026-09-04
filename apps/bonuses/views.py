@@ -18,8 +18,8 @@ from .serializers import (
 )
 from .services import QRCodeService
 
-_ADMIN_TAG = 'Admin — Bonuses'
-_USER_TAG = 'User — Bonuses'
+_ADMIN_TAG = 'CRM — Promo Discounts'
+_USER_TAG = 'Telegram Mini App — Bonuses'
 
 
 @extend_schema_view(
@@ -54,14 +54,16 @@ class BonusCategoryViewSet(viewsets.ModelViewSet):
         return qs
     
     @action(detail=True, methods=['post'])
+    @extend_schema(tags=[_ADMIN_TAG], summary='Bonus kategoriyasini faollashtirish')
     def activate(self, request, pk=None):
         """POST /api/admin/bonuses/categories/{id}/activate/ — Activate bonus."""
         bonus = self.get_object()
         bonus.is_active = True
         bonus.save(update_fields=['is_active', 'updated_at'])
         return Response({'status': 'activated'})
-    
+
     @action(detail=True, methods=['post'])
+    @extend_schema(tags=[_ADMIN_TAG], summary='Bonus kategoriyasini deaktivatsiya qilish')
     def deactivate(self, request, pk=None):
         """POST /api/admin/bonuses/categories/{id}/deactivate/ — Deactivate bonus."""
         bonus = self.get_object()

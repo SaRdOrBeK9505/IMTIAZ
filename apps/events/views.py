@@ -16,7 +16,7 @@ from .serializers import (
     EventRegistrationSerializer,
 )
 
-_TAG = 'Events'
+_TAG = 'Telegram Mini App — Events'
 _ADMIN_TAG = 'Admin — Events'
 
 

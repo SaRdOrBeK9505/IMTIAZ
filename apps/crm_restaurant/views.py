@@ -32,10 +32,10 @@ from .serializers import (
     RestaurantTableWriteSerializer,
 )
 
-_TABLE_TAG = 'CRM Restaurant — Tables'
-_MENU_TAG = 'CRM Restaurant — Menu'
-_FEATURED_TAG = 'CRM Restaurant — Featured'
-_ORG_TAG = 'CRM Restaurant — Organization'
+_TABLE_TAG = 'CRM — Restaurant Tables'
+_MENU_TAG = 'CRM — Restaurant Menu'
+_FEATURED_TAG = 'CRM — Restaurant Featured'
+_ORG_TAG = 'CRM — Restaurant Organization'
 
 
 @extend_schema_view(

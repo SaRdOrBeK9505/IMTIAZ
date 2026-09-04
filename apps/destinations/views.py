@@ -19,7 +19,7 @@ from .serializers import (
 )
 
 _ADMIN_TAG = 'Admin — Destinations'
-_CLIENT_TAG = 'Client — Destinations'
+_CLIENT_TAG = 'Telegram Mini App — Destinations'
 
 
 @extend_schema_view(

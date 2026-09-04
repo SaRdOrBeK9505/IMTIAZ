@@ -1,12 +1,13 @@
 """Restaurant Lead CRM views — acceptance/rejection workflow."""
 
-from drf_spectacular.utils import OpenApiResponse, extend_schema, extend_schema_view
+from drf_spectacular.utils import OpenApiResponse, extend_schema, extend_schema_view, OpenApiParameter
 from rest_framework import status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
+from rest_framework.pagination import PageNumberPagination
 
 from apps.core.authentication import CRMJWTAuthentication
 from apps.core.openapi_schemas import ErrorResponseSerializer
@@ -21,7 +22,13 @@ from .serializers import (
     RestaurantBookingLeadUpdateTimeSerializer,
 )
 
-_LEAD_TAG = 'CRM Restaurant — Leads'
+_LEAD_TAG = 'CRM — Restaurant Leads'
+
+
+class LeadPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 100
 
 
 class IsRestaurantStaffPermission:
@@ -43,6 +50,11 @@ class IsRestaurantStaffPermission:
         tags=[_LEAD_TAG],
         summary='Restoran leadlari ro\'yxati',
         description='Faqat o\'z restoraniga tegishli leadlarni ko\'radi.',
+        parameters=[
+            OpenApiParameter('page', int, description='Sahifa raqami'),
+            OpenApiParameter('page_size', int, description='Sahifa hajmi (default: 10, max: 100)'),
+            OpenApiParameter('status', str, description='Filter by status: pending, accepted, rejected'),
+        ],
     ),
     create=extend_schema(
         tags=[_LEAD_TAG],
@@ -62,6 +74,7 @@ class RestaurantBookingLeadViewSet(RestaurantCRMViewSet):
     serializer_class = RestaurantBookingLeadSerializer
     permission_classes = [IsAuthenticated, IsRestaurantCRMUser, IsRestaurantStaffPermission]
     authentication_classes = [CRMJWTAuthentication]
+    pagination_class = LeadPagination
     
     def get_queryset(self):
         """Faqat o'z restoraniga tegishli leadlarni qaytarish."""
@@ -70,9 +83,16 @@ class RestaurantBookingLeadViewSet(RestaurantCRMViewSet):
         
         try:
             staff = RestaurantStaff.objects.get(user=self.request.user, is_active=True)
-            return RestaurantBookingLead.objects.filter(restaurant=staff.restaurant).select_related(
+            qs = RestaurantBookingLead.objects.filter(restaurant=staff.restaurant).select_related(
                 'restaurant', 'accepted_by'
             )
+            
+            # Filter by status if provided
+            status_filter = self.request.query_params.get('status')
+            if status_filter:
+                qs = qs.filter(status=status_filter)
+            
+            return qs
         except RestaurantStaff.DoesNotExist:
             return RestaurantBookingLead.objects.none()
     

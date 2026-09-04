@@ -44,7 +44,7 @@ class PaymentListView(generics.ListAPIView):
         )
 
     @extend_schema(
-        tags=['Payments'],
+        tags=['Telegram Mini App — Payments'],
         summary='To\'lovlar tarixi',
         description='Foydalanuvchining barcha to\'lovlari (AlifPay va boshqalar).',
         responses={200: PaymentSerializer(many=True)},
@@ -69,7 +69,7 @@ class PaymentInitiateView(APIView):
             '(hold, narx, depozit). Keyin AlifPay checkout ochiladi. '
             'Mijoz to\'lagach Bookhara settlement saga ishga tushadi.'
         ),
-        tags=['Payments'],
+        tags=['Telegram Mini App — Payments'],
     )
     def post(self, request):
         serializer = PaymentInitiateSerializer(data=request.data)
@@ -112,7 +112,7 @@ class PaymentConfirmView(APIView):
         request=None,
         responses={200: OpenApiResponse(description='Joriy to\'lov holati')},
         summary='To\'lovni tasdiqlash (polling)',
-        tags=['Payments'],
+        tags=['Telegram Mini App — Payments'],
     )
     def post(self, request, payment_id):
         if not Payment.objects.filter(id=payment_id, user=request.user).exists():
@@ -136,7 +136,7 @@ class PaymentWebhookView(APIView):
         responses={200: OpenApiResponse(description='OK')},
         summary='Provayder webhook callback',
         description='AlifPay: HMAC-SHA256 imzo tekshiriladi.',
-        tags=['Payments'],
+        tags=['Telegram Mini App — Payments'],
     )
     def post(self, request, provider: str):
         logger.info('Webhook [%s] qabul qilindi', provider)

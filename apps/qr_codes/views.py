@@ -43,7 +43,7 @@ from apps.crm.models import StaffActivityLog
 
 logger = logging.getLogger(__name__)
 
-_QR_CRM_TAG = 'CRM Restaurant — QR Codes'
+_QR_CRM_TAG = 'CRM — QR Codes'
 
 
 class RestaurantQRCRMMixin:
@@ -81,7 +81,7 @@ class QRCodeInfoView(APIView):
     @extend_schema(
         responses = {200: QRCodePublicSerializer},
         summary   = 'QR kod ma\'lumotlari',
-        tags      = ['QR Codes — User'],
+        tags      = ['Telegram Mini App — QR Codes'],
     )
     def get(self, request, code: str):
         info = QRScanService.validate_and_get_info(
@@ -107,7 +107,7 @@ class QRRedeemView(APIView):
         request   = QRRedeemRequestSerializer,
         responses = {200: QRRedeemResponseSerializer},
         summary   = 'QR kod chegirmasini qo\'llash',
-        tags      = ['QR Codes — User'],
+        tags      = ['Telegram Mini App — QR Codes'],
     )
     def post(self, request, code: str):
         serializer = QRRedeemRequestSerializer(data=request.data)
@@ -275,6 +275,110 @@ class QRScannerDashboardView(RestaurantQRCRMMixin, APIView):
         return Response({
             'active_bonuses':   active_bonuses,
             'recent_scans':     QRRedemptionCRMSerializer(applied[:10], many=True).data,
+        })
+
+
+class QRScannerAnalyticsView(RestaurantQRCRMMixin, APIView):
+    """
+    GET /api/crm/restaurant/qr/scanner/analytics/
+    QR scanner analitikasi uchun pagination bilan.
+    """
+    @extend_schema(
+        responses={200: OpenApiResponse(description='QR scanner analitikasi')},
+        summary='QR scanner analitikasi (pagination bilan)',
+        tags=[_QR_CRM_TAG],
+        parameters=[
+            OpenApiParameter('page', int, description='Sahifa raqami'),
+            OpenApiParameter('page_size', int, description='Sahifa hajmi (default: 20, max: 100)'),
+            OpenApiParameter('date_from', str, description='Filter from date (YYYY-MM-DD)'),
+            OpenApiParameter('date_to', str, description='Filter to date (YYYY-MM-DD)'),
+            OpenApiParameter('qr_code_id', str, description='Filter by specific QR code'),
+        ],
+    )
+    def get(self, request):
+        from django.core.paginator import Paginator
+        from django.db.models import Sum, Count, Q, Avg
+        from django.utils import timezone
+        from datetime import timedelta, date
+        
+        org = _get_crm_org(request)
+        
+        # Get query parameters
+        page = int(request.query_params.get('page', 1))
+        page_size = min(int(request.query_params.get('page_size', 20)), 100)
+        date_from = request.query_params.get('date_from')
+        date_to = request.query_params.get('date_to')
+        qr_code_id = request.query_params.get('qr_code_id')
+        
+        # Build queryset
+        qs = QRCodeRedemption.objects.filter(
+            qr_code__organization=org
+        ).select_related('qr_code', 'user', 'booking').order_by('-scanned_at')
+        
+        # Apply filters
+        if date_from:
+            qs = qs.filter(scanned_at__date__gte=date_from)
+        if date_to:
+            qs = qs.filter(scanned_at__date__lte=date_to)
+        if qr_code_id:
+            qs = qs.filter(qr_code_id=qr_code_id)
+        
+        # Get summary statistics
+        summary = qs.aggregate(
+            total_scans=Count('id'),
+            total_discount=Sum('discount_applied'),
+            total_revenue=Sum('final_amount'),
+            unique_users=Count('user', distinct=True),
+            average_discount=Avg('discount_applied'),
+        )
+        
+        # Top bonuses
+        top_bonuses = qs.values('qr_code__title').annotate(
+            scan_count=Count('id')
+        ).order_by('-scan_count')[:5]
+        
+        # Daily scans (last 7 days)
+        days = int(request.query_params.get('days', 7))
+        end_date = timezone.now().date()
+        start_date = end_date - timedelta(days=days-1)
+        
+        daily_scans = []
+        current_date = start_date
+        while current_date <= end_date:
+            count = qs.filter(scanned_at__date=current_date).count()
+            daily_scans.append({
+                'date': current_date.strftime('%Y-%m-%d'),
+                'count': count
+            })
+            current_date += timedelta(days=1)
+        
+        # Paginate results
+        paginator = Paginator(qs, page_size)
+        page_obj = paginator.get_page(page)
+        
+        return Response({
+            'summary': {
+                'total_scans': summary['total_scans'] or 0,
+                'total_discount_amount': str(summary['total_discount'] or 0),
+                'average_discount': str(int(summary['average_discount'] or 0)),
+            },
+            'top_bonuses': [
+                {
+                    'bonus_name': item['qr_code__title'] or 'Noma\'lum',
+                    'scan_count': item['scan_count']
+                }
+                for item in top_bonuses
+            ],
+            'daily_scans': daily_scans,
+            'data': QRRedemptionCRMSerializer(page_obj, many=True).data,
+            'pagination': {
+                'page': page,
+                'page_size': page_size,
+                'total_pages': paginator.num_pages,
+                'total_count': paginator.count,
+                'has_next': page_obj.has_next(),
+                'has_previous': page_obj.has_previous(),
+            }
         })
 
 

@@ -23,7 +23,7 @@ from apps.tours.serializers import (
 )
 from apps.tours.views.crm_views import TourCRMMixin
 
-_DESTINATIONS_TAG = 'CRM Travel — Destinations'
+_DESTINATIONS_TAG = 'CRM — Travel Destinations'
 
 
 def _save_destination_images(request, destination: TourDestination) -> None:

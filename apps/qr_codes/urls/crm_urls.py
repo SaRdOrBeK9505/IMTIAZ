@@ -10,6 +10,7 @@ from apps.qr_codes.views import (
     QRStaffScanView,
     QRStaffRedeemView,
     QRScannerDashboardView,
+    QRScannerAnalyticsView,
     QRBonusesListView,
     QRCodeAnalyticsView,
     QRAllAnalyticsView,
@@ -18,6 +19,7 @@ from apps.qr_codes.views import (
 urlpatterns = [
     # UI sahifalari (screenshot mos — specific pathlar birinchi)
     path('scanner/',                     QRScannerDashboardView.as_view(),     name='crm-qr-scanner'),
+    path('scanner/analytics/',           QRScannerAnalyticsView.as_view(),     name='crm-qr-scanner-analytics'),
     path('bonuses/',                     QRBonusesListView.as_view(),          name='crm-qr-bonuses'),
     path('analytics/',                   QRAllAnalyticsView.as_view(),         name='crm-qr-all-analytics'),
     path('redemptions/',                 QRAllRedemptionsListView.as_view(),   name='crm-qr-all-redemptions'),

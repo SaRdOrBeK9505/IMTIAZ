@@ -3,7 +3,6 @@
 from django.urls import path
 from .views import (
     CRMDashboardView,
-    CRMAuthView,
     BranchDashboardView,
     BranchBookingListView,
     BookingStatusUpdateView,
@@ -21,7 +20,6 @@ from apps.crm_restaurant.staff_views import (
 
 urlpatterns = [
     path('dashboard/', CRMDashboardView.as_view(), name='crm-home-dashboard'),
-    path('auth/', CRMAuthView.as_view(), name='crm-auth'),
 
     path('branches/<uuid:branch_id>/dashboard/', BranchDashboardView.as_view(), name='crm-dashboard'),
     path('branches/<uuid:branch_id>/bookings/', BranchBookingListView.as_view(), name='crm-bookings'),

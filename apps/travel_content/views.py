@@ -13,7 +13,7 @@ from .serializers import (
 )
 
 _ADMIN_TAG = 'Admin — Travel Content'
-_CLIENT_TAG = 'Client — Travel Content'
+_CLIENT_TAG = 'Telegram Mini App — Travel Content'
 
 
 # ══════════════════════════ ADMIN — CRUD ════════════════════════════════════

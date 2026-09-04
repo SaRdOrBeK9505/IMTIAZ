@@ -7,6 +7,7 @@ Tasks:
     process_scheduled_notifications — navbatdagi bildirishnomalar
     retry_failed_subscription_payments — obuna qayta to'lov
     cleanup_old_notifications  — eski bildirishnomalar tozalash
+    send_promo_discount_notification — chegirma taklifi yuborish
 """
 
 from __future__ import annotations
@@ -339,3 +340,64 @@ def notify_user(
 
     # Darhol yuborish
     send_notification.delay(str(notif.id))
+
+
+# ─── Promo Discount Notification ───────────────────────────────────────────────
+
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    name='notifications.send_promo_discount_notification',
+)
+def send_promo_discount_notification(self, promo_id: str) -> bool:
+    """
+    CRM staff tomonidan yaratilgan chegirma taklifini mijozga yuboradi.
+    """
+    from .models import PromoDiscount, Notification
+    from apps.users.models import User
+    
+    try:
+        promo = PromoDiscount.objects.select_related('created_by').get(id=promo_id)
+    except PromoDiscount.DoesNotExist:
+        logger.error('Promo discount topilmadi: id=%s', promo_id)
+        return False
+    
+    # Allaqachon yuborilgan
+    if promo.is_sent:
+        return True
+    
+    # Find user by phone
+    try:
+        user = User.objects.get(phone=promo.customer_phone)
+    except User.DoesNotExist:
+        logger.error('User topilmadi: phone=%s', promo.customer_phone)
+        promo.status = PromoDiscount.Status.CANCELLED
+        promo.save(update_fields=['status', 'updated_at'])
+        return False
+    
+    # Create notification
+    discount_text = f"{promo.discount_value}% chegirma" if promo.discount_type == 'percentage' else f"{promo.discount_value} so'm chegirma"
+    
+    notif = Notification.objects.create(
+        user=user,
+        notification_type=Notification.NotificationType.PROMO_DISCOUNT,
+        channel=Notification.Channel.TELEGRAM,
+        title=promo.title,
+        body=f"{promo.description}\n\nChegirma: {discount_text}\nMuddati: {promo.valid_until.strftime('%d.%m.%Y %H:%M') if promo.valid_until else 'Cheklanmagan'}",
+        metadata={
+            'promo_id': str(promo.id),
+            'discount_type': promo.discount_type,
+            'discount_value': str(promo.discount_value),
+        },
+    )
+    
+    # Send notification
+    result = send_notification(str(notif.id))
+    
+    if result:
+        promo.is_sent = True
+        promo.sent_at = timezone.now()
+        promo.save(update_fields=['is_sent', 'sent_at', 'updated_at'])
+    
+    return result

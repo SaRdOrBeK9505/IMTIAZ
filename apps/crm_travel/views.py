@@ -13,7 +13,7 @@ from apps.crm_core.onboarding import OwnerProvisioningError, create_branch_for_o
 from apps.crm_restaurant.serializers import BranchCreateSerializer, BranchProfileSerializer
 from apps.users.models import UserRole
 
-_ORG_TAG = 'CRM Travel — Organization'
+_ORG_TAG = 'CRM — Travel Organization'
 
 
 class TourOrganizationView(APIView):

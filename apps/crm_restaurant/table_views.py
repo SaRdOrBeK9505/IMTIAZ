@@ -227,9 +227,9 @@ class RestaurantTablesGroupedView(BranchScopedMixin, APIView):
 
     @extend_schema(
         tags=[_TABLE_TAG],
-        summary='Stollar bo\'limlar bo\'yicha guruhlangan',
+        summary='Stollar bo\'limlar bo\'yicha guruhlangan (filtr bilan)',
         parameters=[
-            OpenApiParameter('section', str, required=False),
+            OpenApiParameter('location', str, description='Filter by location: all|ichki|tashqi|vip|teras'),
             OpenApiParameter('branch_id', str, required=False),
         ],
         responses={200: OpenApiResponse(description='Guruhlangan stollar')},
@@ -243,15 +243,38 @@ class RestaurantTablesGroupedView(BranchScopedMixin, APIView):
         qs = RestaurantTable.objects.filter(branch=branch, is_active=True).order_by(
             'section', 'table_number',
         )
-        if section := request.query_params.get('section'):
-            qs = qs.filter(section__iexact=section)
+        
+        # Filter by location
+        location_filter = request.query_params.get('location', 'all')
+        if location_filter != 'all':
+            location_mapping = {
+                'ichki': 'Ichki zal',
+                'tashqi': 'Tashqi',
+                'vip': 'VIP',
+                'teras': 'Teras',
+            }
+            section_filter = location_mapping.get(location_filter.lower())
+            if section_filter:
+                qs = qs.filter(section__iexact=section_filter)
 
         sections: dict = {}
         for table in qs:
             key = table.section or 'Boshqa'
             sections.setdefault(key, {'section': key, 'count': 0, 'tables': []})
             sections[key]['count'] += 1
-            sections[key]['tables'].append(RestaurantTableSerializer(table).data)
+            
+            # Map status to UI format
+            status_mapping = {
+                'available': 'bosh',
+                'occupied': 'band',
+                'reserved': 'band_mijoz',
+                'maintenance': 'band',
+            }
+            ui_status = status_mapping.get(table.current_status, 'bosh')
+            
+            table_data = RestaurantTableSerializer(table).data
+            table_data['ui_status'] = ui_status
+            sections[key]['tables'].append(table_data)
 
         return Response({
             'branch_id': str(branch.id),

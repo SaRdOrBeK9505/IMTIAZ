@@ -40,19 +40,9 @@ urlpatterns = [
         # A'zolik
         path('membership/', include('apps.membership.urls')),
 
-        # CRM — vertikal namespace (rol asosida) — legacy dan OLDIN
+        # CRM — vertikal namespace (rol asosida)
         path('crm/restaurant/', include('apps.crm_restaurant.urls')),
-        path('crm/tour/',       include('apps.crm_travel.urls')),
-        path('crm/travel/',     include('apps.crm_travel.urls')),  # alias
-
-        # CRM (filial paneli) — legacy endpointlar
-        path('crm/', include('apps.crm.urls')),
-
-        # CRM — Tur kompaniyasi (alohida UI, legacy)
-        path('crm/tours/', include('apps.crm_travel.legacy_urls')),
-
-        # CRM — QR kodlar (legacy; yangi: /api/crm/restaurant/qr/)
-        path('crm/qr/', include('apps.qr_codes.urls.crm_urls')),
+        path('crm/travel/',     include('apps.crm_travel.urls')),
 
         # CRM — bildirishnomalar (lead, yangilanishlar)
         path('crm/notifications/', include('apps.notifications.crm_urls')),
@@ -83,6 +73,9 @@ urlpatterns = [
 
         # App Settings (admin + public)
         path('settings/', include('apps.settings_app.urls')),
+
+        # Banners (admin + client)
+        path('banners/', include('apps.banners.urls')),
 
         # Integrations logs (admin only)
         path('integrations/', include('apps.integrations.urls')),

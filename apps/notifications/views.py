@@ -44,7 +44,7 @@ class NotificationListView(generics.ListAPIView):
         return qs[:50]
 
     @extend_schema(
-        tags=['Notifications'],
+        tags=['Telegram Mini App — Notifications'],
         summary='Bildirishnomalar ro\'yxati',
         description='Oxirgi 50 ta yozuv. `?unread=true` — faqat o\'qilmaganlar.',
         parameters=[
@@ -64,7 +64,7 @@ class NotificationReadView(APIView):
         request=None,
         responses={200: OpenApiResponse(description="O'qildi")},
         summary="Bildirishnomani o'qildi deb belgilash",
-        tags=['Notifications'],
+        tags=['Telegram Mini App — Notifications'],
     )
     def post(self, request, pk):
         updated = Notification.objects.filter(
@@ -89,7 +89,7 @@ class NotificationReadAllView(APIView):
         request=None,
         responses={200: OpenApiResponse(description='Barchasi o\'qildi')},
         summary='Barcha bildirishnomalarni o\'qildi deb belgilash',
-        tags=['Notifications'],
+        tags=['Telegram Mini App — Notifications'],
     )
     def post(self, request):
         count = Notification.objects.filter(
@@ -114,7 +114,7 @@ class TelegramWebhookView(APIView):
     authentication_classes = []
 
     @extend_schema(
-        tags=['Notifications'],
+        tags=['Telegram Mini App — Notifications'],
         summary='Telegram bot webhook',
         description='Telegram Bot API update qabul qiladi. X-TELEGRAM-BOT-API-SECRET-TOKEN tekshiriladi.',
         request=OpenApiTypes.OBJECT,

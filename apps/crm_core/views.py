@@ -28,7 +28,7 @@ class RestaurantStaffListCreateView(RestaurantStaffManagementMixin, APIView):
     permission_classes = [IsAuthenticated, IsRestaurantOwner]
 
     @extend_schema(
-        tags=['CRM Restaurant — Staff'],
+        tags=['CRM — Restaurant Staff'],
         summary='Restoran xodimlari ro\'yxati',
         responses={200: BranchStaffListSerializer(many=True), 403: ErrorResponseSerializer},
     )
@@ -37,7 +37,7 @@ class RestaurantStaffListCreateView(RestaurantStaffManagementMixin, APIView):
         return Response(BranchStaffListSerializer(staff, many=True).data)
 
     @extend_schema(
-        tags=['CRM Restaurant — Staff'],
+        tags=['CRM — Restaurant Staff'],
         summary='Restoranga yangi xodim qo\'shish',
         description='Yaratilgan user roli: `restaurant_staff`. Faqat owner qo\'shgan xodim CRM ga kira oladi.',
         request=BranchStaffCreateSerializer,
@@ -62,7 +62,7 @@ class RestaurantStaffDetailView(RestaurantStaffManagementMixin, APIView):
         return self.get_staff_queryset().filter(pk=pk).first()
 
     @extend_schema(
-        tags=['CRM Restaurant — Staff'],
+        tags=['CRM — Restaurant Staff'],
         summary='Restoran xodimini yangilash',
         request=BranchStaffUpdateSerializer,
         responses={200: BranchStaffListSerializer, 404: ErrorResponseSerializer},
@@ -79,7 +79,7 @@ class RestaurantStaffDetailView(RestaurantStaffManagementMixin, APIView):
         return Response(BranchStaffListSerializer(staff).data)
 
     @extend_schema(
-        tags=['CRM Restaurant — Staff'],
+        tags=['CRM — Restaurant Staff'],
         summary='Restoran xodimini deaktivatsiya qilish',
         responses={204: OpenApiResponse(description='OK'), 404: ErrorResponseSerializer},
     )
@@ -100,7 +100,7 @@ class RestaurantOwnerDashboardView(OwnerDashboardMixin, APIView):
     permission_classes = [IsAuthenticated, IsRestaurantOwner]
 
     @extend_schema(
-        tags=['CRM Restaurant — Dashboard'],
+        tags=['CRM — Restaurant Dashboard'],
         summary='Restoran owner dashboard',
         responses={200: OwnerDashboardResponseSerializer, 403: ErrorResponseSerializer},
     )
@@ -118,7 +118,7 @@ class TourStaffListCreateView(TourStaffManagementMixin, APIView):
     permission_classes = [IsAuthenticated, IsTourOwner]
 
     @extend_schema(
-        tags=['CRM Travel — Staff'],
+        tags=['CRM — Travel Staff'],
         summary='Tur kompaniyasi xodimlari ro\'yxati',
         responses={200: BranchStaffListSerializer(many=True), 403: ErrorResponseSerializer},
     )
@@ -127,7 +127,7 @@ class TourStaffListCreateView(TourStaffManagementMixin, APIView):
         return Response(BranchStaffListSerializer(staff, many=True).data)
 
     @extend_schema(
-        tags=['CRM Travel — Staff'],
+        tags=['CRM — Travel Staff'],
         summary='Tur kompaniyasiga yangi xodim qo\'shish',
         description='Yaratilgan user roli: `tour_staff`.',
         request=BranchStaffCreateSerializer,
@@ -152,7 +152,7 @@ class TourStaffDetailView(TourStaffManagementMixin, APIView):
         return self.get_staff_queryset().filter(pk=pk).first()
 
     @extend_schema(
-        tags=['CRM Travel — Staff'],
+        tags=['CRM — Travel Staff'],
         summary='Tur xodimini yangilash',
         request=BranchStaffUpdateSerializer,
         responses={200: BranchStaffListSerializer, 404: ErrorResponseSerializer},
@@ -169,7 +169,7 @@ class TourStaffDetailView(TourStaffManagementMixin, APIView):
         return Response(BranchStaffListSerializer(staff).data)
 
     @extend_schema(
-        tags=['CRM Travel — Staff'],
+        tags=['CRM — Travel Staff'],
         summary='Tur xodimini deaktivatsiya qilish',
         responses={204: OpenApiResponse(description='OK'), 404: ErrorResponseSerializer},
     )
@@ -190,7 +190,7 @@ class TourOwnerDashboardView(OwnerDashboardMixin, APIView):
     permission_classes = [IsAuthenticated, IsTourOwner]
 
     @extend_schema(
-        tags=['CRM Travel — Dashboard'],
+        tags=['CRM — Travel Dashboard'],
         summary='Tur kompaniyasi owner dashboard',
         responses={200: OwnerDashboardResponseSerializer, 403: ErrorResponseSerializer},
     )

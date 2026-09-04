@@ -24,7 +24,7 @@ class MembershipTierListView(generics.ListAPIView):
     queryset           = MembershipTier.objects.all()
 
     @extend_schema(
-        tags=['Membership'],
+        tags=['Telegram Mini App — Membership'],
         summary='A\'zolik darajalari ro\'yxati',
         description='Auth talab qilmaydi. Tier cheklovlari va imtiyozlari.',
         responses={200: MembershipTierSerializer(many=True)},
@@ -40,7 +40,7 @@ class MyMembershipView(APIView):
     @extend_schema(
         responses={200: UserMembershipSerializer},
         summary="Joriy a'zolik darajasi",
-        tags=['Membership'],
+        tags=['Telegram Mini App — Membership'],
     )
     def get(self, request):
         try:
@@ -57,7 +57,7 @@ class WaitlistApplyView(APIView):
     @extend_schema(
         responses={200: WaitlistApplicationSerializer},
         summary='Waitlist ariza holati',
-        tags=['Membership'],
+        tags=['Telegram Mini App — Membership'],
     )
     def get(self, request):
         try:
@@ -70,7 +70,7 @@ class WaitlistApplyView(APIView):
         request=WaitlistApplySerializer,
         responses={201: WaitlistApplicationSerializer},
         summary="Waitlist ga ariza topshirish",
-        tags=['Membership'],
+        tags=['Telegram Mini App — Membership'],
     )
     def post(self, request):
         if hasattr(request.user, 'waitlist_application'):
@@ -131,7 +131,7 @@ class SubscriptionView(APIView):
     @extend_schema(
         responses={200: SubscriptionSerializer},
         summary='Joriy obuna',
-        tags=['Membership'],
+        tags=['Telegram Mini App — Membership'],
     )
     def get(self, request):
         try:

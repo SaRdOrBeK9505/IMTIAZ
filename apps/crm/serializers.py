@@ -72,12 +72,25 @@ class RestaurantBookingCRMSerializer(BookingCRMSerializer):
     duration_minutes = serializers.IntegerField(source='restaurant_detail.duration_minutes', read_only=True)
     special_requests = serializers.CharField(source='restaurant_detail.special_requests', read_only=True)
     confirmed_by_staff = serializers.BooleanField(source='restaurant_detail.confirmed_by_staff', read_only=True)
+    ui_status = serializers.SerializerMethodField()
+    customer_phone = serializers.CharField(source='user.phone', read_only=True)
 
     class Meta(BookingCRMSerializer.Meta):
         fields = BookingCRMSerializer.Meta.fields + [
             'table_number', 'reservation_at', 'guest_count',
             'duration_minutes', 'special_requests', 'confirmed_by_staff',
+            'ui_status', 'customer_phone',
         ]
+    
+    @extend_schema_field(serializers.CharField())
+    def get_ui_status(self, obj) -> str:
+        """Map backend status to UI status"""
+        status_mapping = {
+            'confirmed': 'tasdiqlangan',
+            'pending': 'kutilmoqda',
+            'cancelled': 'bekor_qilingan',
+        }
+        return status_mapping.get(obj.status, 'kutilmoqda')
 
 
 class BookingStatusUpdateSerializer(serializers.Serializer):
@@ -88,14 +101,14 @@ class BookingStatusUpdateSerializer(serializers.Serializer):
 
 class RestaurantBookingCreateSerializer(serializers.Serializer):
     """Yangi restoran bron yaratish — CRM /restaurant/bookings."""
-    customer_name  = serializers.CharField(max_length=150)
-    customer_phone = serializers.CharField(max_length=20)
-    table_number   = serializers.CharField(max_length=20, required=False, allow_blank=True)
-    reservation_at = serializers.DateTimeField()
-    guest_count    = serializers.IntegerField(min_value=1, default=2)
+    customer_name = serializers.CharField(max_length=150)
+    phone = serializers.CharField(max_length=20)
+    table_id = serializers.UUIDField(required=False, allow_null=True)
+    table_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    date_time = serializers.DateTimeField()
+    guests_count = serializers.IntegerField(min_value=1, default=2)
     duration_minutes = serializers.IntegerField(min_value=30, default=120)
-    special_requests = serializers.CharField(required=False, allow_blank=True, max_length=1000)
-    table_id       = serializers.UUIDField(required=False, allow_null=True)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=1000)
 
 
 # ─── RestaurantTable ──────────────────────────────────────────────────────────
@@ -122,6 +135,16 @@ class RestaurantTableWriteSerializer(serializers.ModelSerializer):
             'table_number', 'capacity', 'min_capacity',
             'section', 'description', 'is_active', 'is_vip', 'features',
         ]
+    
+    def validate_section(self, value):
+        # Map UI location to backend section
+        section_mapping = {
+            'ichki': 'Ichki zal',
+            'tashqi': 'Tashqi',
+            'vip': 'VIP',
+            'teras': 'Teras',
+        }
+        return section_mapping.get(value.lower(), value) if value else value
 
     def validate_capacity(self, value):
         if value < 1:
@@ -186,17 +209,26 @@ class StaffLeaderboardSerializer(serializers.ModelSerializer):
 
 class TourLeadSerializer(serializers.ModelSerializer):
     package_title = serializers.CharField(source='package.title', read_only=True, allow_null=True)
+    package_destination = serializers.CharField(source='package.destination', read_only=True, allow_null=True)
+    package_price = serializers.DecimalField(source='package.base_price', read_only=True, allow_null=True, max_digits=14, decimal_places=2)
+    is_ai_generated = serializers.SerializerMethodField()
+    ai_analysis = serializers.CharField(source='customer_analysis', read_only=True, allow_null=True)
 
     class Meta:
         model = TourLead
         fields = [
             'id', 'full_name', 'phone', 'passengers', 'preferred_departure_date',
-            'note', 'status', 'package_title', 'package_id',
+            'note', 'status', 'package_title', 'package_id', 'package_destination', 'package_price',
+            'is_ai_generated', 'ai_analysis',
             'crm_response', 'sent_at', 'retry_count', 'created_at', 'updated_at',
         ]
         read_only_fields = [
             'id', 'crm_response', 'sent_at', 'retry_count', 'created_at', 'updated_at',
         ]
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_is_ai_generated(self, obj) -> bool:
+        return obj.session is not None
 
 
 class TourLeadUpdateSerializer(serializers.Serializer):

@@ -18,7 +18,7 @@ from apps.crm_core.exports import (
 
 from .helpers import can_view_analytics, resolve_branch
 
-_ANALYTICS_TAG = 'CRM Restaurant — Analytics'
+_ANALYTICS_TAG = 'CRM — Restaurant Analytics'
 
 
 class RestaurantAnalyticsView(APIView):

@@ -61,7 +61,7 @@ class ChatView(APIView):
             '`pending_action_id` ni olib alohida tasdiqlang:\n'
             '`POST /api/ai/actions/{pending_action_id}/confirm/`'
         ),
-        tags=['AI Assistant'],
+        tags=['Telegram Mini App — AI Assistant'],
     )
     def post(self, request):
         # NON-STREAM so'rov — monitoring uchun WARNING
@@ -160,7 +160,7 @@ class SessionBootstrapView(APIView):
             'Yangi sessiyada IMTIAZ AI salom beradi va qanday yordam '
             'berishini so\'raydi.'
         ),
-        tags=['AI Assistant'],
+        tags=['Telegram Mini App — AI Assistant'],
     )
     def post(self, request):
         serializer = SessionBootstrapSerializer(data=request.data)
@@ -187,7 +187,7 @@ class ActionConfirmView(APIView):
         request=None,
         responses={200: OpenApiResponse(description='Harakat bajarildi')},
         summary='AI harakatini tasdiqlash',
-        tags=['AI Assistant'],
+        tags=['Telegram Mini App — AI Assistant'],
     )
     def post(self, request, action_id):
         try:
@@ -217,7 +217,7 @@ class ActionRejectView(APIView):
         request=None,
         responses={200: OpenApiResponse(description='Bekor qilindi')},
         summary='AI harakatini bekor qilish',
-        tags=['AI Assistant'],
+        tags=['Telegram Mini App — AI Assistant'],
     )
     def post(self, request, action_id):
         try:
@@ -247,7 +247,7 @@ class SessionListView(generics.ListAPIView):
         ).order_by('-updated_at')
 
     @extend_schema(
-        tags=['AI Assistant'],
+        tags=['Telegram Mini App — AI Assistant'],
         summary='AI suhbat sessiyalari',
         description='Faol sessiyalar ro\'yxati.',
         responses={200: SessionListSerializer(many=True)},
@@ -267,7 +267,7 @@ class SessionDetailView(generics.RetrieveDestroyAPIView):
         return ConversationSession.objects.filter(user=self.request.user)
 
     @extend_schema(
-        tags=['AI Assistant'],
+        tags=['Telegram Mini App — AI Assistant'],
         summary='Sessiya tafsilotlari va xabarlar tarixi',
         responses={200: ConversationSessionSerializer, 404: OpenApiResponse(description='Topilmadi')},
     )
@@ -275,7 +275,7 @@ class SessionDetailView(generics.RetrieveDestroyAPIView):
         return super().get(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['AI Assistant'],
+        tags=['Telegram Mini App — AI Assistant'],
         summary='Sessiyani yopish (soft delete)',
         description='`is_active=False` qilinadi.',
         responses={204: OpenApiResponse(description='Yopildi')},
@@ -301,7 +301,7 @@ class AIActionLogListView(generics.ListAPIView):
         ).order_by('-created_at')[:50]
 
     @extend_schema(
-        tags=['AI Assistant'],
+        tags=['Telegram Mini App — AI Assistant'],
         summary='AI harakatlar audit jurnali',
         description='Oxirgi 50 ta AI action (booking, search, ...).',
         responses={200: AIActionLogSerializer(many=True)},

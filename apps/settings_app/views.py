@@ -13,7 +13,7 @@ from .models import AppSetting
 from .serializers import AppSettingSerializer, PublicAppSettingSerializer
 
 _ADMIN_TAG = 'Admin — Settings'
-_PUBLIC_TAG = 'Public — Settings'
+_PUBLIC_TAG = 'Telegram Mini App — Settings'
 
 
 @extend_schema_view(

@@ -16,7 +16,7 @@ from ..pagination import TourDestinationPagination
 from ..serializers import TourDestinationDetailSerializer, TourDestinationListSerializer
 from ..services import TourDestinationSearchService
 
-_DEST_TAG = 'Tours — Destinations'
+_DEST_TAG = 'Telegram Mini App — Tours'
 
 _LIST_PARAMS = [
     OpenApiParameter('q', str, description='Qidiruv: nom, mamlakat, shahar, tavsif'),

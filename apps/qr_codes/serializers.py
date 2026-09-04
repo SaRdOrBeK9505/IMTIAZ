@@ -163,29 +163,29 @@ class QRCodeCRMUpdateSerializer(serializers.ModelSerializer):
 
 class QRRedemptionCRMSerializer(serializers.ModelSerializer):
     """CRM uchun redemption tarixi."""
-    user_name    = serializers.SerializerMethodField()
-    user_phone   = serializers.SerializerMethodField()
-    qr_code_str  = serializers.CharField(source='qr_code.code', read_only=True)
-    bonus_title  = serializers.CharField(source='qr_code.title', read_only=True)
-    qr_type      = serializers.CharField(source='qr_code.qr_type', read_only=True)
+    customer_name = serializers.SerializerMethodField()
+    phone = serializers.SerializerMethodField()
+    bonus_name = serializers.CharField(source='qr_code.title', read_only=True)
+    original_price = serializers.CharField(source='order_amount', read_only=True)
+    discount_amount = serializers.CharField(source='discount_applied', read_only=True)
+    final_price = serializers.CharField(source='final_amount', read_only=True)
+    scanned_at = serializers.DateTimeField(read_only=True)
 
     class Meta:
         model  = QRCodeRedemption
         fields = [
-            'id', 'qr_code_str', 'bonus_title', 'qr_type',
-            'user_name', 'user_phone', 'customer_name', 'customer_phone',
-            'service_type', 'order_amount', 'discount_applied', 'final_amount',
-            'status', 'rejection_reason', 'scanned_at',
+            'customer_name', 'phone', 'bonus_name',
+            'original_price', 'discount_amount', 'final_price', 'scanned_at',
         ]
 
     @extend_schema_field(serializers.CharField(allow_null=True))
-    def get_user_name(self, obj) -> str | None:
+    def get_customer_name(self, obj) -> str | None:
         if obj.customer_name:
             return obj.customer_name
         return obj.user.full_name if obj.user else None
 
     @extend_schema_field(serializers.CharField(allow_null=True))
-    def get_user_phone(self, obj) -> str | None:
+    def get_phone(self, obj) -> str | None:
         if obj.customer_phone:
             return obj.customer_phone
         return obj.user.phone if obj.user else None

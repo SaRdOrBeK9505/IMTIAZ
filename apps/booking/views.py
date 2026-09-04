@@ -12,7 +12,7 @@ from apps.core.openapi_schemas import ErrorResponseSerializer
 from .models import Booking, RestaurantBooking
 from .serializers import BookingSerializer, RestaurantBookingSerializer
 
-_TAG = 'Bookings'
+_TAG = 'Telegram Mini App — Bookings'
 
 
 class BookingListView(generics.ListAPIView):

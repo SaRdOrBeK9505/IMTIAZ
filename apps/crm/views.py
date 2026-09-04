@@ -33,37 +33,13 @@ class LegacyCRMViewMixin:
     authentication_classes = [CRMJWTAuthentication]
 
 
-class CRMAuthView(APIView):
-    """POST /api/crm/auth/ — deprecated."""
-    permission_classes = []
-
-    @extend_schema(
-        tags=['Auth — CRM (O\'chirilgan)'],
-        summary='CRM kirish — eskirgan URL (410)',
-        description=(
-            'Eski login endpoint. **O\'rniga:** `POST /api/crm/auth/login/` dan foydalaning.\n\n'
-            'Endpoint keyinroq butunlay olib tashlanadi.'
-        ),
-        request=None,
-        responses={410: OpenApiResponse(description='Eskirgan endpoint')},
-        deprecated=True,
-    )
-    def post(self, request):
-        return Response({
-            'message': 'Bu endpoint eskirgan. POST /api/crm/auth/login/ dan foydalaning.',
-            'login_url': '/api/crm/auth/login/',
-        }, status=status.HTTP_410_GONE)
-
-
 class CRMDashboardView(LegacyCRMViewMixin, APIView):
     """GET /api/crm/dashboard/ — legacy bosh sahifa."""
     permission_classes = [IsAuthenticated, IsRestaurantStaff]
 
     @extend_schema(
-        responses={200: OpenApiResponse(description='CRM bosh sahifa statistikasi')},
-        summary='CRM bosh sahifa (legacy)',
-        tags=['CRM Legacy'],
         deprecated=True,
+        exclude=True,
     )
     def get(self, request):
         staff = request.user.branch_staff_profile
@@ -108,10 +84,8 @@ class BranchDashboardView(LegacyCRMViewMixin, APIView):
     permission_classes = [IsAuthenticated, IsRestaurantStaff]
 
     @extend_schema(
-        responses={200: OpenApiResponse(description='Filial dashboard')},
-        summary='Filial dashboard (legacy)',
-        tags=['CRM Legacy'],
         deprecated=True,
+        exclude=True,
     )
     def get(self, request, branch_id):
         staff = request.user.branch_staff_profile
@@ -162,8 +136,8 @@ class BranchBookingListView(LegacyCRMViewMixin, generics.ListAPIView):
         return qs
 
     @extend_schema(
-        tags=['CRM Legacy'],
         deprecated=True,
+        exclude=True,
         summary='Filial bronlari (legacy)',
         parameters=[
             OpenApiParameter('status', str),
@@ -180,11 +154,8 @@ class BookingStatusUpdateView(LegacyCRMViewMixin, APIView):
     permission_classes = [IsAuthenticated, IsRestaurantStaff]
 
     @extend_schema(
-        request=BookingStatusUpdateSerializer,
-        responses={200: OpenApiResponse(description='Yangilangan holat')},
-        summary='Bron holati (legacy)',
-        tags=['CRM Legacy'],
         deprecated=True,
+        exclude=True,
     )
     def patch(self, request, branch_id, booking_id):
         staff = request.user.branch_staff_profile
@@ -213,10 +184,8 @@ class BranchAnalyticsView(LegacyCRMViewMixin, APIView):
     permission_classes = [IsAuthenticated, IsRestaurantStaff]
 
     @extend_schema(
-        responses={200: OpenApiResponse(description='Analitika')},
-        summary='Filial analitika (legacy)',
-        tags=['CRM Legacy'],
         deprecated=True,
+        exclude=True,
     )
     def get(self, request, branch_id):
         staff = request.user.branch_staff_profile
