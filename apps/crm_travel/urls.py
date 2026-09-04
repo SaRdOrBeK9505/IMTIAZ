@@ -30,5 +30,7 @@ urlpatterns = [
     path('clients/<uuid:pk>/', TourClientDetailView.as_view(), name='tour-client-detail'),
     path('clients/<uuid:pk>/purchases/', TourClientPurchasesView.as_view(), name='tour-client-purchases'),
 
+    path('qr/', include('apps.qr_codes.urls.crm_urls')),
+
     path('', include('apps.crm_travel.tour_crm_urls')),
 ]

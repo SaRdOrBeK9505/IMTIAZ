@@ -38,7 +38,7 @@ from .serializers import (
     QRRedemptionCRMSerializer, QRAnalyticsSummarySerializer,
 )
 from .services import QRScanService, QRRedemptionService, QRGeneratorService
-from .permissions import IsRestaurantQRManager
+from .permissions import IsOrgQRManager as _IsOrgQRManager  # eski IsRestaurantQRManager o'rniga
 from apps.crm.models import StaffActivityLog
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ _QR_CRM_TAG = 'CRM — QR Codes'
 class RestaurantQRCRMMixin:
     """Restoran CRM JWT + owner/staff QR ruxsatlari."""
     authentication_classes = [CRMJWTAuthentication]
-    permission_classes = [IsAuthenticated, IsRestaurantQRManager]
+    permission_classes = [IsAuthenticated, _IsOrgQRManager]
 
 
 def _get_crm_org(request):
@@ -57,6 +57,12 @@ def _get_crm_org(request):
     if not org:
         raise PermissionDenied('Tashkilot topilmadi.')
     return org
+
+
+def _get_crm_org_qr_queryset(request):
+    """QR kodlar uchun queryset — organization bo'lishi shart, platforma darajasidagi bonuslar emas."""
+    org = _get_crm_org(request)
+    return QRCode.objects.filter(organization=org)
 
 
 def _log_qr_action(request, description, entity_id=None):
@@ -159,8 +165,7 @@ class QRCodeCRMListCreateView(RestaurantQRCRMMixin, generics.ListCreateAPIView):
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return QRCode.objects.none()
-        org = _get_crm_org(self.request)
-        qs  = QRCode.objects.filter(organization=org).select_related('branch')
+        qs = _get_crm_org_qr_queryset(self.request).select_related('branch')
 
         params = self.request.query_params
         if is_active := params.get('is_active'):
@@ -209,8 +214,7 @@ class QRCodeCRMDetailView(RestaurantQRCRMMixin, generics.RetrieveUpdateDestroyAP
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return QRCode.objects.none()
-        org = _get_crm_org(self.request)
-        return QRCode.objects.filter(organization=org)
+        return _get_crm_org_qr_queryset(self.request)
 
     def perform_destroy(self, instance):
         instance.is_active = False
@@ -240,7 +244,7 @@ class QRCodeRegenerateView(RestaurantQRCRMMixin, APIView):
     def post(self, request, pk=None):
         org = _get_crm_org(request)
         try:
-            qr = QRCode.objects.get(id=pk, organization=org)
+            qr = _get_crm_org_qr_queryset(request).get(id=pk)
         except QRCode.DoesNotExist:
             return Response({'message': 'QR kod topilmadi.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -270,7 +274,7 @@ class QRScannerDashboardView(RestaurantQRCRMMixin, APIView):
             qr_code__organization=org, status='applied',
         ).select_related('qr_code', 'user').order_by('-scanned_at')
 
-        active_bonuses = QRCode.objects.filter(organization=org, is_active=True).count()
+        active_bonuses = _get_crm_org_qr_queryset(request).filter(is_active=True).count()
 
         return Response({
             'active_bonuses':   active_bonuses,
@@ -391,8 +395,7 @@ class QRBonusesListView(RestaurantQRCRMMixin, generics.ListAPIView):
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return QRCode.objects.none()
-        org = _get_crm_org(self.request)
-        qs  = QRCode.objects.filter(organization=org).select_related('branch')
+        qs = _get_crm_org_qr_queryset(self.request).select_related('branch')
         if is_active := self.request.query_params.get('is_active'):
             qs = qs.filter(is_active=(is_active.lower() == 'true'))
         return qs
@@ -489,7 +492,7 @@ class QRStaffRedeemView(RestaurantQRCRMMixin, APIView):
 
         org = _get_crm_org(request)
         try:
-            qr = QRCode.objects.get(code=data['code'], organization=org)
+            qr = _get_crm_org_qr_queryset(request).get(code=data['code'])
         except QRCode.DoesNotExist:
             return Response({'message': 'QR kod topilmadi.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -560,7 +563,7 @@ class QRCodeAnalyticsView(RestaurantQRCRMMixin, APIView):
     def get(self, request, pk=None):
         org = _get_crm_org(request)
         try:
-            qr = QRCode.objects.get(id=pk, organization=org)
+            qr = _get_crm_org_qr_queryset(request).get(id=pk)
         except QRCode.DoesNotExist:
             return Response({'message': 'QR topilmadi.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -610,7 +613,7 @@ class QRAllAnalyticsView(RestaurantQRCRMMixin, APIView):
         else:
             start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-        qr_codes = QRCode.objects.filter(organization=org)
+        qr_codes = _get_crm_org_qr_queryset(request)
         applied_redemptions = QRCodeRedemption.objects.filter(
             qr_code__organization=org,
             status='applied',

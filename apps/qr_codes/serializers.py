@@ -10,17 +10,27 @@ from .models import QRCode, QRCodeRedemption, QRAnalyticsSummary
 
 class QRCodePublicSerializer(serializers.ModelSerializer):
     """Foydalanuvchi QR skanlaganda ko'radigan ma'lumotlar."""
-    organization_name = serializers.CharField(source='organization.name', read_only=True)
+    organization_name = serializers.CharField(source='organization.name', read_only=True, allow_null=True)
     is_valid          = serializers.BooleanField(read_only=True)
+    qr_image_url      = serializers.SerializerMethodField()
 
     class Meta:
         model  = QRCode
         fields = [
-            'code', 'title', 'description', 'qr_type',
+            'id', 'code', 'qr_image', 'qr_image_url', 'title', 'description', 'qr_type',
             'discount_value', 'max_discount_amount',
             'minimum_order_amount', 'applicable_services',
             'valid_until', 'is_valid', 'organization_name',
         ]
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_qr_image_url(self, obj):
+        if obj.qr_image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.qr_image.url)
+            return obj.qr_image.url
+        return None
 
 
 class QRRedeemRequestSerializer(serializers.Serializer):
@@ -80,7 +90,7 @@ class QRStaffRedeemRequestSerializer(QRRedeemRequestSerializer):
 
 class QRCodeCRMSerializer(serializers.ModelSerializer):
     """CRM uchun QR kod — to'liq ma'lumot."""
-    organization_name = serializers.CharField(source='organization.name', read_only=True)
+    organization_name = serializers.CharField(source='organization.name', read_only=True, allow_null=True)
     branch_name       = serializers.CharField(source='branch.name', read_only=True, allow_null=True)
     is_valid          = serializers.BooleanField(read_only=True)
     scan_count        = serializers.SerializerMethodField()

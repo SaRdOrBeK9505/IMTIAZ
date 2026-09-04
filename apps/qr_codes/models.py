@@ -58,12 +58,41 @@ class QRCode(BaseModel):
         'crm.Organization',
         on_delete=models.CASCADE,
         related_name='qr_codes',
+        null=True, blank=True,
+        help_text="Bo'sh bo'lsa — IMTIAZ platforma darajasidagi umumiy bonus (tashkilotga bog'lanmagan)",
     )
     branch = models.ForeignKey(
         'crm.Branch',
         on_delete=models.SET_NULL,
         null=True, blank=True,
         related_name='qr_codes',
+    )
+
+    # ── E'lon shabloni va shaxsiylashtirish ──────────────────────────────────
+    source_template = models.ForeignKey(
+        'bonuses.BonusCategory',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='qr_codes',
+        help_text="Qaysi umumiy bonus e'lonidan (shablon) yaratilgani — ixtiyoriy",
+    )
+    assigned_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True, blank=True,
+        related_name='personal_qr_codes',
+        help_text="Bo'sh bo'lsa — OMMAVIY kampaniya (hamma skanerlay oladi). "
+                  "To'ldirilgan bo'lsa — faqat shu foydalanuvchiga tegishli SHAXSIY vaucher.",
+    )
+    service_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('flight', 'Parvoz'), ('restaurant', 'Restoran'), ('event', 'Tadbir'),
+            ('hotel', "Mehmonxona"), ('tour', 'Tur sayohat'), ('all', 'Barcha xizmatlar'),
+        ],
+        default='all',
+        db_index=True,
+        help_text="Qaysi xizmat turiga tegishli — mobil ilovada bo'lim bo'yicha filtrlash uchun",
     )
 
     # ── Identifikator ─────────────────────────────────────────────────────────
@@ -130,6 +159,8 @@ class QRCode(BaseModel):
         indexes             = [
             models.Index(fields=['code']),
             models.Index(fields=['organization', 'is_active']),
+            models.Index(fields=['assigned_user', 'is_active']),
+            models.Index(fields=['service_type', 'is_active']),
         ]
 
     def __str__(self):
