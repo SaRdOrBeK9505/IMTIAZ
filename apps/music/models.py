@@ -1,6 +1,5 @@
 """Background Music Management — audio files for restaurants/events."""
 
-import os
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator, MinValueValidator, MaxValueValidator
@@ -133,10 +132,9 @@ class BackgroundMusic(BaseModel):
         super().save(*args, **kwargs)
     
     def delete(self, *args, **kwargs):
-        """Delete file from storage when model is deleted."""
+        """Delete file from storage when model is deleted — S3/Spaces bilan ham ishlaydi."""
         if self.audio_file:
-            if os.path.exists(self.audio_file.path):
-                os.remove(self.audio_file.path)
+            self.audio_file.delete(save=False)
         super().delete(*args, **kwargs)
     
     def activate(self):

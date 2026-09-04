@@ -1,85 +1,29 @@
 """Destination serializers."""
 
 from rest_framework import serializers
-from drf_spectacular.utils import extend_schema_field
-from typing import List, Dict
-from .models import Country, Destination, DestinationImage
+
+from .models import Destination
 
 
-class CountrySerializer(serializers.ModelSerializer):
-    """Country serializer for admin CRUD."""
-    
+class DestinationAdminSerializer(serializers.ModelSerializer):
+    """Admin — to'liq CRUD."""
+
     class Meta:
-        model = Country
+        model = Destination
         fields = [
-            'id', 'name', 'name_uz', 'code', 'flag_emoji',
-            'currency', 'calling_code', 'is_active', 'order',
-            'created_at', 'updated_at'
+            'id', 'code', 'name', 'group',
+            'flag_image', 'order', 'is_active',
+            'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
-class DestinationImageSerializer(serializers.ModelSerializer):
-    """Destination image serializer."""
-    
-    class Meta:
-        model = DestinationImage
-        fields = [
-            'id', 'destination', 'image', 'caption', 'caption_uz',
-            'is_primary', 'order', 'created_at', 'updated_at'
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+class DestinationClientSerializer(serializers.ModelSerializer):
+    """Client — faqat o'qish."""
 
+    group_display = serializers.CharField(source='get_group_display', read_only=True)
 
-class DestinationSerializer(serializers.ModelSerializer):
-    """Destination serializer for admin CRUD."""
-    
-    country_name = serializers.CharField(source='country.name', read_only=True)
-    images = DestinationImageSerializer(many=True, read_only=True)
-    
     class Meta:
         model = Destination
-        fields = [
-            'id', 'country', 'country_name', 'name', 'name_uz',
-            'description', 'description_uz', 'category',
-            'latitude', 'longitude', 'rating', 'review_count',
-            'is_popular', 'is_active', 'featured_image',
-            'images', 'order', 'created_at', 'updated_at'
-        ]
-        read_only_fields = ['id', 'rating', 'review_count', 'created_at', 'updated_at']
-
-
-class DestinationListSerializer(serializers.ModelSerializer):
-    """Lightweight serializer for destination lists."""
-    
-    country_name = serializers.CharField(source='country.name', read_only=True)
-    country_code = serializers.CharField(source='country.code', read_only=True)
-    country_flag = serializers.CharField(source='country.flag_emoji', read_only=True)
-    
-    class Meta:
-        model = Destination
-        fields = [
-            'id', 'name', 'name_uz', 'country_name', 'country_code',
-            'country_flag', 'category', 'rating', 'review_count',
-            'is_popular', 'featured_image'
-        ]
-
-
-class CountryWithDestinationsSerializer(serializers.ModelSerializer):
-    """Country serializer with popular destinations."""
-    
-    popular_destinations = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = Country
-        fields = [
-            'id', 'name', 'name_uz', 'code', 'flag_emoji',
-            'currency', 'calling_code', 'is_active',
-            'popular_destinations'
-        ]
-    
-    @extend_schema_field(DestinationListSerializer(many=True))
-    def get_popular_destinations(self, obj: Country) -> List[Dict]:
-        """Get popular destinations for this country."""
-        destinations = obj.destinations.filter(is_popular=True, is_active=True)[:5]
-        return DestinationListSerializer(destinations, many=True).data
+        fields = ['id', 'code', 'name', 'group', 'group_display', 'flag_image']
+        read_only_fields = fields

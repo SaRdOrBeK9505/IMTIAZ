@@ -3,7 +3,7 @@
 from drf_spectacular.utils import OpenApiResponse, extend_schema, extend_schema_view
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -11,11 +11,13 @@ from apps.core.openapi_schemas import ErrorResponseSerializer
 
 from .models import BackgroundMusic
 from .serializers import (
+    ActiveMusicPublicSerializer,
     BackgroundMusicSerializer,
     BackgroundMusicUpdateSerializer,
 )
 
 _ADMIN_TAG = 'Admin — Background Music'
+_CLIENT_TAG = 'Client — Fon musiqasi'
 
 
 @extend_schema_view(
@@ -131,3 +133,28 @@ class ControlMusicView(APIView):
                 {'error': 'Music track not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+
+@extend_schema(
+    tags=[_CLIENT_TAG],
+    summary='Hozirgi faol fon musiqasi (client)',
+    description="Login talab qilmaydi. Ilova ochilganda pleer shu endpointdan faol trekni oladi.",
+    responses={
+        200: ActiveMusicPublicSerializer,
+        404: OpenApiResponse(description="Hozircha faol trek yo'q — pleer sukut saqlashi kerak"),
+    },
+)
+class PublicActiveMusicView(APIView):
+    """GET /api/music/active/ — Client uchun faol trekni olish."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        active_music = BackgroundMusic.get_active_track()
+        if not active_music:
+            return Response(
+                {'message': "Hozircha faol fon musiqasi yo'q"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        serializer = ActiveMusicPublicSerializer(active_music, context={'request': request})
+        return Response(serializer.data)

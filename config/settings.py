@@ -77,6 +77,7 @@ LOCAL_APPS = [
     'apps.support',     # Foydalanuvchi so'rovlari tizimi
     'apps.settings_app', # Ilova sozlamalari
     'apps.banners',     # Reklama bannerlari
+    'apps.services',    # Xizmatlar (ServiceIcon, ServiceColor, Service)
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

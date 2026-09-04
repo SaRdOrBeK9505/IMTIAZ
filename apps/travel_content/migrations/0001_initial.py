@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('destinations', '0002_destination_featured_image_thumbnail_and_more'),
+        ('destinations', '0001_initial_destination'),
     ]
 
     operations = [

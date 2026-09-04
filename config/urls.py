@@ -77,6 +77,9 @@ urlpatterns = [
         # Banners (admin + client)
         path('banners/', include('apps.banners.urls')),
 
+        # Services — ServiceIcon, ServiceColor, Service (admin + client)
+        path('services/', include('apps.services.urls')),
+
         # Integrations logs (admin only)
         path('integrations/', include('apps.integrations.urls')),
     ])),

@@ -50,9 +50,22 @@ class BackgroundMusicSerializer(serializers.ModelSerializer):
 
 class BackgroundMusicUpdateSerializer(serializers.Serializer):
     """Serializer for updating volume and active status."""
-    
+
     volume = serializers.IntegerField(
         required=False,
         validators=[MinValueValidator(0), MaxValueValidator(100)]
     )
     is_active = serializers.BooleanField(required=False)
+
+
+class ActiveMusicPublicSerializer(serializers.ModelSerializer):
+    """Client uchun — faqat pleer ishlashi uchun kerakli maydonlar."""
+
+    class Meta:
+        model = BackgroundMusic
+        fields = [
+            'id', 'title', 'artist', 'mood', 'audio_file',
+            'duration_seconds', 'volume', 'loop',
+            'fade_in_seconds', 'fade_out_seconds',
+        ]
+        read_only_fields = fields

@@ -1,28 +1,27 @@
-"""Destination URLs."""
+"""Destination URLs.
 
-from django.urls import path, include
+Admin (IsAdminUser):
+  GET/POST            /api/destinations/admin/
+  GET/PUT/PATCH/DELETE /api/destinations/admin/{id}/
+
+Client (AllowAny):
+  GET  /api/destinations/           — ro'yxat (?group=popular|signature)
+  GET  /api/destinations/{id}/      — tafsilot
+"""
+
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .views import (
-    CountryListView,
-    CountryViewSet,
-    DestinationDetailView,
-    DestinationImageViewSet,
-    DestinationListView,
-    DestinationViewSet,
-)
+from .views import DestinationDetailView, DestinationListView, DestinationViewSet
 
 router = DefaultRouter()
-router.register('countries', CountryViewSet, basename='destination-countries')
-router.register('', DestinationViewSet, basename='destinations')
-router.register('images', DestinationImageViewSet, basename='destination-images')
+router.register('', DestinationViewSet, basename='admin-destinations')
 
 urlpatterns = [
-    # Admin endpoints
+    # Admin
     path('admin/', include(router.urls)),
-    
-    # Client endpoints
-    path('countries/', CountryListView.as_view(), name='destinations-countries'),
+
+    # Client
     path('', DestinationListView.as_view(), name='destinations-list'),
     path('<uuid:pk>/', DestinationDetailView.as_view(), name='destinations-detail'),
 ]
