@@ -1,8 +1,9 @@
 # Eski Country, DestinationImage va Destination jadvallarini o'chirib,
 # yangi sodda Destination jadvalini yaratish.
 # SQLite va PostgreSQL bilan mos.
+# code: VARCHAR(20) — ch-st-moritz kabi uzun kodlar uchun
 
-from django.db import migrations, connection
+from django.db import migrations
 
 
 def rebuild_tables(apps, schema_editor):
@@ -10,33 +11,29 @@ def rebuild_tables(apps, schema_editor):
 
     with schema_editor.connection.cursor() as c:
         if db == 'postgresql':
-            # FK larni oldin tushirish — constraint nomlari VPS da farq qilishi mumkin
-            c.execute("""
-                ALTER TABLE travel_content_travelreel
-                    DROP CONSTRAINT IF EXISTS travel_content_travelreel_destination_id_fkey;
-                ALTER TABLE travel_content_travelreel
-                    DROP CONSTRAINT IF EXISTS travel_content_trave_destination_id_bec2b49e_fk_destinati;
-            """)
-            c.execute("""
-                ALTER TABLE travel_content_curatedtrip
-                    DROP CONSTRAINT IF EXISTS travel_content_curatedtrip_destination_id_fkey;
-                ALTER TABLE travel_content_curatedtrip
-                    DROP CONSTRAINT IF EXISTS travel_content_curat_destination_id_149aa9f3_fk_destinati;
-            """)
+            # Barcha mumkin bo'lgan FK constraint nomlarini tushirish
+            for tbl, constraint in [
+                ('travel_content_travelreel',  'travel_content_travelreel_destination_id_fkey'),
+                ('travel_content_travelreel',  'travel_content_trave_destination_id_bec2b49e_fk_destinati'),
+                ('travel_content_curatedtrip', 'travel_content_curatedtrip_destination_id_fkey'),
+                ('travel_content_curatedtrip', 'travel_content_curat_destination_id_149aa9f3_fk_destinati'),
+            ]:
+                c.execute(
+                    f'ALTER TABLE {tbl} DROP CONSTRAINT IF EXISTS {constraint}'
+                )
 
-        # Eski jadvallarni o'chirish — CASCADE bilan (barcha FK lar ham tushadi)
-        c.execute("DROP TABLE IF EXISTS destinations_destinationimage CASCADE")
-        c.execute("DROP TABLE IF EXISTS destinations_destination CASCADE")
-        c.execute("DROP TABLE IF EXISTS destinations_country CASCADE")
+        # Eski jadvallarni CASCADE bilan o'chirish
+        c.execute('DROP TABLE IF EXISTS destinations_destinationimage CASCADE')
+        c.execute('DROP TABLE IF EXISTS destinations_destination CASCADE')
+        c.execute('DROP TABLE IF EXISTS destinations_country CASCADE')
 
         if db == 'sqlite':
-            # SQLite uchun UUID extension yo'q — TEXT ishlatamiz
             c.execute("""
                 CREATE TABLE destinations_destination (
                     id          TEXT         PRIMARY KEY,
-                    created_at  DATETIME     NOT NULL,
-                    updated_at  DATETIME     NOT NULL,
-                    code        VARCHAR(10)  NOT NULL UNIQUE,
+                    created_at  DATETIME     NOT NULL DEFAULT (datetime('now')),
+                    updated_at  DATETIME     NOT NULL DEFAULT (datetime('now')),
+                    code        VARCHAR(20)  NOT NULL UNIQUE,
                     name        VARCHAR(100) NOT NULL,
                     "group"     VARCHAR(20)  NOT NULL DEFAULT 'popular',
                     flag_image  VARCHAR(255),
@@ -51,7 +48,7 @@ def rebuild_tables(apps, schema_editor):
                     id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
                     created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
                     updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-                    code        VARCHAR(10)  NOT NULL UNIQUE,
+                    code        VARCHAR(20)  NOT NULL UNIQUE,
                     name        VARCHAR(100) NOT NULL,
                     "group"     VARCHAR(20)  NOT NULL DEFAULT 'popular',
                     flag_image  VARCHAR(255),
@@ -66,7 +63,7 @@ def rebuild_tables(apps, schema_editor):
                     FOREIGN KEY (destination_id)
                     REFERENCES destinations_destination(id)
                     ON DELETE SET NULL
-                    DEFERRABLE INITIALLY DEFERRED;
+                    DEFERRABLE INITIALLY DEFERRED
             """)
             c.execute("""
                 ALTER TABLE travel_content_curatedtrip
@@ -74,13 +71,13 @@ def rebuild_tables(apps, schema_editor):
                     FOREIGN KEY (destination_id)
                     REFERENCES destinations_destination(id)
                     ON DELETE SET NULL
-                    DEFERRABLE INITIALLY DEFERRED;
+                    DEFERRABLE INITIALLY DEFERRED
             """)
 
-        # Indexlar (har ikki DB uchun)
-        c.execute('CREATE INDEX IF NOT EXISTS destinations_destination_group_idx ON destinations_destination ("group")')
+        # Indexlar
+        c.execute('CREATE INDEX IF NOT EXISTS destinations_destination_group_idx    ON destinations_destination ("group")')
         c.execute('CREATE INDEX IF NOT EXISTS destinations_destination_is_active_idx ON destinations_destination (is_active)')
-        c.execute('CREATE INDEX IF NOT EXISTS destinations_destination_code_idx ON destinations_destination (code)')
+        c.execute('CREATE INDEX IF NOT EXISTS destinations_destination_code_idx      ON destinations_destination (code)')
 
 
 class Migration(migrations.Migration):

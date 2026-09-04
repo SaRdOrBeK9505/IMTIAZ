@@ -14,7 +14,7 @@ class Destination(BaseModel):
         SIGNATURE = 'signature', 'IMTIAZ Signature'
 
     code = models.CharField(
-        max_length=10,
+        max_length=20,
         unique=True,
         help_text='ISO 3166-1 alpha-2 kod (tr, ae, jp ...)',
     )
